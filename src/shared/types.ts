@@ -1,5 +1,5 @@
 import type {Vec} from './world';
 export type Input={mx:number;mz:number;yaw:number;attack:boolean;block:boolean;interact:boolean;seq:number};
 export type Actor=Vec & {id:string;kind:'player'|'soldier'|'zombie'|'corrupted';name:string;hp:number;maxHp:number;yaw:number;cd:number;windup:number;swing:number;block:boolean;deadUntil:number;castle?:string;owner?:string;mode?:'follow'|'hold'|'attack'|'guard';hold?:Vec;connected?:boolean;lastSeq?:number;input?:Input;inputAt?:number;target?:string};
-export type Castle=Vec & {id:string;name:string;friendly:boolean;gate:number;barrier:number;capture:number;lost:number;rewarded:boolean};
+export type Castle=Vec & {id:string;name:string;friendly:boolean;level:number;gate:number;barrier:number;capture:number;lost:number;rewarded:boolean};
 export type Game={time:number;status:'playing'|'victory'|'defeat';actors:Actor[];castles:Castle[];camps:(Vec&{id:string;name:string;rescued:boolean})[];resources:{wood:number;iron:number;medicine:number;recruits:number};caches:(Vec&{id:string;taken:boolean})[];nest:Vec&{hp:number;maxHp:number};everCaptured:boolean;siege:{castle:string;starts:number;active:boolean}|null;nextSiege:number;stats:{captures:number;rescues:number;sieges:number;recruited:number;kills:number};events:{id:number;text:string;time:number}[];nextId:number};

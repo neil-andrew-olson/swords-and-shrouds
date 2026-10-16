@@ -7,7 +7,7 @@ export function spawn(g:Game,kind:Actor['kind'],x:number,z:number,extra:Partial<
  const a:Actor={id:`a${++g.nextId}`,kind,name:kind==='corrupted'?'Corrupted knight':kind==='soldier'?'Oathsworn':kind==='zombie'?'Shrouded':'Knight',x,z,hp,maxHp:hp,yaw:0,cd:0,windup:0,swing:0,block:false,deadUntil:0,...extra};g.actors.push(a);return a;
 }
 export function createGame():Game{
- const g:Game={time:0,status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0},events:[],nextId:0};
+ const g:Game={time:0,status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0},events:[],nextId:0};
  g.castles.forEach((c,i)=>{for(let n=0;n<4+i*2;n++)spawn(g,n===5?'corrupted':'zombie',c.x-5+(n%3)*4,c.z-5+Math.floor(n/3)*4,{castle:c.id});});
  g.camps.forEach(c=>{for(let n=0;n<3;n++)spawn(g,'zombie',c.x+n*2-2,c.z-4);});
  for(let n=0;n<5;n++)spawn(g,n===4?'corrupted':'zombie',NEST.x-6+n*3,NEST.z+5);
@@ -35,22 +35,24 @@ export function command(g:Game,id:string,action:string){
  const p=g.actors.find(a=>a.id===id&&a.hp>0);if(!p||g.status!=='playing')return 'You cannot act right now.';
  if(['follow','hold','attack'].includes(action)){for(const s of g.actors.filter(a=>a.kind==='soldier'&&a.hp>0&&a.owner===id&&a.mode!=='guard')){s.mode=action as Actor['mode'];s.hold={x:p.x,z:p.z};if(action==='attack'){const target=g.actors.filter(a=>hostile(a)&&a.hp>0&&dist(p,a)<18).sort((a,b)=>dist(p,a)-dist(p,b))[0];s.target=target?.id;}}return '';}
  if(action==='heal'){if(!g.resources.medicine)return 'No healing supplies remain.';if(p.hp>=p.maxHp)return 'Health is already full.';g.resources.medicine--;p.hp=Math.min(p.maxHp,p.hp+65);return '';}
- const c=g.castles.find(c=>c.friendly&&dist(c,p)<7);if(!c)return 'Stand near a friendly castle banner.';
+ const c=g.castles.find(c=>c.friendly&&dist(c,p)<15);if(!c)return 'Enter a friendly castle or stand beside its entrance to build.';
  if(action==='recruit'||action==='guard'){if(!g.resources.recruits)return 'Rescue survivors to gain recruits.';if(g.resources.iron<COSTS.recruit.iron)return 'Need 3 iron.';if(g.actors.filter(a=>a.kind==='soldier'&&a.hp>0).length>=16)return 'Army limit: 16 soldiers.';g.resources.iron-=3;g.resources.recruits--;g.stats.recruited++;spawn(g,'soldier',c.x+2,c.z+3,{owner:id,mode:action==='guard'?'guard':'follow',castle:action==='guard'?c.id:undefined});return '';}
+ if(action==='upgrade'){const cost={wood:24+c.level*16,iron:10+c.level*8};if(c.level>=2)return 'This castle is fully upgraded.';if(g.resources.wood<cost.wood||g.resources.iron<cost.iron)return `Upgrade needs ${cost.wood} wood and ${cost.iron} iron.`;g.resources.wood-=cost.wood;g.resources.iron-=cost.iron;c.level++;c.gate=180+c.level*120;c.barrier=120+c.level*60;event(g,`${c.name} upgraded to ${c.level===1?'Bastion':'Citadel'}. Defenses restored; nearby allies recover health.`);return ''; }
  if(action!=='repair'&&action!=='barricade')return 'Unknown command.';
- if(action==='repair'&&c.gate>=180)return 'Gate is fully repaired.';if(action==='barricade'&&c.barrier>=120)return 'Barricade is at full strength.';
+ if(action==='repair'&&c.gate>=180+c.level*120)return 'Gate is fully repaired.';if(action==='barricade'&&c.barrier>=120+c.level*60)return 'Barricade is at full strength.';
  const cost=COSTS[action];if(g.resources.wood<cost.wood||g.resources.iron<cost.iron)return `Need ${cost.wood} wood and ${cost.iron} iron.`;
- g.resources.wood-=cost.wood;g.resources.iron-=cost.iron;if(action==='repair')c.gate=180;else c.barrier=120;return '';
+ g.resources.wood-=cost.wood;g.resources.iron-=cost.iron;if(action==='repair')c.gate=180+c.level*120;else c.barrier=120+c.level*60;event(g,`${c.name}: ${action==='repair'?'gate repaired':'barricade constructed'}.`);return '';
 }
 function interactions(g:Game,dt:number){
  const interacting=g.actors.filter(a=>a.kind==='player'&&a.hp>0&&a.connected&&a.input?.interact);
  for(const cache of g.caches)if(!cache.taken&&interacting.some(p=>dist(p,cache)<3)){cache.taken=true;g.resources.wood+=12;g.resources.iron+=5;g.resources.medicine++;event(g,'Supplies recovered: 12 wood, 5 iron, 1 healing supply.');}
  for(const c of g.camps)if(!c.rescued&&interacting.some(p=>dist(p,c)<4)&&!g.actors.some(a=>hostile(a)&&a.hp>0&&dist(a,c)<9)){c.rescued=true;g.resources.recruits+=4;g.stats.rescues++;event(g,`${c.name} rescued. Four recruits await your orders.`);}
- for(const c of g.castles){if(c.friendly)continue;const defenders=g.actors.some(a=>hostile(a)&&a.hp>0&&(a.castle===c.id||dist(a,c)<10));if(!defenders&&interacting.some(p=>dist(p,c)<4)){c.capture+=dt;if(c.capture>=5){c.friendly=true;c.gate=180;c.barrier=0;c.capture=0;c.lost=0;g.everCaptured=true;g.stats.captures++;if(!c.rewarded){c.rewarded=true;g.resources.wood+=16;g.resources.iron+=8;}event(g,`${c.name} reclaimed. Fortify and assign guards.`);}}else c.capture=0;}
+ for(const c of g.castles){if(c.friendly)continue;const defenders=g.actors.some(a=>hostile(a)&&a.hp>0&&(a.castle===c.id||dist(a,c)<10));if(!defenders&&interacting.some(p=>dist(p,c)<4)){c.capture+=dt;if(c.capture>=5){c.friendly=true;c.gate=180+c.level*120;c.barrier=0;c.capture=0;c.lost=0;g.everCaptured=true;g.stats.captures++;if(!c.rewarded){c.rewarded=true;g.resources.wood+=16;g.resources.iron+=8;}event(g,`${c.name} reclaimed. Fortify and assign guards.`);}}else c.capture=0;}
 }
 export function tick(g:Game,dt=.05){
  if(g.status!=='playing')return;g.time+=dt;
  for(const a of [...g.actors]){
+  if(a.hp>0&&!hostile(a)&&g.castles.some(c=>c.friendly&&c.level>0&&dist(a,c)<9))a.hp=Math.min(a.maxHp,a.hp+dt*2);
   a.cd=Math.max(0,a.cd-dt);a.swing=Math.max(0,a.swing-dt);
   if(a.hp<=0){if(a.deadUntil>g.time)continue;
    if(a.kind==='player'){const c=g.castles.find(c=>c.friendly);if(!c&&g.everCaptured)continue;a.hp=a.maxHp;a.x=c?.x??START.x;a.z=c?c.z+3:START.z;a.input=idle();a.block=false;}

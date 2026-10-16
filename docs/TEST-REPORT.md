@@ -52,3 +52,9 @@ The command-line WSS client required the environment’s configured outbound pro
 5. Lose and reclaim a castle while holding another. Observe fallen soldiers reanimate.
 6. Complete a campaign in solo and online modes, then verify the results and restart.
 7. Repeat on an actual phone and a second network through the eventual HTTPS URL.
+
+## Fortress update
+
+Added two authoritative castle tiers (24W/10I, then 40W/18I), tier-aware repairs, restorative castle aura, construction access from the entrance, survivor beacons and directional objective guidance. Added soft shadows, antialiasing, tone mapping, armor detail, animated capes and sword arcs, enemy windup rings, and floating damage numbers. Xbox camera toggle and existing controls remain supported.
+
+18 tests pass, including shared upgrade resource accounting, tier caps, proximity/ownership checks, tier-aware repairs and healing. TypeScript and production build pass. Cloud browser WebGL remains unavailable; visual appearance, physical controllers and mobile performance require human playtesting. This update improves the playable build; it is not a claim of finished production quality.
