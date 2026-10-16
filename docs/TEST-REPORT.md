@@ -20,14 +20,28 @@ Controlled simulation fixtures accelerate tests by setting selected positions, c
 - Physical Xbox controller over USB/Bluetooth.
 - Controller-only navigation usability and touch responsiveness.
 - Gameplay balance and remote latency under realistic conditions.
-- Deployed HTTPS application, public WSS connections, incognito browser play, or separate physical devices.
+- Incognito browser gameplay or separate physical devices. Public HTTPS and WSS were verified as described below.
 - Load testing, abandoned-room timers over real five-minute duration, and server restart recovery (recovery is intentionally not supported).
 
-No supported browser-QA capability was exposed in the managed build environment. No preview server was started for browser QA. Local HTTP/WebSocket servers existed only inside the automated integration tests and were closed after them.
+The deployed page was opened in the cloud browser. Its WebGL renderer is disabled by the browser environment, so it displayed the application’s WebGL-unavailable message. This prevented visual 3D and browser-control testing. No browser security settings were changed. Local HTTP/WebSocket servers existed only inside the automated integration tests and were closed after them.
 
 ## Deployment status
 
-Render is connected. The user approved the homelab workspace and Free plan. The source repository is now available; initial deployment is being prepared. Public verification remains pending.
+Initial deployment verified live on 2026-10-16 UTC (2026-10-15 America/Chicago).
+
+- Public URL: https://swords-and-shrouds.onrender.com/
+- Repository: https://github.com/neil-andrew-olson/swords-and-shrouds
+- Deployed game commit: 9848f482d1c29e5f458d38d0228cd41abde2cfcf
+- Render service: srv-db8p5sbbc2fs73bmlbo0
+- Initial deployment: dep-db8p5t3bc2fs73bmldh0
+- Workspace: homelab; plan: Free; region: Ohio.
+- HTTPS /health returned 200 and {"ok":true,"rooms":0}.
+- The live root page loaded with the correct game title and controls.
+- Two independent WSS clients joined the same public room with distinct player identities, received three castles, and observed authoritative movement replicated from one client to the other.
+- Disconnect and resume restored the original public-session player identity.
+- Recent Render error-log query returned no errors.
+
+The command-line WSS client required the environment’s configured outbound proxy; after using that normal network path, both public tests passed. This validates the service protocol, not physical-device gameplay.
 
 ## Human acceptance pass
 

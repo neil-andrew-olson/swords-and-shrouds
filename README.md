@@ -47,7 +47,9 @@ Hardware Xbox, Bluetooth, touch-device usability, camera clipping and visual lay
 
 ## Deploy to Render
 
-The source repository is https://github.com/neil-andrew-olson/swords-and-shrouds. Deployment status is recorded in docs/TEST-REPORT.md.
+Play: https://swords-and-shrouds.onrender.com/
+
+The source repository is https://github.com/neil-andrew-olson/swords-and-shrouds. Render Free in the homelab workspace is live. Deployment verification details are recorded in docs/TEST-REPORT.md.
 
 Put the project source in a Git repository accessible to your Render account. Create a Node web service using:
 
@@ -77,4 +79,4 @@ Models, procedural textures, and simple synthesized audio are original code-gene
 
 ## Current scope and limits
 
-This is a first playable implementation, not a verified public release. AI navigation uses simple castle-entrance waypoints; balancing, visual quality, physical controllers, low-end mobile performance, and a full human campaign need playtesting. No accounts, long-term saves, inventories, procedural terrain, PvP, or horizontal server scaling are implemented. Decorative scenery is not collidable; castle walls are collidable and prevent melee hits through them. Barricades/gates are defensive health pools; friendly knights pass under the raised gate.
+This is a publicly deployed first playable implementation. Public HTTPS, two-client WSS room joining, movement synchronization, and reconnect identity were verified. Visual and hardware playtesting remain outstanding. AI navigation uses simple castle-entrance waypoints; balancing, visual quality, physical controllers, low-end mobile performance, and a full human campaign need playtesting. No accounts, long-term saves, inventories, procedural terrain, PvP, or horizontal server scaling are implemented. Decorative scenery is not collidable; castle walls are collidable and prevent melee hits through them. Barricades/gates are defensive health pools; friendly knights pass under the raised gate.
