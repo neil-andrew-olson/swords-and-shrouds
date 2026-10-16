@@ -1,4 +1,4 @@
-import {CASTLES,CAMPS,NEST,START,COSTS,dist,move,waypoint,clamp,lineClear} from '../shared/world';
+import {CASTLES,CAMPS,REGIONS,NEST,START,COSTS,dist,move,waypoint,clamp,lineClear} from '../shared/world';
 import type {Actor,Game,Input} from '../shared/types';
 export const idle=():Input=>({mx:0,mz:0,yaw:0,attack:false,block:false,interact:false,seq:0});
 export function event(g:Game,text:string){g.events.push({id:++g.nextId,text,time:g.time});g.events=g.events.slice(-8);}
@@ -7,8 +7,8 @@ export function spawn(g:Game,kind:Actor['kind'],x:number,z:number,extra:Partial<
  const a:Actor={id:`a${++g.nextId}`,kind,name:kind==='corrupted'?'Corrupted knight':kind==='soldier'?'Oathsworn':kind==='zombie'?'Shrouded':'Knight',x,z,hp,maxHp:hp,yaw:0,cd:0,windup:0,swing:0,block:false,deadUntil:0,stamina:100,armor:'light',abilityCd:0,...extra};g.actors.push(a);return a;
 }
 export function createGame():Game{
- const g:Game={time:0,noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0},events:[],nextId:0};
- g.castles.forEach((c,i)=>{for(let n=0;n<4+i*2;n++)spawn(g,n===5?'corrupted':'zombie',c.x-5+(n%3)*4,c.z-5+Math.floor(n/3)*4,{castle:c.id});});
+ const g:Game={time:0,regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0},events:[],nextId:0};
+ g.castles.forEach((c,i)=>{for(let n=0;n<4+(i%3)*2+Math.floor(i/3);n++)spawn(g,n===5?'corrupted':'zombie',c.x-5+(n%3)*4,c.z-5+Math.floor(n/3)*4,{castle:c.id});});
  g.camps.forEach(c=>{for(let n=0;n<3;n++)spawn(g,'zombie',c.x+n*2-2,c.z-4);});
  for(let n=0;n<5;n++)spawn(g,n===4?'corrupted':'zombie',NEST.x-6+n*3,NEST.z+5);
  [...CAMPS,...CASTLES,{x:3,z:24},{x:15,z:-25},{x:28,z:-53},{x:16,z:-91},{x:-11,z:-119},{x:-10,z:-164}].forEach((p,i)=>g.caches.push({id:`cache${i}`,x:p.x+4,z:p.z+4,taken:false}));
@@ -21,22 +21,27 @@ export function setInput(g:Game,id:string,v:unknown):boolean{
  if(!a||![i.mx,i.mz,i.yaw,i.seq].every(Number.isFinite)||!Number.isSafeInteger(i.seq)||i.seq<0||i.seq<=(a.lastSeq??-1)||[i.attack,i.block,i.interact].some(x=>typeof x!=='boolean'))return false;
  const length=Math.max(1,Math.hypot(i.mx,i.mz));a.input={mx:i.mx/length,mz:i.mz/length,yaw:Math.atan2(Math.sin(i.yaw),Math.cos(i.yaw)),attack:i.attack,block:i.block,interact:i.interact,seq:i.seq};a.lastSeq=i.seq;a.inputAt=g.time;return true;
 }
+export function moveEnemy(g:Game,a:Actor,target:{x:number;z:number},amount:number){const before={x:a.x,z:a.z};move(a,target,amount);for(const c of g.castles){if(!c.friendly)continue;const plane=c.barrier>0?c.z+13:c.gate>0?c.z+10:null;if(plane!==null&&before.z>=plane+.45&&a.z<plane+.45&&Math.abs(a.x-c.x)<3.5){a.x=before.x;a.z=before.z;}}}
 const hostile=(a:Actor)=>a.kind==='zombie'||a.kind==='corrupted';
 export function noise(g:Game,p:{x:number;z:number},radius:number){g.noises.push({x:p.x,z:p.z,radius,until:g.time+4});g.noises=g.noises.slice(-24);}
+export function sever(g:Game,a:Actor,part:'leftArm'|'rightArm'|'head'){
+ if(a.kind!=='zombie'||a.severed?.includes(part))return;a.severed=[...(a.severed??[]),part];if(part==='head'&&a.hp>0)hurt(g,a,a.hp);
+}
 function hurt(g:Game,a:Actor,amount:number,attacker?:Actor){
  if(a.hp<=0)return;
  if(a.block&&attacker){const towards=Math.atan2(attacker.x-a.x,-(attacker.z-a.z));if(Math.cos(towards-a.yaw)>.2)amount*=.2;}
  if(a.kind==='player'&&a.armor==='heavy')amount*=.7;
- a.hp=Math.max(0,a.hp-amount);
+ a.hp=Math.max(0,a.hp-amount);if(a.kind==='zombie'&&attacker?.kind==='player'){if(a.hp===0)sever(g,a,'head');else if(a.hp<=a.maxHp*.5)sever(g,a,(a.severed??[]).includes('rightArm')?'leftArm':(a.severed??[]).includes('leftArm')?'rightArm':attacker.x<a.x?'leftArm':'rightArm');}
  if(a.hp===0){a.deadUntil=g.time+(a.kind==='player'?12:a.kind==='soldier'?7:2);a.windup=0;if(a.kind==='player'){a.downed=true;a.revive=0;a.block=false;event(g,`${a.name} is down! Hold Interact nearby for 3 seconds before corruption takes hold.`);}if(hostile(a)){g.stats.kills++;g.resources.wood+=2;g.resources.iron++;}if(a.kind==='soldier')event(g,'An Oathsworn has fallen. Corruption rises in 7 seconds.');}
 }
-function swing(g:Game,a:Actor){a.stamina=Math.max(0,(a.stamina??100)-18);noise(g,a,22);a.cd=.65;a.swing=.25;for(const e of g.actors){if(!hostile(e)||e.hp<=0||dist(a,e)>3.4||!lineClear(a,e))continue;const angle=Math.atan2(e.x-a.x,-(e.z-a.z));if(Math.cos(angle-a.yaw)>.25)hurt(g,e,34,a);}
+function swing(g:Game,a:Actor){a.stamina=Math.max(0,(a.stamina??100)-18);noise(g,a,22);a.cd=.65;a.swing=.25;a.attackSerial=(a.attackSerial??0)+1;for(const e of g.actors){if(!hostile(e)||e.hp<=0||dist(a,e)>3.4||!lineClear(a,e))continue;const angle=Math.atan2(e.x-a.x,-(e.z-a.z));if(Math.cos(angle-a.yaw)>.25)hurt(g,e,34,a);}
  if(dist(a,g.nest)<4&&g.castles.every(c=>c.friendly)&&g.camps.every(c=>c.rescued)){g.nest.hp=Math.max(0,g.nest.hp-34);if(g.nest.hp===0){g.status='victory';event(g,'The shroud is broken. The kingdom lives.');}}
 }
 export function command(g:Game,id:string,action:string){
  const p=g.actors.find(a=>a.id===id&&a.hp>0);if(!p||g.status!=='playing')return 'You cannot act right now.';
  if(['follow','hold','attack'].includes(action)){for(const s of g.actors.filter(a=>a.kind==='soldier'&&a.hp>0&&a.owner===id&&a.mode!=='guard')){s.mode=action as Actor['mode'];s.hold={x:p.x,z:p.z};if(action==='attack'){const target=g.actors.filter(a=>hostile(a)&&a.hp>0&&dist(p,a)<18).sort((a,b)=>dist(p,a)-dist(p,b))[0];s.target=target?.id;}}return '';}
- if(action==='sweep'){if((p.abilityCd??0)>0)return 'Sword Sweep is recovering.';if((p.stamina??100)<40)return 'Sword Sweep needs 40 stamina.';p.stamina=(p.stamina??100)-40;p.abilityCd=7;p.cd=.9;p.swing=.4;noise(g,p,32);for(const enemy of g.actors)if(hostile(enemy)&&enemy.hp>0&&dist(p,enemy)<4.5&&lineClear(p,enemy))hurt(g,enemy,48,p);return '';}
+ if(action.startsWith('travel:')){const from=g.castles.find(c=>c.friendly&&dist(c,p)<8),to=g.castles.find(c=>c.id===action.slice(7)&&c.friendly);if(!from||!to)return 'Travel between friendly castle banners.';if(g.siege||g.actors.some(a=>hostile(a)&&a.hp>0&&dist(a,p)<20))return 'Travel is unavailable during a siege or nearby combat.';p.x=to.x;p.z=to.z+3;for(const s of g.actors.filter(a=>a.kind==='soldier'&&a.owner===id&&a.mode==='follow'&&a.hp>0)){s.x=to.x+2;s.z=to.z+3;}return '';}
+ if(action==='sweep'){if((p.abilityCd??0)>0)return 'Sword Sweep is recovering.';if((p.stamina??100)<40)return 'Sword Sweep needs 40 stamina.';p.stamina=(p.stamina??100)-40;p.abilityCd=7;p.cd=.9;p.swing=.4;p.attackSerial=(p.attackSerial??0)+1;noise(g,p,32);for(const enemy of g.actors)if(hostile(enemy)&&enemy.hp>0&&dist(p,enemy)<4.5&&lineClear(p,enemy))hurt(g,enemy,48,p);return '';}
  if(action==='light'||action==='heavy'){if(!g.castles.some(c=>c.friendly&&dist(c,p)<15))return 'Change armor at a friendly castle.';p.armor=action;event(g,`${p.name} equipped ${action} armor.`);return '';}
  if(action==='heal'){if(!g.resources.medicine)return 'No healing supplies remain.';if(p.hp>=p.maxHp)return 'Health is already full.';g.resources.medicine--;p.hp=Math.min(p.maxHp,p.hp+65);return '';}
  const c=g.castles.find(c=>c.friendly&&dist(c,p)<15);if(!c)return 'Enter a friendly castle or stand beside its entrance to build.';
@@ -78,15 +83,17 @@ export function tick(g:Game,dt=.05){
    const anchor=a.mode==='guard'?fort:a.mode==='hold'?a.hold:owner;
    let target=a.mode==='attack'?g.actors.find(e=>e.id===a.target&&e.hp>0):undefined;
    if(!target&&nearest&&dist(a,nearest)<9&&(!anchor||dist(nearest,anchor)<15))target=nearest;
-   if(target){a.yaw=Math.atan2(target.x-a.x,-(target.z-a.z));if(dist(a,target)>2.2||!lineClear(a,target))move(a,waypoint(a,target),dt*4.6);else if(a.cd===0){hurt(g,target,22,a);noise(g,a,22);a.cd=.9;a.swing=.25;}}
+   if(target){a.yaw=Math.atan2(target.x-a.x,-(target.z-a.z));if(dist(a,target)>2.2||!lineClear(a,target))move(a,waypoint(a,target),dt*4.6);else if(a.cd===0){hurt(g,target,22,a);noise(g,a,22);a.cd=.9;a.swing=.25;a.attackSerial=(a.attackSerial??0)+1;}}
    else if(anchor&&dist(a,anchor)>(owner?.downed?2:3))move(a,waypoint(a,anchor),dt*4.9);
   }else{
    const fort=g.castles.find(c=>c.id===a.castle);
    const target=nearest&&dist(a,nearest)<(a.kind==='corrupted'?20:13)&&lineClear(a,nearest)?nearest:undefined;const heard=g.noises.filter(n=>dist(a,n)<n.radius).sort((x,y)=>dist(a,x)-dist(a,y))[0];if(heard)a.investigate={x:heard.x,z:heard.z,until:g.time+6};
-   if(a.windup>0){a.windup-=dt;if(a.windup<=0&&target&&dist(a,target)<2.8&&lineClear(a,target)){hurt(g,target,a.kind==='corrupted'?24:13,a);a.swing=.2;}continue;}
-   if(target){a.yaw=Math.atan2(target.x-a.x,-(target.z-a.z));if(dist(a,target)>2||!lineClear(a,target))move(a,waypoint(a,target),dt*(a.kind==='corrupted'?3.6:2.6));else if(a.cd===0){a.windup=.65;a.cd=1.65;}}
-   else if(a.investigate&&a.investigate.until>g.time&&dist(a,a.investigate)>1.5){a.yaw=Math.atan2(a.investigate.x-a.x,-(a.investigate.z-a.z));move(a,waypoint(a,a.investigate),dt*2.6);}
-   else if(fort?.friendly){const gate={x:fort.x,z:fort.z+11};if(fort.gate>0||fort.barrier>0){if(dist(a,gate)>2.5)move(a,waypoint(a,gate),dt*2.6);else if(a.cd===0){if(fort.barrier>0)fort.barrier=Math.max(0,fort.barrier-12);else fort.gate=Math.max(0,fort.gate-12);noise(g,gate,30);a.cd=1;a.swing=.2;}}else move(a,waypoint(a,fort),dt*2.6);}
+   const defense=g.castles.find(c=>c.friendly&&(c.barrier>0||c.gate>0)&&a.z>=c.z+(c.barrier>0?12:9)&&dist(a,c)<30&&(a.castle===c.id||(nearest&&Math.abs(nearest.x-c.x)<9&&Math.abs(nearest.z-c.z)<9)||(a.investigate&&Math.abs(a.investigate.x-c.x)<9&&Math.abs(a.investigate.z-c.z)<9)));
+   if(defense){const front={x:defense.x,z:defense.z+(defense.barrier>0?14:11)};a.yaw=Math.atan2(front.x-a.x,-(front.z-a.z));if(dist(a,front)>1.8)moveEnemy(g,a,waypoint(a,front),dt*2.6);else if(a.cd===0){if(defense.barrier>0)defense.barrier=Math.max(0,defense.barrier-12);else defense.gate=Math.max(0,defense.gate-12);a.cd=1;a.swing=.25;a.attackSerial=(a.attackSerial??0)+1;noise(g,front,30);}continue;}
+   if(a.windup>0){a.windup-=dt;if(a.windup<=0&&target&&dist(a,target)<2.8&&lineClear(a,target)){hurt(g,target,(a.kind==='corrupted'?24:13)*Math.max(.25,1-(a.severed??[]).filter(p=>p!=='head').length*.4),a);a.swing=.2;}continue;}
+   if(target){a.yaw=Math.atan2(target.x-a.x,-(target.z-a.z));if(dist(a,target)>2||!lineClear(a,target))moveEnemy(g,a,waypoint(a,target),dt*(a.kind==='corrupted'?3.6:2.6));else if(a.cd===0){a.windup=.65;a.cd=1.65;a.attackSerial=(a.attackSerial??0)+1;}}
+   else if(a.investigate&&a.investigate.until>g.time&&dist(a,a.investigate)>1.5){a.yaw=Math.atan2(a.investigate.x-a.x,-(a.investigate.z-a.z));moveEnemy(g,a,waypoint(a,a.investigate),dt*2.6);}
+   else if(fort?.friendly){const gate={x:fort.x,z:fort.z+11};if(fort.gate>0||fort.barrier>0){if(dist(a,gate)>2.5)moveEnemy(g,a,waypoint(a,gate),dt*2.6);else if(a.cd===0){if(fort.barrier>0)fort.barrier=Math.max(0,fort.barrier-12);else fort.gate=Math.max(0,fort.gate-12);noise(g,gate,30);a.cd=1;a.swing=.2;}}else moveEnemy(g,a,waypoint(a,fort),dt*2.6);}
   }
  }
  interactions(g,dt);
@@ -96,6 +103,10 @@ export function tick(g:Game,dt=.05){
   c.lost=threats.length&&!defended&&c.gate<=0?c.lost+dt:Math.max(0,c.lost-dt);
   if(c.lost>=8){c.friendly=false;c.lost=0;c.gate=0;c.barrier=0;for(const a of threats)a.castle=c.id;event(g,`${c.name} has fallen. Reclaim its banner!`);}
  }
+ for(const shot of g.shots.filter(s=>s.lands<=g.time)){if(g.castles.some(c=>c.id===shot.castle&&c.friendly))for(const a of g.actors)if(hostile(a)&&a.hp>0&&dist(a,{x:shot.tx,z:shot.tz})<4)hurt(g,a,shot.damage);}
+ g.shots=g.shots.filter(s=>s.lands>g.time);
+ for(const c of g.castles){c.artilleryCd=Math.max(0,c.artilleryCd-dt);if(!c.friendly)continue;const target=g.actors.filter(a=>hostile(a)&&a.hp>0&&dist(a,c)<34).sort((a,b)=>dist(a,c)-dist(b,c))[0];if(target&&c.artilleryCd===0){g.shots.push({id:++g.nextId,castle:c.id,x:c.x+6,z:c.z-6,tx:target.x,tz:target.z,lands:g.time+.7,damage:42+c.level*12});c.artilleryCd=g.regions.some(r=>r.id===c.region&&r.held)?3:4.5;}}
+ for(const region of g.regions){const held=g.castles.filter(c=>c.region===region.id).every(c=>c.friendly);if(held&&!region.held){region.incomeAt=g.time+60;if(!region.paid){g.resources.wood+=40;g.resources.iron+=20;region.paid=true;}event(g,`${region.name} secured: supply income every minute and faster castle artillery.`);}if(!held&&region.held)event(g,`${region.name} supply routes lost. Reclaim every castle to restore them.`);region.held=held;if(held&&g.time>=region.incomeAt){g.resources.wood+=24;g.resources.iron+=12;g.resources.medicine+=2;region.incomeAt=g.time+60;event(g,`${region.name} supplies arrived: 24 wood, 12 iron, 2 healing supplies.`);}}
  if(g.everCaptured&&!g.castles.some(c=>c.friendly)){g.status='defeat';event(g,'The last stronghold has fallen.');return;}
  if(!g.siege&&g.everCaptured&&g.time>=g.nextSiege){const friendly=g.castles.filter(c=>c.friendly);const target=friendly[(g.stats.sieges+g.stats.captures)%friendly.length];g.siege={castle:target.id,starts:g.time+30,active:false};event(g,`Siege approaching ${target.name} in 30 seconds.`);}
  if(g.siege){const c=g.castles.find(c=>c.id===g.siege!.castle)!;

@@ -68,3 +68,7 @@ Replaced visible player, companion and corrupted knight placeholders with Quater
 ## The Gathering Fog survival update
 
 29 tests pass, including stamina limits, sweep cooldown/wall checks, armor tradeoffs, noise attraction/expiry, interrupted revival, failed-rescue boss uniqueness, solo companion rescue, multiplayer-scaled hordes and health-adjusted recovery. Production TypeScript/Vite build passes. See SURVIVAL-DESIGN.md for complete rules and explicit scope. Visual QA and physical-device/controller playtesting remain outstanding.
+
+## Three Kingdoms expansion
+
+35 tests and production build pass. Added three-region/nine-castle campaign, automatic catapults, regional supply rewards and reload bonus, hostile barrier interception, friendly travel, replicated skeleton dismemberment and layered combat animation. See REGIONS-UPDATE.md for mechanics and limitations. Existing camera modes and Xbox controls are preserved. Visual and physical-device acceptance testing remains required.

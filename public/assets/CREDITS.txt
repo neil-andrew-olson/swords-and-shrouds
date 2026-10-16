@@ -1,4 +1,4 @@
-SWORDS & SHROUDDS — FREE ASSET CREDITS
+SWORDS & SHROUDS — FREE ASSET CREDITS
 
 Quaternius — Animated Knight Pack
 https://quaternius.com/packs/knightcharacter.html
@@ -16,6 +16,6 @@ Kenney — Castle Kit
 https://kenney.nl/assets/castle-kit
 CC0. Original license included beside this file.
 Selected tower roof, ballista, rock formation and stone pillar. Color atlas embedded; compressed with gzip.
-Ballista is decorative scenery, not an operable siege weapon.
+Catapult model added for automatic castle artillery. Ballista asset retained but no longer placed in the world.
 
 All selected downloads were free. No paid generation service, API key or runtime third-party asset server is required.

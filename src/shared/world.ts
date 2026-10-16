@@ -1,13 +1,11 @@
 export type Vec = { x:number; z:number };
-export const CASTLES = [
-  {id:'keep',name:'The Fallen Keep',x:0,z:0},
-  {id:'border',name:'The Border Fortress',x:42,z:-67},
-  {id:'citadel',name:'The High Citadel',x:-24,z:-135}
-];
-export const CAMPS = [{id:'mill',name:'The Old Mill',x:-20,z:19},{id:'crossing',name:'Ashen Crossing',x:22,z:-37},{id:'hamlet',name:'Hollow Hamlet',x:3,z:-102}];
-export const NEST={x:0,z:-184};
+export const REGIONS=[{id:'march',name:'Green March',offset:0,color:0x34463d},{id:'moor',name:'Ashen Moor',offset:-240,color:0x494640},{id:'crown',name:'Frozen Crown',offset:-480,color:0x59666a}];
+const forts=[['The Fallen Keep','The Border Fortress','The High Citadel'],['Emberwatch','Blackfen Hold','The Cinder Bastion'],['Frostgate','Winterwatch','The Crown Fortress']];
+export const CASTLES=REGIONS.flatMap((r,i)=>[{id:i===0?'keep':r.id+'-keep',name:forts[i][0],x:0,z:r.offset,region:r.id},{id:i===0?'border':r.id+'-border',name:forts[i][1],x:42,z:r.offset-67,region:r.id},{id:i===0?'citadel':r.id+'-citadel',name:forts[i][2],x:-24,z:r.offset-135,region:r.id}]);
+export const CAMPS=REGIONS.flatMap((r,i)=>[{id:r.id+'-mill',name:i===0?'The Old Mill':r.name+' Refuge',x:-20,z:r.offset+19,region:r.id},{id:r.id+'-crossing',name:i===0?'Ashen Crossing':r.name+' Crossing',x:22,z:r.offset-37,region:r.id},{id:r.id+'-hamlet',name:i===0?'Hollow Hamlet':r.name+' Hamlet',x:3,z:r.offset-102,region:r.id}]);
+export const NEST={x:0,z:-664};
 export const START={x:0,z:27};
-export const BOUNDS={minX:-75,maxX:85,minZ:-205,maxZ:43};
+export const BOUNDS={minX:-75,maxX:85,minZ:-685,maxZ:43};
 export const COSTS={repair:{wood:8,iron:2},barricade:{wood:12,iron:4},recruit:{wood:0,iron:3}};
 export const dist=(a:Vec,b:Vec)=>Math.hypot(a.x-b.x,a.z-b.z);
 export const clamp=(v:number,a:number,b:number)=>Math.max(a,Math.min(b,v));

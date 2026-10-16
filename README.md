@@ -20,7 +20,7 @@ Run tests with `npm test`. No credentials or database are required for local pla
 
 Choose a knight name and Begin a campaign. Solo begins immediately with two Oathsworn companions. For multiplayer, share the room code or invitation link. Up to four people join from their own browsers; everyone uses the same server.
 
-Clear the Fallen Keep, then hold Interact at its banner for five seconds. Rescue three marked survivor groups after defeating nearby undead. Reclaim the Border Fortress and High Citadel. Hold all three castles and rescue every group to expose the plague nest in the far north. Destroy it to win.
+Clear the Fallen Keep, then hold Interact at its banner for five seconds. Rescue nine marked survivor groups across Green March, Ashen Moor and Frozen Crown after defeating nearby undead. Reclaim all nine castles. Hold all nine castles and rescue every group to expose the plague nest in the far north. Destroy it to win.
 
 Keep captured castles defended. Sieges have a 30-second warning. Enemies damage barricades and gates, then capture an unguarded banner in eight seconds. Fallen castles can be reclaimed. Losing every friendly castle after the first capture loses the campaign.
 
@@ -75,7 +75,7 @@ Rooms allow four humans, reserve disconnected identities for 60 seconds, pause w
 
 ## Artwork and audio
 
-Models, procedural textures, and simple synthesized audio are original code-generated assets. Three.js, Express, ws, Vite, TypeScript, tsx, and related packages retain their upstream licenses. The interface requests Cormorant Garamond and DM Sans from Google Fonts, with local serif/sans-serif fallbacks if unavailable.
+Character and environment models include CC0 assets by Quaternius, Kay Lousberg and Kenney; see public/assets/CREDITS.txt. Procedural textures and synthesized audio are original. Three.js, Express, ws, Vite, TypeScript, tsx, and related packages retain their upstream licenses. The interface requests Cormorant Garamond and DM Sans from Google Fonts, with local serif/sans-serif fallbacks if unavailable.
 
 ## Current scope and limits
 
