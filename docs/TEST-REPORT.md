@@ -64,3 +64,7 @@ Added two authoritative castle tiers (24W/10I, then 40W/18I), tier-aware repairs
 Replaced visible player, companion and corrupted knight placeholders with Quaternius's animated knight; Shrouded enemies now use KayKit skeleton warriors. Idle, movement, attack and death animations use separate per-character mixers and skeleton clones. Imported Kenney roof, stone pillar, rock and decorative ballista models. All downloaded art is CC0; credits and original included licenses are served under /assets/.
 
 21 tests pass: previous gameplay/network tests plus GLB container integrity, self-contained textures/buffers, sanitized bone-name compatibility and required animation clips. Production build passes. This does not certify visual alignment, camera appearance, controller hardware, or mobile frame rate; those need a WebGL-capable human playthrough. Models remain stylized, not equivalent to the detailed reference render. Procedural fallback models remain if asset loading fails.
+
+## The Gathering Fog survival update
+
+29 tests pass, including stamina limits, sweep cooldown/wall checks, armor tradeoffs, noise attraction/expiry, interrupted revival, failed-rescue boss uniqueness, solo companion rescue, multiplayer-scaled hordes and health-adjusted recovery. Production TypeScript/Vite build passes. See SURVIVAL-DESIGN.md for complete rules and explicit scope. Visual QA and physical-device/controller playtesting remain outstanding.

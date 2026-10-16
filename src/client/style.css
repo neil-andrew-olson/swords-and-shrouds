@@ -5,3 +5,5 @@
 .camp-buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px}.camp-buttons button{font-size:11px}
 
 #wayfinder{margin:14px 0;padding:12px;border-left:3px solid #dfb76a;background:#dfb76a18;color:#ffe2a3;font-size:12px;line-height:1.6}#castleDetails{color:#eacb8d}#baseActions{flex-wrap:wrap;max-width:90vw}#manageCastle{background:#cba461;color:#172424;font-weight:700}
+
+.staminatrack{height:5px;margin-top:7px;background:#15262a}.staminatrack #stamina{height:100%;background:#d5b36a;transition:width .1s}#staminaText{display:block;font-size:10px;color:#e0ca9d}#troops{display:flex;flex-wrap:wrap;justify-content:center;max-width:95vw}#troops button{padding:9px 10px}
