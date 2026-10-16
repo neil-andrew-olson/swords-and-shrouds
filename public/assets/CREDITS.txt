@@ -1,0 +1,21 @@
+SWORDS & SHROUDDS — FREE ASSET CREDITS
+
+Quaternius — Animated Knight Pack
+https://quaternius.com/packs/knightcharacter.html
+https://quaternius.itch.io/lowpoly-animated-knight
+CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/
+Converted FBX to GLB, retained five clips, compressed with gzip. Runtime armor tinting and procedural sword added.
+
+Kay Lousberg — KayKit Skeletons 1.1 FREE / Character Animations 1.1 FREE
+https://kaylousberg.itch.io/kaykit-skeletons
+https://kaylousberg.itch.io/kaykit-character-animations
+CC0. Original license files included beside this file.
+Skeleton Warrior model; selected idle, walking, death and unarmed attack clips. Animation preview meshes removed; compressed with gzip.
+
+Kenney — Castle Kit
+https://kenney.nl/assets/castle-kit
+CC0. Original license included beside this file.
+Selected tower roof, ballista, rock formation and stone pillar. Color atlas embedded; compressed with gzip.
+Ballista is decorative scenery, not an operable siege weapon.
+
+All selected downloads were free. No paid generation service, API key or runtime third-party asset server is required.

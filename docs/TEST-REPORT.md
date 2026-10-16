@@ -58,3 +58,9 @@ The command-line WSS client required the environment’s configured outbound pro
 Added two authoritative castle tiers (24W/10I, then 40W/18I), tier-aware repairs, restorative castle aura, construction access from the entrance, survivor beacons and directional objective guidance. Added soft shadows, antialiasing, tone mapping, armor detail, animated capes and sword arcs, enemy windup rings, and floating damage numbers. Xbox camera toggle and existing controls remain supported.
 
 18 tests pass, including shared upgrade resource accounting, tier caps, proximity/ownership checks, tier-aware repairs and healing. TypeScript and production build pass. Cloud browser WebGL remains unavailable; visual appearance, physical controllers and mobile performance require human playtesting. This update improves the playable build; it is not a claim of finished production quality.
+
+## Free animated asset integration
+
+Replaced visible player, companion and corrupted knight placeholders with Quaternius's animated knight; Shrouded enemies now use KayKit skeleton warriors. Idle, movement, attack and death animations use separate per-character mixers and skeleton clones. Imported Kenney roof, stone pillar, rock and decorative ballista models. All downloaded art is CC0; credits and original included licenses are served under /assets/.
+
+21 tests pass: previous gameplay/network tests plus GLB container integrity, self-contained textures/buffers, sanitized bone-name compatibility and required animation clips. Production build passes. This does not certify visual alignment, camera appearance, controller hardware, or mobile frame rate; those need a WebGL-capable human playthrough. Models remain stylized, not equivalent to the detailed reference render. Procedural fallback models remain if asset loading fails.
