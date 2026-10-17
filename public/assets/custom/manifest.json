@@ -1,0 +1,74 @@
+[
+  {
+    "name": "hero",
+    "source": "characters/player_vanguard_knight_animated",
+    "before": 314702,
+    "after": 13976,
+    "bytes": 2542208,
+    "gzip": 1697387
+  },
+  {
+    "name": "fallen",
+    "source": "characters/corrupted_knight_animated",
+    "before": 330770,
+    "after": 12564,
+    "bytes": 2522376,
+    "gzip": 1713007
+  },
+  {
+    "name": "ally",
+    "source": "characters/ai_companion_oathsworn_animated",
+    "before": 315324,
+    "after": 11279,
+    "bytes": 2582480,
+    "gzip": 1765252
+  },
+  {
+    "name": "trebuchet",
+    "source": "defense/defense_castle_trebuchet",
+    "before": 631616,
+    "after": 14036,
+    "bytes": 1119416,
+    "gzip": 1035666
+  },
+  {
+    "name": "stakes",
+    "source": "defense/defense_cheval_de_frise",
+    "before": 205970,
+    "after": 5705,
+    "bytes": 912652,
+    "gzip": 868081
+  },
+  {
+    "name": "supplies",
+    "source": "resources/resource_supply_cache",
+    "before": 918444,
+    "after": 4656,
+    "bytes": 1370824,
+    "gzip": 1344154
+  },
+  {
+    "name": "plague",
+    "source": "structures/plague_nest",
+    "before": 820106,
+    "after": 15979,
+    "bytes": 1467608,
+    "gzip": 1378118
+  },
+  {
+    "name": "sword",
+    "source": "weapons/weapon_longsword",
+    "before": 30094,
+    "after": 3851,
+    "bytes": 508112,
+    "gzip": 404338
+  },
+  {
+    "name": "shield",
+    "source": "weapons/weapon_heater_shield",
+    "before": 272284,
+    "after": 4707,
+    "bytes": 1031968,
+    "gzip": 991681
+  }
+]

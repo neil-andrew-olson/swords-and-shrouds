@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {customCharacter} from './custom-character';
 import {GLTFLoader,type GLTF} from 'three/addons/loaders/GLTFLoader.js';
 import {clone} from 'three/addons/utils/SkeletonUtils.js';
 import type {Actor} from '../shared/types';
@@ -9,9 +10,12 @@ export async function loadAsset(name:string):Promise<GLTF>{
  return loader.parseAsync(bytes,'/assets/');
 }
 export class CharacterAssets{
+ custom=new Map<string,GLTF>();
+ customLoaded=false;
+ customReady=Promise.all(['sword','shield','hero','ally','fallen'].map(async name=>{try{this.custom.set(name,await loadAsset('custom/'+name));}catch(e){console.warn('Custom character unavailable',name,e);}})).then(()=>{this.customLoaded=true;});
  knight?:GLTF;skeleton?:GLTF;skeletonClips:THREE.AnimationClip[]=[];
  ready=Promise.all([loadAsset('knight'),loadAsset('skeleton'),loadAsset('skeleton-general'),loadAsset('skeleton-movement'),loadAsset('skeleton-combat')]).then(([knight,skeleton,general,movement,combat])=>{this.knight=knight;this.skeleton=skeleton;this.skeletonClips=[...general.animations,...movement.animations,...combat.animations];}).catch(error=>console.warn('Character assets unavailable; using fallback models.',error));
- create(a:Actor){const undead=a.kind==='zombie';const source=undead?this.skeleton:this.knight;if(!source)return;
+ create(a:Actor){const custom=this.custom.get(a.kind==='player'?'hero':a.kind==='soldier'?'ally':a.kind==='corrupted'?'fallen':'');if(a.kind!=='zombie'&&!this.customLoaded)return;if(custom)return customCharacter(custom,a,this.custom);const undead=a.kind==='zombie';const source=undead?this.skeleton:this.knight;if(!source)return;
   const model=clone(source.scene);model.updateMatrixWorld(true);const bounds=new THREE.Box3().setFromObject(model),size=bounds.getSize(new THREE.Vector3());const scale=1.85/size.y;
   const pivot=new THREE.Group();pivot.add(model);model.scale.multiplyScalar(scale);model.position.y-=bounds.min.y*scale;pivot.rotation.y=Math.PI;
   model.traverse(o=>{if(o instanceof THREE.Mesh){o.castShadow=o.receiveShadow=true;const materials=Array.isArray(o.material)?o.material:[o.material];const tinted=materials.map(m=>{const n=m.clone() as THREE.MeshStandardMaterial;if(n.isMeshStandardMaterial){n.roughness=undead?.85:.46;n.metalness=undead?0:.6;if(a.kind==='corrupted')n.color.multiply(new THREE.Color(.55,.35,.55));if(a.kind==='soldier')n.color.multiply(new THREE.Color(.75,.9,.8));}return n;});o.material=Array.isArray(o.material)?tinted:tinted[0];}});

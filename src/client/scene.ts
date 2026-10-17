@@ -8,6 +8,7 @@ const mats=new Map<string,THREE.MeshStandardMaterial>();
 function mat(color:number,tex=false){const key=color+':'+tex;if(!mats.has(key))mats.set(key,new THREE.MeshStandardMaterial({color,roughness:1,flatShading:true,...(tex?{map:texture('#b8b8b8',color)}:{})}));return mats.get(key)!;}
 function box(parent:THREE.Object3D,x:number,y:number,z:number,w:number,h:number,d:number,color:number,tex=false){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(color,tex));mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
 export class WorldView{
+ customProps=new Map<string,THREE.Group>();
  characterAssets=new CharacterAssets();animated=new Map<string,NonNullable<ReturnType<CharacterAssets['create']>>>();
  renderer:THREE.WebGLRenderer;scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(68,1,.08,80);actors=new Map<string,THREE.Group>();flags=new Map<string,THREE.Mesh>();gates=new Map<string,THREE.Mesh>();barriers=new Map<string,THREE.Group>();campMeshes=new Map<string,THREE.Group>();cacheMeshes=new Map<string,THREE.Group>();nest=new THREE.Group();weapon=new THREE.Group();shield=new THREE.Group();solid:THREE.Object3D[]=[];torchlights:THREE.PointLight[]=[];upgrades=new Map<string,THREE.Group[]>();previousHp=new Map<string,number>();effects:{mesh:THREE.Sprite;life:number}[]=[];projectiles=new Map<number,THREE.Mesh>();debris:{mesh:THREE.Mesh;life:number;velocity:THREE.Vector3}[]=[];artillery=new Map<string,THREE.Object3D>();
  constructor(canvas:HTMLCanvasElement){
@@ -24,12 +25,23 @@ export class WorldView{
   // Mountains stay outside the navigable map.
   for(let i=0;i<18;i++){const mountain=new THREE.Mesh(new THREE.ConeGeometry(22+i%3*8,28+i%5*6,5),mat(0x263941));mountain.position.set(-130+i*17,10,-720-i%3*5);this.scene.add(mountain);}
   this.scene.add(this.camera);box(this.weapon,0,0,0,.08,.95,.12,palette.iron);box(this.weapon,0,-.5,0,.45,.08,.15,palette.gold);box(this.weapon,0,-.67,0,.1,.3,.1,palette.wood);this.camera.add(this.weapon);box(this.shield,0,0,0,.55,.7,.1,0x576b73);box(this.shield,0,0,-.06,.06,.65,.03,palette.gold);this.camera.add(this.shield);this.weapon.visible=this.shield.visible=false;
-  window.addEventListener('resize',()=>this.resize());this.resize();void this.environmentAssets();
+  window.addEventListener('resize',()=>this.resize());this.resize();void this.environmentAssets();void this.customEnvironment();
+ }
+ async customEnvironment(){
+  for(const name of ['sword','shield','stakes','supplies','plague','trebuchet'])try{
+   const asset=await loadAsset('custom/'+name);const model=asset.scene;model.updateMatrixWorld(true);const bounds=new THREE.Box3().setFromObject(model),size=bounds.getSize(new THREE.Vector3()),center=bounds.getCenter(new THREE.Vector3());
+   const normalized=new THREE.Group();model.position.x-=center.x;model.position.z-=center.z;model.position.y-=bounds.min.y;normalized.add(model);normalized.userData.height=size.y;this.customProps.set(name,normalized);
+   const fit=(height:number)=>{const o=normalized.clone(true);o.scale.setScalar(height/size.y);o.traverse(n=>{if(n instanceof THREE.Mesh)n.castShadow=n.receiveShadow=true;});return o;};
+   if(name==='sword'||name==='shield'){const parent=name==='sword'?this.weapon:this.shield;parent.clear();const o=fit(name==='sword'?1.2:.75);o.position.y=name==='sword'?-.65:-.35;parent.add(o);}
+   if(name==='stakes')for(const barrier of this.barriers.values()){barrier.clear();const o=fit(1.7);const b=new THREE.Box3().setFromObject(o),w=b.getSize(new THREE.Vector3()).x;o.scale.x*=5/Math.max(.01,w);barrier.add(o);}
+   if(name==='plague'){for(const child of this.nest.children)if(!(child instanceof THREE.Light))child.visible=false;this.nest.add(fit(4.5));}
+   if(name==='trebuchet')for(const c of CASTLES){const old=this.artillery.get(c.id);if(old)this.scene.remove(old);const o=fit(3);o.position.set(c.x+6,0,c.z-6);this.scene.add(o);this.artillery.set(c.id,o);}
+  }catch(e){console.warn('Custom prop unavailable',name,e);}
  }
  async environmentAssets(){
   for(const name of ['tower-square-top-roof-high','siege-catapult','rocks-large','wall-pillar']){try{const asset=await loadAsset(name);const bounds=new THREE.Box3().setFromObject(asset.scene),size=bounds.getSize(new THREE.Vector3());const place=(x:number,z:number,height:number,y=0)=>{const o=asset.scene.clone(true);const scale=height/size.y;o.scale.multiplyScalar(scale);o.position.set(x,y-bounds.min.y*scale,z);o.traverse(n=>{if(n instanceof THREE.Mesh)n.castShadow=n.receiveShadow=true;});this.scene.add(o);return o;};
    if(name==='tower-square-top-roof-high')for(const c of CASTLES)for(const dx of [-10,10])for(const dz of [-10,10])place(c.x+dx,c.z+dz,3,6);
-   if(name==='siege-catapult')for(const c of CASTLES)this.artillery.set(c.id,place(c.x+6,c.z-6,2));
+   if(name==='siege-catapult'&&!this.customProps.has('trebuchet'))for(const c of CASTLES)this.artillery.set(c.id,place(c.x+6,c.z-6,2));
    if(name==='rocks-large')for(let i=0;i<54;i++)place((i%2?1:-1)*(25+i%5*7),24-i*12,1+i%3*.4);
    if(name==='wall-pillar')for(const c of CASTLES)for(const dx of [-3.7,3.7])place(c.x+dx,c.z+10,4.5);
   }catch(error){console.warn('Environment asset unavailable',name,error);}}
@@ -71,7 +83,7 @@ export class WorldView{
   const shots=new Set(g.shots.map(s=>s.id));for(const [id,m] of this.projectiles)if(!shots.has(id)){this.scene.remove(m);m.geometry.dispose();this.projectiles.delete(id);}for(const shot of g.shots){let m=this.projectiles.get(shot.id);if(!m){m=new THREE.Mesh(new THREE.SphereGeometry(.23,8,6),mat(0xe6bb79));this.scene.add(m);this.projectiles.set(shot.id,m);}const t=Math.max(0,Math.min(1,1-(shot.lands-g.time)/.7));m.position.set(shot.x+(shot.tx-shot.x)*t,2+Math.sin(t*Math.PI)*6,shot.z+(shot.tz-shot.z)*t);const gun=this.artillery.get(shot.castle);if(gun)gun.rotation.y=Math.atan2(shot.tx-shot.x,shot.tz-shot.z);}
   for(const c of g.castles){this.upgrades.get(c.id)!.forEach((group,i)=>group.visible=c.friendly&&c.level>i);this.flags.get(c.id)!.material=mat(c.friendly?0x77a992:0x9a4d47);const gate=this.gates.get(c.id)!;gate.visible=c.friendly&&c.gate>0;const nearFriendly=g.actors.some(a=>(a.kind==='player'||a.kind==='soldier')&&a.hp>0&&dist(a,{x:c.x,z:c.z+10})<4);gate.scale.y=nearFriendly?.15:1;gate.position.y=nearFriendly?3.9:2;this.barriers.get(c.id)!.visible=c.barrier>0;}
   for(const c of g.camps){const mesh=this.campMeshes.get(c.id)!;mesh.visible=!c.rescued&&(!me||dist(c,me)<45);}
-  for(const c of g.caches){let mesh=this.cacheMeshes.get(c.id);if(!mesh){mesh=new THREE.Group();mesh.position.set(c.x,0,c.z);box(mesh,0,.4,0,.8,.8,.7,0xb59151,true);box(mesh,0,.42,0,.85,.1,.75,0xd7b16e);this.cacheMeshes.set(c.id,mesh);this.scene.add(mesh);}mesh.visible=!c.taken;}
+  for(const c of g.caches){let mesh=this.cacheMeshes.get(c.id);if(!mesh){mesh=new THREE.Group();mesh.position.set(c.x,0,c.z);box(mesh,0,.4,0,.8,.8,.7,0xb59151,true);box(mesh,0,.42,0,.85,.1,.75,0xd7b16e);this.cacheMeshes.set(c.id,mesh);this.scene.add(mesh);}if(this.customProps.has('supplies')&&!mesh.userData.custom){mesh.clear();const source=this.customProps.get('supplies')!;const o=source.clone(true);o.scale.setScalar(1/source.userData.height);mesh.add(o);mesh.userData.custom=true;}mesh.visible=!c.taken&&(!me||dist(c,me)<46);}
   this.nest.visible=g.nest.hp>0;this.nest.children[8].rotation.y=time*.5;
   if(me){const sun=this.scene.getObjectByName('sun') as THREE.DirectionalLight;sun.position.set(me.x-25,60,me.z-20);sun.target.position.set(me.x,0,me.z);const model=this.actors.get(me.id);const pos=model?.position??new THREE.Vector3(me.x,0,me.z);const target=new THREE.Vector3(pos.x,1.55,pos.z);const forward=new THREE.Vector3(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch));
    if(first){this.camera.position.copy(target);this.camera.rotation.set(pitch,-yaw,0,'YXZ');}
