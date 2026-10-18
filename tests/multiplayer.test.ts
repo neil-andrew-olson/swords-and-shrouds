@@ -14,3 +14,10 @@ test('independent sockets: rooms, sync, capacity, reconnect, leadership, isolati
  other.messages.length=0;await wait(230);assert.ok(other.messages.some(m=>m.type==='state'));
  }finally{clients.forEach(c=>c.ws.terminate());await s.close();}
 });
+
+test('weapon recovery and independent equipment replicate across sockets and survive reconnect',async()=>{
+ const s=makeServer();await new Promise<void>(r=>s.server.listen(0,'127.0.0.1',r));const url=`ws://127.0.0.1:${(s.server.address() as any).port}/ws`,clients:Awaited<ReturnType<typeof client>>[]=[];
+ try{const a=await client(url);clients.push(a);a.send({type:'create',name:'Collector'});const aw=await a.next('welcome');const room=s.rooms.get(aw.code)!,p=room.game.actors.find(a=>a.id===aw.id)!,drop=room.game.weaponDrops[0];p.x=drop.x;p.z=drop.z;a.send({type:'input',input:{...{mx:0,mz:0,yaw:0,attack:false,block:false,interact:true,seq:1}}});await wait(180);assert.ok(room.game.armory.includes('hammer'));
+ const b=await client(url);clients.push(b);b.send({type:'join',code:aw.code,name:'Late joiner'});const bw=await b.next('welcome');assert.ok((await b.next('state')).game.armory.includes('hammer'));b.send({type:'command',action:'equip:hammer'});await wait(160);const state=a.messages.filter(m=>m.type==='state').at(-1);assert.equal(state.game.actors.find((p:any)=>p.id===bw.id).weapon,'hammer');assert.equal(state.game.actors.find((p:any)=>p.id===aw.id).weapon,'sword');b.ws.close();await wait(50);const resume=await client(url);clients.push(resume);resume.send({type:'resume',code:aw.code,token:bw.token});await resume.next('welcome');assert.equal((await resume.next('state')).game.actors.find((p:any)=>p.id===bw.id).weapon,'hammer');
+ }finally{clients.forEach(c=>c.ws.terminate());await s.close();}
+});

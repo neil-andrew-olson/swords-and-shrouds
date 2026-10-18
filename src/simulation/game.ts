@@ -1,5 +1,6 @@
 import {CASTLES,CAMPS,REGIONS,NEST,START,COSTS,dist,move,waypoint,clamp,lineClear} from '../shared/world';
 import type {Actor,Game,Input} from '../shared/types';
+import {WEAPON_IDS,WEAPONS,isWeapon,weaponStats} from '../shared/weapons';
 export const idle=():Input=>({mx:0,mz:0,yaw:0,attack:false,block:false,interact:false,seq:0});
 export function event(g:Game,text:string){g.events.push({id:++g.nextId,text,time:g.time});g.events=g.events.slice(-8);}
 export function spawn(g:Game,kind:Actor['kind'],x:number,z:number,extra:Partial<Actor>={}):Actor{
@@ -7,7 +8,7 @@ export function spawn(g:Game,kind:Actor['kind'],x:number,z:number,extra:Partial<
  const a:Actor={id:`a${++g.nextId}`,kind,name:kind==='corrupted'?'Corrupted knight':kind==='soldier'?'Oathsworn':kind==='zombie'?'Shrouded':'Knight',x,z,hp,maxHp:hp,yaw:0,cd:0,windup:0,swing:0,block:false,deadUntil:0,stamina:100,armor:'light',abilityCd:0,...extra};g.actors.push(a);return a;
 }
 export function createGame():Game{
- const g:Game={time:0,regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0},events:[],nextId:0};
+ const g:Game={time:0,armory:['sword'],weaponDrops:[{id:'starter-hammer',weapon:'hammer',x:-3,z:30,taken:false},...CASTLES.map((c,i)=>({id:'rack-'+c.id,weapon:WEAPON_IDS[1+i%4],x:c.x-5,z:c.z+4,taken:false}))],regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0},events:[],nextId:0};
  g.castles.forEach((c,i)=>{for(let n=0;n<4+(i%3)*2+Math.floor(i/3);n++)spawn(g,n===5?'corrupted':'zombie',c.x-5+(n%3)*4,c.z-5+Math.floor(n/3)*4,{castle:c.id});});
  g.camps.forEach(c=>{for(let n=0;n<3;n++)spawn(g,'zombie',c.x+n*2-2,c.z-4);});
  for(let n=0;n<5;n++)spawn(g,n===4?'corrupted':'zombie',NEST.x-6+n*3,NEST.z+5);
@@ -15,7 +16,7 @@ export function createGame():Game{
  spawn(g,'soldier',-2,25,{mode:'follow'});spawn(g,'soldier',2,25,{mode:'follow'});
  event(g,'Reclaim the Fallen Keep. Rescue the survivors. End the plague.');return g;
 }
-export function addPlayer(g:Game,id:string,name:string){let c=g.castles.find(c=>c.friendly);const a=spawn(g,'player',c?.x??START.x,c?c.z+3:START.z,{id,name,connected:true,lastSeq:-1,input:idle(),inputAt:g.time});for(const s of g.actors.filter(a=>a.kind==='soldier'&&!a.owner))s.owner=id;return a;}
+export function addPlayer(g:Game,id:string,name:string){let c=g.castles.find(c=>c.friendly);const a=spawn(g,'player',c?.x??START.x,c?c.z+3:START.z,{id,name,weapon:'sword',connected:true,lastSeq:-1,input:idle(),inputAt:g.time});for(const s of g.actors.filter(a=>a.kind==='soldier'&&!a.owner))s.owner=id;return a;}
 export function setInput(g:Game,id:string,v:unknown):boolean{
  if(!v||typeof v!=='object')return false;const i=v as Input;const a=g.actors.find(a=>a.id===id&&a.kind==='player');
  if(!a||![i.mx,i.mz,i.yaw,i.seq].every(Number.isFinite)||!Number.isSafeInteger(i.seq)||i.seq<0||i.seq<=(a.lastSeq??-1)||[i.attack,i.block,i.interact].some(x=>typeof x!=='boolean'))return false;
@@ -29,19 +30,20 @@ export function sever(g:Game,a:Actor,part:'leftArm'|'rightArm'|'head'){
 }
 function hurt(g:Game,a:Actor,amount:number,attacker?:Actor){
  if(a.hp<=0)return;
- if(a.block&&attacker){const towards=Math.atan2(attacker.x-a.x,-(attacker.z-a.z));if(Math.cos(towards-a.yaw)>.2)amount*=.2;}
+ if(a.block&&attacker){const towards=Math.atan2(attacker.x-a.x,-(attacker.z-a.z));if(Math.cos(towards-a.yaw)>.2)amount*=attacker&&a.kind==='player'&&!weaponStats(a.weapon).shield?.55:.2;}
  if(a.kind==='player'&&a.armor==='heavy')amount*=.7;
- a.hp=Math.max(0,a.hp-amount);if(a.kind==='zombie'&&attacker?.kind==='player'){if(a.hp===0)sever(g,a,'head');else if(a.hp<=a.maxHp*.5)sever(g,a,(a.severed??[]).includes('rightArm')?'leftArm':(a.severed??[]).includes('leftArm')?'rightArm':attacker.x<a.x?'leftArm':'rightArm');}
+ a.hp=Math.max(0,a.hp-amount);if(a.kind==='zombie'&&attacker?.kind==='player'&&attacker.weapon!=='hammer'){if(a.hp===0)sever(g,a,'head');else if(a.hp<=a.maxHp*.5)sever(g,a,(a.severed??[]).includes('rightArm')?'leftArm':(a.severed??[]).includes('leftArm')?'rightArm':attacker.x<a.x?'leftArm':'rightArm');}
  if(a.hp===0){a.deadUntil=g.time+(a.kind==='player'?12:a.kind==='soldier'?7:2);a.windup=0;if(a.kind==='player'){a.downed=true;a.revive=0;a.block=false;event(g,`${a.name} is down! Hold Interact nearby for 3 seconds before corruption takes hold.`);}if(hostile(a)){g.stats.kills++;g.resources.wood+=2;g.resources.iron++;}if(a.kind==='soldier')event(g,'An Oathsworn has fallen. Corruption rises in 7 seconds.');}
 }
-function swing(g:Game,a:Actor){a.stamina=Math.max(0,(a.stamina??100)-18);noise(g,a,22);a.cd=.65;a.swing=.25;a.attackSerial=(a.attackSerial??0)+1;for(const e of g.actors){if(!hostile(e)||e.hp<=0||dist(a,e)>3.4||!lineClear(a,e))continue;const angle=Math.atan2(e.x-a.x,-(e.z-a.z));if(Math.cos(angle-a.yaw)>.25)hurt(g,e,34,a);}
- if(dist(a,g.nest)<4&&g.castles.every(c=>c.friendly)&&g.camps.every(c=>c.rescued)){g.nest.hp=Math.max(0,g.nest.hp-34);if(g.nest.hp===0){g.status='victory';event(g,'The shroud is broken. The kingdom lives.');}}
+function swing(g:Game,a:Actor){const w=weaponStats(a.weapon);a.stamina=Math.max(0,(a.stamina??100)-w.stamina);noise(g,a,22);a.cd=w.cooldown;a.swing=.25;a.attackSerial=(a.attackSerial??0)+1;for(const e of g.actors){if(!hostile(e)||e.hp<=0||dist(a,e)>w.reach||!lineClear(a,e))continue;const angle=Math.atan2(e.x-a.x,-(e.z-a.z));if(Math.cos(angle-a.yaw)>w.arc)hurt(g,e,w.damage,a);}
+ if(dist(a,g.nest)<4&&g.castles.every(c=>c.friendly)&&g.camps.every(c=>c.rescued)){g.nest.hp=Math.max(0,g.nest.hp-w.damage);if(g.nest.hp===0){g.status='victory';event(g,'The shroud is broken. The kingdom lives.');}}
 }
 export function command(g:Game,id:string,action:string){
  const p=g.actors.find(a=>a.id===id&&a.hp>0);if(!p||g.status!=='playing')return 'You cannot act right now.';
+ if(action==='nextWeapon'||action.startsWith('equip:')){const requested=action==='nextWeapon'?g.armory[(g.armory.indexOf(p.weapon??'sword')+1)%g.armory.length]:action.slice(6);if(!isWeapon(requested)||!g.armory.includes(requested))return 'Find that weapon at a marked weapon rack first.';if(p.cd>0||p.swing>0)return 'Finish your attack before changing weapons.';p.weapon=requested;p.block=false;p.cd=.45;return '';}
  if(['follow','hold','attack'].includes(action)){for(const s of g.actors.filter(a=>a.kind==='soldier'&&a.hp>0&&a.owner===id&&a.mode!=='guard')){s.mode=action as Actor['mode'];s.hold={x:p.x,z:p.z};if(action==='attack'){const target=g.actors.filter(a=>hostile(a)&&a.hp>0&&dist(p,a)<18).sort((a,b)=>dist(p,a)-dist(p,b))[0];s.target=target?.id;}}return '';}
  if(action.startsWith('travel:')){const from=g.castles.find(c=>c.friendly&&dist(c,p)<8),to=g.castles.find(c=>c.id===action.slice(7)&&c.friendly);if(!from||!to)return 'Travel between friendly castle banners.';if(g.siege||g.actors.some(a=>hostile(a)&&a.hp>0&&dist(a,p)<20))return 'Travel is unavailable during a siege or nearby combat.';p.x=to.x;p.z=to.z+3;for(const s of g.actors.filter(a=>a.kind==='soldier'&&a.owner===id&&a.mode==='follow'&&a.hp>0)){s.x=to.x+2;s.z=to.z+3;}return '';}
- if(action==='sweep'){if((p.abilityCd??0)>0)return 'Sword Sweep is recovering.';if((p.stamina??100)<40)return 'Sword Sweep needs 40 stamina.';p.stamina=(p.stamina??100)-40;p.abilityCd=7;p.cd=.9;p.swing=.4;p.attackSerial=(p.attackSerial??0)+1;noise(g,p,32);for(const enemy of g.actors)if(hostile(enemy)&&enemy.hp>0&&dist(p,enemy)<4.5&&lineClear(p,enemy))hurt(g,enemy,48,p);return '';}
+ if(action==='sweep'){if(p.cd>0)return 'Finish your attack first.';if((p.abilityCd??0)>0)return 'Sword Sweep is recovering.';if((p.stamina??100)<40)return 'Sword Sweep needs 40 stamina.';p.stamina=(p.stamina??100)-40;p.abilityCd=7;p.cd=.9;p.swing=.4;p.attackSerial=(p.attackSerial??0)+1;noise(g,p,32);for(const enemy of g.actors)if(hostile(enemy)&&enemy.hp>0&&dist(p,enemy)<4.5&&lineClear(p,enemy))hurt(g,enemy,48,p);return '';}
  if(action==='light'||action==='heavy'){if(!g.castles.some(c=>c.friendly&&dist(c,p)<15))return 'Change armor at a friendly castle.';p.armor=action;event(g,`${p.name} equipped ${action} armor.`);return '';}
  if(action==='heal'){if(!g.resources.medicine)return 'No healing supplies remain.';if(p.hp>=p.maxHp)return 'Health is already full.';g.resources.medicine--;p.hp=Math.min(p.maxHp,p.hp+65);return '';}
  const c=g.castles.find(c=>c.friendly&&dist(c,p)<15);if(!c)return 'Enter a friendly castle or stand beside its entrance to build.';
@@ -57,6 +59,7 @@ function interactions(g:Game,dt:number){
  const rescuer=g.actors.find(a=>a.hp>0&&dist(a,down)<3&&lineClear(a,down)&&((a.kind==='player'&&a.connected&&a.input?.interact)||(a.kind==='soldier'&&a.owner===down.id&&a.mode==='follow'&&!g.actors.some(e=>hostile(e)&&e.hp>0&&dist(e,a)<5))));
  down.revive=rescuer?(down.revive??0)+dt:0;if(down.revive>=3){down.hp=60;down.downed=false;down.revive=0;down.stamina=50;down.input=idle();event(g,`${down.name} was rescued before corruption.`);}}
  const interacting=g.actors.filter(a=>a.kind==='player'&&a.hp>0&&a.connected&&a.input?.interact);
+ for(const drop of g.weaponDrops){if(drop.taken)continue;const collector=interacting.find(p=>dist(p,drop)<3&&lineClear(p,drop));if(!collector)continue;drop.taken=true;if(!g.armory.includes(drop.weapon))g.armory.push(drop.weapon);event(g,`${collector.name} recovered ${WEAPONS[drop.weapon].name}. Unlocked for the whole fellowship — R / LB to cycle, or open Armory.`);}
  for(const cache of g.caches)if(!cache.taken&&interacting.some(p=>dist(p,cache)<3)){cache.taken=true;g.resources.wood+=12;g.resources.iron+=5;g.resources.medicine++;event(g,'Supplies recovered: 12 wood, 5 iron, 1 healing supply.');}
  for(const c of g.camps)if(!c.rescued&&interacting.some(p=>dist(p,c)<4)&&!g.actors.some(a=>hostile(a)&&a.hp>0&&dist(a,c)<9)){c.rescued=true;g.resources.recruits+=4;g.stats.rescues++;event(g,`${c.name} rescued. Four recruits await your orders.`);}
  for(const c of g.castles){if(c.friendly)continue;const defenders=g.actors.some(a=>hostile(a)&&a.hp>0&&(a.castle===c.id||dist(a,c)<10));if(!defenders&&interacting.some(p=>dist(p,c)<4)){c.capture+=dt;if(c.capture>=5){c.friendly=true;c.gate=180+c.level*120;c.barrier=0;c.capture=0;c.lost=0;g.everCaptured=true;g.stats.captures++;if(!c.rewarded){c.rewarded=true;g.resources.wood+=16;g.resources.iron+=8;}event(g,`${c.name} reclaimed. Fortify and assign guards.`);}}else c.capture=0;}
@@ -73,7 +76,7 @@ export function tick(g:Game,dt=.05){
    else{g.actors=g.actors.filter(x=>x!==a);if(a.kind==='soldier')spawn(g,'corrupted',a.x,a.z);continue;}}
   if(a.kind==='player'){
    if(!a.connected||g.time-(a.inputAt??0)>.3){a.input=idle();a.block=false;continue;}
-   const i=a.input??idle();a.yaw=i.yaw;a.block=i.block&&(a.stamina??100)>1;move(a,{x:a.x+i.mx,z:a.z+i.mz},dt*(a.block?2.5:a.armor==='heavy'?4.8:6));if(i.attack&&!a.block&&a.cd===0&&(a.stamina??100)>=18)swing(g,a);continue;
+   const i=a.input??idle();a.yaw=i.yaw;a.block=i.block&&(a.stamina??100)>1;move(a,{x:a.x+i.mx,z:a.z+i.mz},dt*(a.block?2.5:a.armor==='heavy'?4.8:6));if(i.attack&&!a.block&&a.cd===0&&(a.stamina??100)>=weaponStats(a.weapon).stamina)swing(g,a);continue;
   }
   const enemies=g.actors.filter(e=>e.hp>0&&hostile(e)!==hostile(a));
   const nearest=enemies.sort((x,y)=>dist(a,x)-dist(a,y))[0];

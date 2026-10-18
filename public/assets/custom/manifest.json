@@ -86,5 +86,37 @@
     "after": 3369,
     "bytes": 948908,
     "gzip": 927767
+  },
+  {
+    "name": "bastard",
+    "source": "weapons/weapon_bastard_sword",
+    "before": 30160,
+    "after": 3970,
+    "bytes": 402364,
+    "gzip": 270002
+  },
+  {
+    "name": "hammer",
+    "source": "weapons/weapon_warhammer",
+    "before": 73694,
+    "after": 3932,
+    "bytes": 483860,
+    "gzip": 435904
+  },
+  {
+    "name": "poleaxe",
+    "source": "weapons/weapon_poleaxe",
+    "before": 69774,
+    "after": 3950,
+    "bytes": 443020,
+    "gzip": 384861
+  },
+  {
+    "name": "zweihander",
+    "source": "weapons/weapon_zweihander",
+    "before": 72236,
+    "after": 3919,
+    "bytes": 417176,
+    "gzip": 347168
   }
 ]

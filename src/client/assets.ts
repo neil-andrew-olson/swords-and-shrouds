@@ -1,10 +1,13 @@
 import * as THREE from 'three';
+import {WEAPON_IDS} from '../shared/weapons';
 import {customCharacter} from './custom-character';
 import {GLTFLoader,type GLTF} from 'three/addons/loaders/GLTFLoader.js';
 import {clone} from 'three/addons/utils/SkeletonUtils.js';
 import type {Actor} from '../shared/types';
 const loader=new GLTFLoader();
-export async function loadAsset(name:string):Promise<GLTF>{
+const loadedAssets=new Map<string,Promise<GLTF>>();
+export function loadAsset(name:string):Promise<GLTF>{let loading=loadedAssets.get(name);if(!loading){loading=fetchAsset(name);loadedAssets.set(name,loading);loading.catch(()=>loadedAssets.delete(name));}return loading;}
+async function fetchAsset(name:string):Promise<GLTF>{
  const response=await fetch(`/assets/${name}.glb.gz`);if(!response.ok)throw Error(`Asset ${name}: ${response.status}`);
  const bytes=await new Response(response.body!.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
  return loader.parseAsync(bytes,'/assets/');
@@ -12,7 +15,7 @@ export async function loadAsset(name:string):Promise<GLTF>{
 export class CharacterAssets{
  custom=new Map<string,GLTF>();
  customLoaded=false;
- customReady=Promise.all(['sword','shield','hero','ally','fallen'].map(async name=>{try{this.custom.set(name,await loadAsset('custom/'+name));}catch(e){console.warn('Custom character unavailable',name,e);}})).then(()=>{this.customLoaded=true;});
+ customReady=Promise.all([...WEAPON_IDS,'shield','hero','ally','fallen'].map(async name=>{try{this.custom.set(name,await loadAsset('custom/'+name));}catch(e){console.warn('Custom character unavailable',name,e);}})).then(()=>{this.customLoaded=true;});
  knight?:GLTF;skeleton?:GLTF;skeletonClips:THREE.AnimationClip[]=[];
  ready=Promise.all([loadAsset('knight'),loadAsset('skeleton'),loadAsset('skeleton-general'),loadAsset('skeleton-movement'),loadAsset('skeleton-combat')]).then(([knight,skeleton,general,movement,combat])=>{this.knight=knight;this.skeleton=skeleton;this.skeletonClips=[...general.animations,...movement.animations,...combat.animations];}).catch(error=>console.warn('Character assets unavailable; using fallback models.',error));
  create(a:Actor){const custom=this.custom.get(a.kind==='player'?'hero':a.kind==='soldier'?'ally':a.kind==='corrupted'?'fallen':'');if(a.kind!=='zombie'&&!this.customLoaded)return;if(custom)return customCharacter(custom,a,this.custom);const undead=a.kind==='zombie';const source=undead?this.skeleton:this.knight;if(!source)return;

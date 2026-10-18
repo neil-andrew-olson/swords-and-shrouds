@@ -9,3 +9,5 @@
 .staminatrack{height:5px;margin-top:7px;background:#15262a}.staminatrack #stamina{height:100%;background:#d5b36a;transition:width .1s}#staminaText{display:block;font-size:10px;color:#e0ca9d}#troops{display:flex;flex-wrap:wrap;justify-content:center;max-width:95vw}#troops button{padding:9px 10px}
 
 #regions{font-size:10px;line-height:1.7;max-width:260px;color:#ddcfa7;margin:7px 0}#travelMenu{max-height:130px;overflow:auto}
+
+#weaponCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:18px 0}#weaponCards button{display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:18px;white-space:normal;min-height:145px}#weaponCards strong{font-size:18px;color:#e7d2ad}#weaponCards span{font-size:12px;line-height:1.6}#weaponCards small{color:#a9d7da;font-size:11px;letter-spacing:1px}#weaponCards .equipped{border-color:#b9d8c1;background:#253c34;opacity:1}#armoryPanel{border-top:1px solid #52605b;padding-top:22px;margin-top:24px}#equippedWeapon{display:block;color:#e2c795;font-size:11px;margin-top:7px}#armoryHint{color:#a9d7da}

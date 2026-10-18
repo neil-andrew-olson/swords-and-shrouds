@@ -57,3 +57,11 @@ own gameplay behavior. The complete supplied castle mesh is not substituted for
 the modular castle because its interior must first match navigation/collision.
 In-browser visual playtesting remains necessary; numeric size tests do not certify
 texture quality or final weapon grip appearance.
+
+## Armory and competition polish pass
+
+Five supplied weapon models now have server-authoritative equipment and distinct damage, reach, stamina, recovery and attack cones. Blue weapon racks unlock a shared fellowship armory; a starter warhammer is at (-3,30), and castle racks distribute all remaining types. R / Xbox LB cycles unlocked equipment; I or the Armory button opens accessible stat cards. Late joiners inherit unlocks; equipment is individual and retained on reconnect. Two-handed weapons hide shields and use weaker frontal parries. Switching cannot reset attack recovery. Weapon meshes change in first person and on remote actors. Loaded GLTF promises are shared to avoid duplicate downloads.
+
+Four additional models add about 1.44 MB compressed, each under 4,000 triangles. Forty-six automated tests cover discovery, ownership, forged commands, reconnects, remote equipment, attack stats, occlusion, controller edges and actual mesh bounds in animation. Exact vertex bounds are used for long weapons because rotated bounding boxes substantially overestimate their extent.
+
+Still required before calling this competition-ready: dedicated polearm/hammer/two-handed animations (currently reusing supplied sword clips), authored castle/village environments with matching collision, remaining defensive equipment with useful mechanics, richer audio and encounters, and an end-to-end visual/controller/mobile performance playtest. Not all supplied assets are active. No claim of GPU visual verification is made.
