@@ -65,3 +65,9 @@ Five supplied weapon models now have server-authoritative equipment and distinct
 Four additional models add about 1.44 MB compressed, each under 4,000 triangles. Forty-six automated tests cover discovery, ownership, forged commands, reconnects, remote equipment, attack stats, occlusion, controller edges and actual mesh bounds in animation. Exact vertex bounds are used for long weapons because rotated bounding boxes substantially overestimate their extent.
 
 Still required before calling this competition-ready: dedicated polearm/hammer/two-handed animations (currently reusing supplied sword clips), authored castle/village environments with matching collision, remaining defensive equipment with useful mechanics, richer audio and encounters, and an end-to-end visual/controller/mobile performance playtest. Not all supplied assets are active. No claim of GPU visual verification is made.
+
+## Combat feedback pass
+
+Snapshot-driven synthesized swing, nearby impact, player damage and equipment sounds replace the mouse-click attack beep. Initial snapshots, duplicates and reconnect gaps are silent; nearby impacts are capped to three per update. Sound remains opt-in through the existing Sound checkbox, respects browser audio activation, and uses no downloaded or paid audio. First-person attacks ease through a weapon-speed-dependent motion and shield raises interpolate; the HUD reports recovery time, low stamina and guard state. A brief damage vignette respects reduced-motion preference. This is procedural feedback, not a replacement for dedicated weapon animation clips.
+
+Validation: 48 automated tests and production build passed. Audio perception, motion quality and hardware-controller playback still require a real browser playtest. Publication remains blocked by Render's existing billing suspension (Monthly Quota Exceeded); no plan or billing changes were made.
