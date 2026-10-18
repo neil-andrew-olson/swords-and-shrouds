@@ -70,5 +70,21 @@
     "after": 4707,
     "bytes": 1031968,
     "gzip": 991681
+  },
+  {
+    "name": "iron",
+    "source": "resources/resource_iron_ingots",
+    "before": 496536,
+    "after": 3298,
+    "bytes": 955604,
+    "gzip": 919389
+  },
+  {
+    "name": "medicine",
+    "source": "resources/resource_medicine",
+    "before": 604872,
+    "after": 3369,
+    "bytes": 948908,
+    "gzip": 927767
   }
 ]
