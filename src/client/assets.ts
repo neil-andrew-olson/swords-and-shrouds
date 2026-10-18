@@ -8,9 +8,9 @@ const loader=new GLTFLoader();
 const loadedAssets=new Map<string,Promise<GLTF>>();
 export function loadAsset(name:string):Promise<GLTF>{let loading=loadedAssets.get(name);if(!loading){loading=fetchAsset(name);loadedAssets.set(name,loading);loading.catch(()=>loadedAssets.delete(name));}return loading;}
 async function fetchAsset(name:string):Promise<GLTF>{
- const response=await fetch(`/assets/${name}.glb.gz`);if(!response.ok)throw Error(`Asset ${name}: ${response.status}`);
+ const response=await fetch(`${import.meta.env.BASE_URL}assets/${name}.glb.gz`);if(!response.ok)throw Error(`Asset ${name}: ${response.status}`);
  const bytes=await new Response(response.body!.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
- return loader.parseAsync(bytes,'/assets/');
+ return loader.parseAsync(bytes,`${import.meta.env.BASE_URL}assets/`);
 }
 export class CharacterAssets{
  custom=new Map<string,GLTF>();
