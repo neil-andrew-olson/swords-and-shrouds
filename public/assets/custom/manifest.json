@@ -118,5 +118,61 @@
     "after": 3919,
     "bytes": 417176,
     "gzip": 347168
+  },
+  {
+    "name": "berserker",
+    "source": "characters/player_mercenary_berserker_animated",
+    "before": 369192,
+    "after": 11467,
+    "bytes": 2703908,
+    "gzip": 1881826
+  },
+  {
+    "name": "ranger",
+    "source": "characters/player_scout_ranger_animated",
+    "before": 287342,
+    "after": 11747,
+    "bytes": 2676020,
+    "gzip": 1811075
+  },
+  {
+    "name": "templar",
+    "source": "characters/player_templar_crusader_animated",
+    "before": 323004,
+    "after": 10461,
+    "bytes": 2466340,
+    "gzip": 1665211
+  },
+  {
+    "name": "survivor",
+    "source": "characters/rescued_survivor_animated",
+    "before": 368252,
+    "after": 9287,
+    "bytes": 2635128,
+    "gzip": 1793266
+  },
+  {
+    "name": "skeleton-soldier",
+    "source": "characters/skeleton_soldier_animated",
+    "before": 294518,
+    "after": 11153,
+    "bytes": 2749560,
+    "gzip": 1863780
+  },
+  {
+    "name": "zombie",
+    "source": "characters/zombie_peasant_animated",
+    "before": 328334,
+    "after": 11658,
+    "bytes": 2478992,
+    "gzip": 1667688
+  },
+  {
+    "name": "cauldron",
+    "source": "defense/defense_boiling_pitch_cauldron",
+    "before": 306032,
+    "after": 5320,
+    "bytes": 463392,
+    "gzip": 425794
   }
 ]

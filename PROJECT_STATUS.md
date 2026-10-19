@@ -4,7 +4,22 @@ Updated: 2026-10-19. Read this file first when continuing in a new chat.
 Do not require the previous conversation or import its full transcript.
 Inspect current code and git history before assuming this checkpoint is still current.
 
-## Latest completed batch — companion AI
+## Latest completed batch — visual corrections and asset integration
+
+- Recovered and integrated seven prepared assets: berserker, ranger, templar, survivor, skeleton-soldier, zombie, cauldron.
+- Ally roles select templar / ranger / berserker appearances. Enemies alternate the supplied skeleton and zombie models; corrupted knights retain fallen.
+- Survivor camps use three animated survivors and a cauldron instead of survivor box placeholders.
+- Five measured weapon grip/orientation profiles now apply to first person, animated hand sockets and weapon racks.
+- Character sizing uses rendered mesh vertices. Grounding follows animated poses, excludes held equipment, and samples body vertices plus soles to control CPU cost.
+- Removed horizontal root motion in character coordinates: the armature rotates local axes, so freezing local X/Z did not stop attack clips from moving models meters away.
+- Terrain surface aligned to Y=0. Removed the mismatched first-person shield backing and disabled viewmodel shadows.
+- Asset loader accepts both compressed bytes and responses already decompressed by the host.
+- Validation: 56 tests pass; TypeScript/Vite production build and git diff --check pass. New regressions cover nine animated bodies, horizontal animation drift, and five weapon grip/blade profiles.
+- Browser validation: local Chromium rendered weapon lineup, hero idle/attack, multiple character variants, survivor camp, and the actual production client in both camera modes. No page errors in the production smoke check.
+- The game is still in polish, not finished. Remaining: broader structure/resource asset integration, model/texture refinement, two-handed support-hand posing, custom-undead visual dismemberment parity, full campaign / controller / performance playtesting.
+- Hosting revision and live verification will be recorded after this implementation commit is created.
+
+## Previous completed batch — companion AI
 
 - Gameplay commit: e1a9345c563bfba0acdeed3e567501b04025d69e on main.
 - Hosting pin updated in neilandrew.dev commit 6169bb3de68618adf49e5bf41aeb53fe2423e9e1 to that gameplay commit.
@@ -40,23 +55,14 @@ Solo companions, up to four online players, castle capture/loss/reclamation, sie
 Five-weapon shared discovery and individual equipment, weapon stats, Xbox mappings, and combat feedback exist.
 See src/shared/weapons.ts, src/simulation/game.ts, src/client/main.ts and README.md.
 
-## Unfinished user priorities — verified against source
+## Current priorities
 
-1. Ally spacing and distinct behavior: implemented in the latest batch above; browser playtesting and balancing remain.
-2. Character/enemy variety:
-   - src/client/assets.ts selects hero for players, ally for soldiers, fallen for corrupted knights and the existing skeleton for zombies.
-   - The requested additional berserker/ranger/templar/survivor/skeleton/zombie variants are not present under those names in this tree.
-3. Weapon grips, blade direction and swings:
-   - src/client/equipment.ts still guesses the longest axis and offsets the model by length * .34.
-   - Replace guesses with measured per-asset grip/orientation data and inspect hand attachment through animations.
-   - Existing size tests do not establish that handles sit correctly in hands or blades face correctly.
-4. Ground contact:
-   - Inspect bind pose and animated foot heights in src/client/custom-character.ts and assets.ts; visually verify across clips.
-5. Survivor outposts:
-   - src/client/scene.ts still builds box-shaped survivor placeholders.
-   - Replace with supplied survivor and cauldron models after inspecting source assets.
+1. Verify the visual update on neilandrew.dev after its hosting revision is updated.
+2. Integrate more generated structures and environment props; audit source archives against the manifest.
+3. Refine model surfaces, weapon support-hand posing and custom-undead visual dismemberment.
+4. Playtest combat balance, formations, full campaign, physical Xbox controller and low-end performance.
 
-At the recovery baseline, earlier chat statements that all visual polish changes were integrated were NOT confirmed by the saved main branch. Recover any newer saved artifact before duplicating work, but do not treat chat statements as commits.
+The specific upside-down weapon, floating characters and survivor placeholders reported in screenshots were addressed in the latest visual batch. Continue from the current code rather than repeating old recovery claims.
 
 ## Asset recovery leads
 
@@ -79,9 +85,8 @@ Passing automated tests does not resolve the reported visual/AI polish defects.
 
 ## Next work session
 
-Ally roles and spacing are implemented. Inspect supplied character/prop assets next and implement visual fixes with browser verification.
-Before publishing game changes through neilandrew.dev, inspect its worker and simulation integration as well as its client build: updating the game-source pin alone must not be assumed to update authoritative server gameplay.
-Run both repositories' relevant tests and build checks, and verify deployed client/server behavior.
+Read the latest implementation and hosting commits, verify deployment, then continue broader environment asset integration and the priorities above.
+worker.js in neilandrew.dev imports .game-build/src/simulation/game.ts, so game-source.json controls both client and authoritative gameplay builds.
 
 ## Continuity procedure
 

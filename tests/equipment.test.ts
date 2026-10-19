@@ -6,3 +6,18 @@ test('actual hand-mounted assets stay human-sized through idle, run, block and a
 
 import {WEAPON_IDS,WEAPONS} from '../src/shared/weapons';
 test('every supplied weapon fits the animated hero and two-handed loadouts omit shields',async()=>{const equipment=new Map();for(const id of [...WEAPON_IDS,'shield'])equipment.set(id,await geometryAsset(id));const source=await geometryAsset('hero');for(const weapon of WEAPON_IDS){const a={id:'qa',kind:'player',hp:100,maxHp:100,weapon,attackSerial:0} as Actor;const rig=customCharacter(source,a,equipment);for(let i=0;i<25;i++){if(i===5)a.attackSerial=1;rig.update(a,false,1/30);rig.model.updateMatrixWorld(true);const item=rig.model.getObjectByName('equipment-'+weapon)!;assert.ok(item);const size=new THREE.Box3().setFromObject(item,true).getSize(new THREE.Vector3());assert.ok(size.length()<2.2,weapon+' '+size.toArray());}assert.equal(!!rig.model.getObjectByName('equipment-shield'),WEAPONS[weapon].shield);rig.dispose();}});
+
+import {meshBounds} from '../src/client/grounding';
+test('all nine animated bodies stay grounded through idle, movement, block and attacks',async()=>{
+ for(const name of ['hero','ally','fallen','berserker','ranger','templar','survivor','skeleton-soldier','zombie']){
+  const a={id:'ground',kind:'player',hp:100,maxHp:100,attackSerial:0} as Actor;
+  const rig=customCharacter(await geometryAsset(name),a,new Map());
+  for(let i=0;i<60;i++){if(i===30)a.attackSerial=1;a.block=i>20&&i<30;rig.update(a,i>5&&i<20,1/20);const b=meshBounds(rig.model);assert.ok(Math.abs(b.min.y)<.07,`${name} frame ${i} ground=${b.min.y}`);assert.ok(Math.abs(b.getCenter(new THREE.Vector3()).x)<1&&Math.abs(b.getCenter(new THREE.Vector3()).z)<1,`${name} frame ${i} root motion escaped actor`);assert.ok(b.max.y<2.35&&b.max.y>.8,`${name} height=${b.max.y}`);}
+  rig.dispose();
+ }
+});
+
+import {WEAPON_GRIPS} from '../src/client/equipment';
+test('measured weapon grips place the handle at the socket with the blade above it',async()=>{
+ for(const id of WEAPON_IDS){const fit=equipmentModel((await geometryAsset(id)).scene,WEAPONS[id].length,false,id);fit.updateMatrixWorld(true);const wrapper=fit.children[0];const grip=new THREE.Vector3(...WEAPON_GRIPS[id].grip as [number,number,number]).applyMatrix4(wrapper.matrixWorld);assert.ok(grip.length()<1e-6,id+' grip');const direction=new THREE.Vector3(...WEAPON_GRIPS[id].blade as [number,number,number]).transformDirection(wrapper.matrixWorld);assert.ok(direction.y>.999,id+' blade');const bounds=new THREE.Box3().setFromObject(fit,true);assert.ok(bounds.max.y>Math.abs(bounds.min.y),id+' blade extends beyond grip');}
+});
