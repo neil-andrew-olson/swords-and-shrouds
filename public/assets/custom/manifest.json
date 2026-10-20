@@ -120,6 +120,14 @@
     "gzip": 347168
   },
   {
+    "name": "cauldron",
+    "source": "defense/defense_boiling_pitch_cauldron",
+    "before": 306032,
+    "after": 5320,
+    "bytes": 463392,
+    "gzip": 425794
+  },
+  {
     "name": "berserker",
     "source": "characters/player_mercenary_berserker_animated",
     "before": 369192,
@@ -166,13 +174,5 @@
     "after": 11658,
     "bytes": 2478992,
     "gzip": 1667688
-  },
-  {
-    "name": "cauldron",
-    "source": "defense/defense_boiling_pitch_cauldron",
-    "before": 306032,
-    "after": 5320,
-    "bytes": 463392,
-    "gzip": 425794
   }
 ]

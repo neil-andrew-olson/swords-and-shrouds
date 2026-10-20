@@ -1,3 +1,4 @@
+import {PLAYER_CHARACTERS,isPlayerCharacter} from '../shared/characters';
 import './style.css';
 import {CombatAudio,combatCues} from './combat-feedback';
 import {WEAPON_IDS,WEAPONS,weaponStats} from '../shared/weapons';
@@ -28,13 +29,50 @@ $('manageCastle').onclick=()=>{openGuide();$('campMenu').scrollIntoView({block:'
 $('name').setAttribute('value',localStorage.getItem('ss-name')||'');$<HTMLInputElement>('sensitivity').value=String(sensitivity);$<HTMLInputElement>('invert').checked=invert;
 $('sensitivity').oninput=()=>{sensitivity=Number($<HTMLInputElement>('sensitivity').value);localStorage.setItem('ss-sensitivity',String(sensitivity));};$('invert').onchange=()=>{invert=$<HTMLInputElement>('invert').checked;localStorage.setItem('ss-invert',String(invert));};
 const queryCode=new URLSearchParams(location.search).get('room');if(queryCode)$<HTMLInputElement>('code').value=queryCode.slice(0,6).toUpperCase();
-function connect(mode:'create'|'join'|'resume'){
+
+const savedCharacter=localStorage.getItem('ss-character')??'templar';
+let selectedCharacter=isPlayerCharacter(savedCharacter)?savedCharacter:'templar';
+const characterSelectors:HTMLSelectElement[]=[];
+for(const location of ['landing','armory']){
+  const label=document.createElement('label');
+  label.textContent='Your character';
+  const select=document.createElement('select');
+  select.id=location==='landing'?'characterChoice':'characterChoiceInGame';
+  select.setAttribute('aria-label','Your character');
+  for(const [value,name] of Object.entries(PLAYER_CHARACTERS)){
+    const option=document.createElement('option');
+    option.value=value;option.textContent=name;select.append(option);
+  }
+  select.value=selectedCharacter;
+  label.append(select);
+  if(location==='landing') $('create').before(label);
+  else $('armoryPanel').prepend(label);
+  characterSelectors.push(select);
+  select.onchange=()=>{
+    if(!isPlayerCharacter(select.value)) return;
+    selectedCharacter=select.value;
+    localStorage.setItem('ss-character',selectedCharacter);
+    for(const other of characterSelectors) other.value=selectedCharacter;
+    if(game) cmd('character:'+selectedCharacter);
+  };
+}
+async function connect(mode:'create'|'join'|'resume'){
+ if(!view.characterAssets.customLoaded){
+   $('connection').textContent='Loading your generated characters...';
+   $<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=true;
+   await view.characterAssets.customReady;
+   if(!view.characterAssets.customLoaded){
+     $('connection').textContent='Character files failed to load. Refresh to retry; check the browser console for the filename.';
+     return;
+   }
+ }
+
  if(ws&&ws.readyState<2)return;stopped=false;$('connection').textContent=mode==='resume'?'Reconnecting…':'Connecting to the kingdom…';$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=true;
  const protocol=location.protocol==='https:'?'wss:':'ws:';const routeCode=mode==='create'?Array.from(crypto.getRandomValues(new Uint8Array(3)),n=>n.toString(16).padStart(2,'0')).join('').toUpperCase():mode==='resume'?code:$<HTMLInputElement>('code').value.trim().toUpperCase();ws=new WebSocket(`${protocol}//${location.host}${import.meta.env.BASE_URL}ws?room=${encodeURIComponent(routeCode)}`);
  ws.onopen=()=>{const name=$<HTMLInputElement>('name').value.trim()||'Knight';localStorage.setItem('ss-name',name);send({type:mode,name,code:mode==='resume'?code:$<HTMLInputElement>('code').value.trim().toUpperCase(),...(mode==='resume'?{token}:{})});};
  ws.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch{return;}
-  if(m.type==='welcome'){id=m.id;code=m.code;token=m.token;everJoined=true;attempts=0;seq=0;sessionStorage.setItem('ss-session',JSON.stringify({code,token}));$('landing').hidden=true;$('hud').hidden=false;$('roomCode').textContent=code;toast('Campaign started. Clear the Fallen Keep, then hold E / A at its banner.');}
-  else if(m.type==='state'){if(!document.hidden)for(const cue of combatCues(game,m.game,id)){combatAudio.play(cue);if(cue.kind==='hurt'){$('hud').classList.remove('hurt-flash');void $('hud').offsetWidth;$('hud').classList.add('hurt-flash');}}game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;$('restart').hidden=host!==id;result.showModal();}else if(game!.status==='playing'&&result.open){result.close();lastEvent=0;}}
+  if(m.type==='welcome'){cmd('character:'+selectedCharacter);id=m.id;code=m.code;token=m.token;everJoined=true;attempts=0;seq=0;sessionStorage.setItem('ss-session',JSON.stringify({code,token}));$('landing').hidden=true;$('hud').hidden=false;$('roomCode').textContent=code;toast('Campaign started. Clear the Fallen Keep, then hold E / A at its banner.');}
+  else if(m.type==='state'){if(!document.hidden)for(const cue of combatCues(game,m.game,id)){combatAudio.play(cue);if(cue.kind==='hurt'){$('hud').classList.remove('hurt-flash');void $('hud').offsetWidth;$('hud').classList.add('hurt-flash');}}game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;$('restart').hidden=host!==id;result.showModal();}else if(game!.status==='playing'&&result.open){result.close();lastEvent=0;cmd('character:'+selectedCharacter);}}
   else if(m.type==='error'){if(!everJoined){sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;stopped=true;ws?.close();$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}else{toast(m.text);if(/expired|not found/.test(m.text)){stopped=true;sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;setTimeout(()=>location.reload(),2000);}}}
  };
  ws.onclose=e=>{release();if(stopped)return;if(e.code===4000||e.code===4001){stopped=true;sessionStorage.removeItem('ss-session');toast(e.reason);$('connection').textContent=e.reason;setTimeout(()=>location.reload(),2500);return;}if(everJoined&&attempts<8){toast('Connection lost. Reconnecting…');setTimeout(()=>connect('resume'),Math.min(8000,500*2**attempts++));}else{$('connection').textContent='Unable to connect. Try again shortly.';$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}};
@@ -44,7 +82,7 @@ $('create').onclick=()=>connect('create');$('join').onclick=()=>connect('join');
 $('invite').onclick=async()=>{const url=new URL(location.href);url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);toast('Invitation link copied. Send it to your fellowship.');}catch{toast(`Room code: ${code}. Friends can enter it on this site.`);}};
 for(const id of WEAPON_IDS){const w=WEAPONS[id],b=document.createElement('button');b.id='equip-'+id;b.dataset.command='equip:'+id;b.innerHTML=`<strong>${w.name}</strong><span>${w.style}</span><span>${w.damage} damage · ${w.reach} m reach · ${w.stamina} stamina · ${w.cooldown}s recovery</span><small>Join a campaign to equip</small>`;b.disabled=true;$('weaponCards').append(b);}
 document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach(b=>b.onclick=()=>cmd(b.dataset.command!));
-window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement||guide.open||result.open)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='KeyR')cmd('nextWeapon');if(e.code==='KeyI')$('armoryBtn').click();if(e.code==='KeyV')cameraToggle();if(e.code==='KeyH')cmd('heal');if(e.code==='KeyQ')cmd('sweep');if(e.code==='Digit1')cmd('follow');if(e.code==='Digit2')cmd('hold');if(e.code==='Digit3')cmd('attack');if(e.code==='KeyG')openGuide();if(e.code==='KeyB'){$('manageCastle').click();}});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
+window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement||guide.open||result.open)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='KeyR')cmd('nextWeapon');if(e.code==='KeyI')$('armoryBtn').click();if(e.code==='KeyV')cameraToggle();if(e.code==='KeyH')cmd('heal');if(e.code==='KeyQ')cmd('sweep');if(e.code==='Digit1')cmd('follow');if(e.code==='Digit2')cmd('hold');if(e.code==='Digit3')cmd('attack');if(e.code==='KeyG')openGuide();if(e.code==='KeyB'){$('manageCastle').click();}});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
 canvas.addEventListener('click',()=>{if(game&&!guide.open&&!result.open&&matchMedia('(pointer:fine)').matches)canvas.requestPointerLock?.();});canvas.addEventListener('contextmenu',e=>e.preventDefault());canvas.addEventListener('mousedown',e=>{if(document.pointerLockElement===canvas){if(e.button===0){mouse.attack=true;}if(e.button===2)mouse.block=true;}});window.addEventListener('mouseup',e=>{if(e.button===0)mouse.attack=false;if(e.button===2)mouse.block=false;});document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas)release();});document.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas){yaw+=e.movementX*.0025*sensitivity;pitch=clamp(pitch-e.movementY*.0025*sensitivity*(invert?-1:1),-1.05,1.05);}});
 const stick=$('stick');let stickId=-1;function stickMove(e:PointerEvent){const rect=stick.getBoundingClientRect();let x=(e.clientX-rect.left-rect.width/2)/35,z=(e.clientY-rect.top-rect.height/2)/35;const len=Math.max(1,Math.hypot(x,z));touch.mx=x/len;touch.forward=-z/len;(stick.firstElementChild as HTMLElement).style.transform=`translate(${touch.mx*25}px,${-touch.forward*25}px)`;}
 stick.onpointerdown=e=>{stickId=e.pointerId;stick.setPointerCapture(stickId);stickMove(e);};stick.onpointermove=e=>{if(e.pointerId===stickId)stickMove(e);};const stopStick=()=>{stickId=-1;touch.mx=touch.forward=0;(stick.firstElementChild as HTMLElement).style.transform='';};stick.onpointerup=stopStick;stick.onpointercancel=stopStick;

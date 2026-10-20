@@ -1,3 +1,4 @@
+import {isPlayerCharacter} from '../shared/characters';
 import {ROLES,ROLE_STATS,formation,placeCompanion,separateCompanions,squad} from './companions';
 import {CASTLES,CAMPS,REGIONS,NEST,START,COSTS,dist,move,waypoint,clamp,lineClear} from '../shared/world';
 import type {Actor,Game,Input} from '../shared/types';
@@ -18,7 +19,7 @@ export function createGame():Game{
  spawn(g,'soldier',-2,25,{mode:'follow'});spawn(g,'soldier',2,25,{mode:'follow'});
  event(g,'Reclaim the Fallen Keep. Rescue the survivors. End the plague.');return g;
 }
-export function addPlayer(g:Game,id:string,name:string){let c=g.castles.find(c=>c.friendly);const a=spawn(g,'player',c?.x??START.x,c?c.z+3:START.z,{id,name,weapon:'sword',connected:true,lastSeq:-1,input:idle(),inputAt:g.time});for(const s of g.actors.filter(a=>a.kind==='soldier'&&!a.owner))s.owner=id;return a;}
+export function addPlayer(g:Game,id:string,name:string){let c=g.castles.find(c=>c.friendly);const a=spawn(g,'player',c?.x??START.x,c?c.z+3:START.z,{id,name,appearance:'templar',weapon:'sword',connected:true,lastSeq:-1,input:idle(),inputAt:g.time});for(const s of g.actors.filter(a=>a.kind==='soldier'&&!a.owner))s.owner=id;return a;}
 export function setInput(g:Game,id:string,v:unknown):boolean{
  if(!v||typeof v!=='object')return false;const i=v as Input;const a=g.actors.find(a=>a.id===id&&a.kind==='player');
  if(!a||![i.mx,i.mz,i.yaw,i.seq].every(Number.isFinite)||!Number.isSafeInteger(i.seq)||i.seq<0||i.seq<=(a.lastSeq??-1)||[i.attack,i.block,i.interact].some(x=>typeof x!=='boolean'))return false;
@@ -42,6 +43,12 @@ function swing(g:Game,a:Actor){const w=weaponStats(a.weapon);a.stamina=Math.max(
 }
 export function command(g:Game,id:string,action:string){
  const p=g.actors.find(a=>a.id===id&&a.hp>0);if(!p||g.status!=='playing')return 'You cannot act right now.';
+ if(action.startsWith('character:')){
+  const choice=action.slice(10);
+  if(p.kind!=='player'||!isPlayerCharacter(choice)) return 'Choose a listed character.';
+  p.appearance=choice;
+  return '';
+ }
  if(action==='nextWeapon'||action.startsWith('equip:')){const requested=action==='nextWeapon'?g.armory[(g.armory.indexOf(p.weapon??'sword')+1)%g.armory.length]:action.slice(6);if(!isWeapon(requested)||!g.armory.includes(requested))return 'Find that weapon at a marked weapon rack first.';if(p.cd>0||p.swing>0)return 'Finish your attack before changing weapons.';p.weapon=requested;p.block=false;p.cd=.45;return '';}
  if(['follow','hold','attack'].includes(action)){for(const s of g.actors.filter(a=>a.kind==='soldier'&&a.hp>0&&a.owner===id&&a.mode!=='guard')){s.mode=action as Actor['mode'];s.hold={x:p.x,z:p.z};if(action==='attack'){const target=g.actors.filter(a=>hostile(a)&&a.hp>0&&dist(p,a)<18).sort((a,b)=>dist(p,a)-dist(p,b))[0];s.target=target?.id;}}return '';}
  if(action.startsWith('travel:')){const from=g.castles.find(c=>c.friendly&&dist(c,p)<8),to=g.castles.find(c=>c.id===action.slice(7)&&c.friendly);if(!from||!to)return 'Travel between friendly castle banners.';if(g.siege||g.actors.some(a=>hostile(a)&&a.hp>0&&dist(a,p)<20))return 'Travel is unavailable during a siege or nearby combat.';p.x=to.x;p.z=to.z+3;for(const s of g.actors.filter(a=>a.kind==='soldier'&&a.owner===id&&a.mode==='follow'&&a.hp>0)){placeCompanion(g,s,p);}return '';}

@@ -1,8 +1,8 @@
-import * as THREE from 'three';
+import {characterAsset} from '../shared/characters';
 import {WEAPON_IDS} from '../shared/weapons';
 import {customCharacter} from './custom-character';
 import {GLTFLoader,type GLTF} from 'three/addons/loaders/GLTFLoader.js';
-import {clone} from 'three/addons/utils/SkeletonUtils.js';
+
 import type {Actor} from '../shared/types';
 const loader=new GLTFLoader();
 const loadedAssets=new Map<string,Promise<GLTF>>();
@@ -14,23 +14,24 @@ async function fetchAsset(name:string):Promise<GLTF>{
  const bytes=header[0]===0x1f&&header[1]===0x8b?await new Response(new Blob([payload]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer():payload;
  return loader.parseAsync(bytes,`${import.meta.env.BASE_URL}assets/`);
 }
-export class CharacterAssets{
- custom=new Map<string,GLTF>();
- customLoaded=false;
- customReady=Promise.all([...WEAPON_IDS,'shield','hero','ally','fallen','berserker','ranger','templar','survivor','skeleton-soldier','zombie'].map(async name=>{try{this.custom.set(name,await loadAsset('custom/'+name));}catch(e){console.warn('Custom character unavailable',name,e);}})).then(()=>{this.customLoaded=true;});
- knight?:GLTF;skeleton?:GLTF;skeletonClips:THREE.AnimationClip[]=[];
- ready=Promise.all([loadAsset('knight'),loadAsset('skeleton'),loadAsset('skeleton-general'),loadAsset('skeleton-movement'),loadAsset('skeleton-combat')]).then(([knight,skeleton,general,movement,combat])=>{this.knight=knight;this.skeleton=skeleton;this.skeletonClips=[...general.animations,...movement.animations,...combat.animations];}).catch(error=>console.warn('Character assets unavailable; using fallback models.',error));
- create(a:Actor){const custom=this.custom.get(a.kind==='player'?'hero':a.kind==='soldier'?(a.appearance??(a.role==='defender'?'templar':a.role==='flanker'?'ranger':a.role==='heavy'?'berserker':'ally')):a.kind==='corrupted'?'fallen':(a.appearance??(parseInt(a.id.replace(/[^0-9]/g,''),10)%2?'zombie':'skeleton-soldier')));if(!this.customLoaded)return;if(custom)return customCharacter(custom,a,this.custom);const undead=a.kind==='zombie';const source=undead?this.skeleton:this.knight;if(!source)return;
-  const model=clone(source.scene);model.updateMatrixWorld(true);const bounds=new THREE.Box3().setFromObject(model),size=bounds.getSize(new THREE.Vector3());const scale=1.85/size.y;
-  const pivot=new THREE.Group();pivot.add(model);model.scale.multiplyScalar(scale);model.position.y-=bounds.min.y*scale;pivot.rotation.y=Math.PI;
-  model.traverse(o=>{if(o instanceof THREE.Mesh){o.castShadow=o.receiveShadow=true;const materials=Array.isArray(o.material)?o.material:[o.material];const tinted=materials.map(m=>{const n=m.clone() as THREE.MeshStandardMaterial;if(n.isMeshStandardMaterial){n.roughness=undead?.85:.46;n.metalness=undead?0:.6;if(a.kind==='corrupted')n.color.multiply(new THREE.Color(.55,.35,.55));if(a.kind==='soldier')n.color.multiply(new THREE.Color(.75,.9,.8));}return n;});o.material=Array.isArray(o.material)?tinted:tinted[0];}});
-  if(!undead){const hand=model.getObjectByName('PalmR');if(hand){const sword=new THREE.Group();const steel=new THREE.MeshStandardMaterial({color:0xbac6cf,metalness:.85,roughness:.28});const blade=new THREE.Mesh(new THREE.BoxGeometry(.12,2.3,.18),steel);blade.position.y=1.25;sword.add(blade);const cross=new THREE.Mesh(new THREE.BoxGeometry(.85,.15,.22),new THREE.MeshStandardMaterial({color:0xae8c4c,metalness:.65,roughness:.4}));sword.add(cross);sword.rotation.x=Math.PI/2;hand.add(sword);}}
-  const mixer=new THREE.AnimationMixer(model),clips=undead?this.skeletonClips:source.animations;
-  const names=undead?{idle:'Idle_A',walk:'Walking_A',attack:'Melee_Unarmed_Attack_Punch_A',death:'Death_A'}:{idle:'Idle',walk:'Run',attack:'Run_swordAttack',death:'Death'};
-  const actions=new Map<string,THREE.AnimationAction>();for(const [key,name] of Object.entries(names)){const clip=clips.find(c=>c.name.split('|').pop()===name);if(clip){const selected=key==='attack'?new THREE.AnimationClip(clip.name+'_upper',clip.duration,clip.tracks.filter(t=>/upperarm|lowerarm|wrist|hand|palm|finger|thumb|chest|spine|torso|abdomen|shoulder|neck|head/i.test(t.name))):clip;const action=mixer.clipAction(selected);if(key==='death'||key==='attack'){action.setLoop(THREE.LoopOnce,1);action.clampWhenFinished=true;}actions.set(key,action);}}
-  let current='',attackUntil=0,lastSerial=-1,lastHp=a.hp,hitTime=0;const fragments:THREE.Mesh[]=[];const removed=new Set<string>();
-  function detach(actor:Actor){if(!undead)return;for(const part of actor.severed??[]){if(removed.has(part))continue;removed.add(part);const names=part==='rightArm'?['Skeleton_Warrior_ArmRight']:part==='leftArm'?['Skeleton_Warrior_ArmLeft']:['Skeleton_Warrior_Head','Skeleton_Warrior_Helmet','Skeleton_Warrior_Eyes','Skeleton_Warrior_Jaw'];model.updateWorldMatrix(true,true);model.traverse(o=>{if(!(o instanceof THREE.Mesh)||!names.includes(o.name))return;o.visible=false;if(o instanceof THREE.SkinnedMesh)o.skeleton.update();const geometry=o.geometry.clone(),positions=geometry.getAttribute('position');const v=new THREE.Vector3();for(let i=0;i<positions.count;i++){o.getVertexPosition(i,v);v.applyMatrix4(o.matrixWorld);positions.setXYZ(i,v.x,v.y,v.z);}geometry.deleteAttribute('skinIndex');geometry.deleteAttribute('skinWeight');geometry.computeBoundingBox();const center=geometry.boundingBox!.getCenter(new THREE.Vector3());geometry.translate(-center.x,-center.y,-center.z);geometry.computeVertexNormals();const materials=Array.isArray(o.material)?o.material.map(m=>m.clone()):o.material.clone();const fragment=new THREE.Mesh(geometry,materials);fragment.position.copy(center);fragment.castShadow=true;fragments.push(fragment);});}}
-
-  return {model:pivot,fragments,update:(actor:Actor,moving:boolean,dt:number)=>{const serial=actor.attackSerial??0;if(serial!==lastSerial){if(lastSerial>=0){attackUntil=undead?.65:.6;const attack=actions.get('attack');attack?.reset().setDuration(attackUntil).fadeIn(.05).play();}lastSerial=serial;}const previousAttack=attackUntil;attackUntil=Math.max(0,attackUntil-dt);if(previousAttack>0&&attackUntil===0)actions.get('attack')?.fadeOut(.08);if(actor.hp<lastHp)hitTime=.16;lastHp=actor.hp;hitTime=Math.max(0,hitTime-dt);const state=actor.hp<=0?'death':moving?'walk':'idle';if(state!==current){const old=actions.get(current),next=actions.get(state);if(next){next.reset().fadeIn(.16).play();old?.fadeOut(.12);}if(state==='death'){actions.get('attack')?.stop();attackUntil=0;}current=state;}const walk=actions.get('walk');if(walk)walk.timeScale=actor.armor==='heavy'?.8:1;mixer.update(dt);const chest=model.getObjectByName(undead?'chest':'Torso');if(chest&&hitTime>0)chest.rotation.x-=Math.sin(hitTime/.16*Math.PI)*.18;if(actor.block){const arm=model.getObjectByName('UpperArmL');if(arm){arm.rotation.x-=.7;arm.rotation.z+=.3;}}if(undead&&actor.severed?.includes('rightArm')&&attackUntil>0){const arm=model.getObjectByName('upperarml');if(arm)arm.rotation.x-=Math.sin(attackUntil/.65*Math.PI); }detach(actor);} ,dispose:()=>{mixer.stopAllAction();mixer.uncacheRoot(model);model.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])m.dispose();});}};
- }
+export class CharacterAssets {
+  custom = new Map<string,GLTF>();
+  customLoaded = false;
+  loadError:unknown;
+  customReady = Promise.all([
+    ...WEAPON_IDS,'shield','hero','ally','fallen','berserker',
+    'ranger','templar','survivor','skeleton-soldier','zombie'
+  ].map(async name => {
+    this.custom.set(name,await loadAsset('custom/'+name));
+  })).then(() => {
+    this.customLoaded=true;
+  }).catch(error => {
+    this.loadError=error;
+    console.error('Generated character assets failed to load',error);
+  });
+  create(a:Actor) {
+    if(!this.customLoaded) return;
+    const source=this.custom.get(characterAsset(a));
+    if(source) return customCharacter(source,a,this.custom);
+  }
 }
