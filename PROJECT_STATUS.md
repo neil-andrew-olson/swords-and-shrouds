@@ -1,6 +1,6 @@
 # Swords & Shrouds — project checkpoint
 
-Updated: 2026-10-19. Read this file first when continuing in a new chat.
+Updated: 2026-10-20. Read this file first when continuing in a new chat.
 Do not require the previous conversation or import its full transcript.
 Inspect current code and git history before assuming this checkpoint is still current.
 
@@ -17,7 +17,10 @@ Inspect current code and git history before assuming this checkpoint is still cu
 - Validation: 56 tests pass; TypeScript/Vite production build and git diff --check pass. New regressions cover nine animated bodies, horizontal animation drift, and five weapon grip/blade profiles.
 - Browser validation: local Chromium rendered weapon lineup, hero idle/attack, multiple character variants, survivor camp, and the actual production client in both camera modes. No page errors in the production smoke check.
 - The game is still in polish, not finished. Remaining: broader structure/resource asset integration, model/texture refinement, two-handed support-hand posing, custom-undead visual dismemberment parity, full campaign / controller / performance playtesting.
-- Hosting revision and live verification will be recorded after this implementation commit is created.
+- Implementation commit: c008b89c60ed67df87d548ac5f0b6b5a39fd2fe8.
+- With explicit user deployment approval, neilandrew.dev game-source.json was updated in hosting commit fa4fb42838c458a080784c658f5c415151b473a0 to that implementation.
+- Cloudflare Workers Builds reported success. Live HTML serves /games/swords-and-shrouds/assets/index-BNkZFd8Z.js, whose contents include all seven added asset names.
+- Live verification 2026-10-20: /health returned ok:true; Chromium created a new campaign and rendered both camera modes without page errors. Inspected screenshots: first-person sword is upright; scene remains very dark and nearby weapon labels can obstruct third-person views. This is a smoke check, not a full campaign or all-animation visual certification.
 
 ## Previous completed batch — companion AI
 
@@ -57,7 +60,7 @@ See src/shared/weapons.ts, src/simulation/game.ts, src/client/main.ts and README
 
 ## Current priorities
 
-1. Verify the visual update on neilandrew.dev after its hosting revision is updated.
+1. Improve scene readability and oversized/occluding weapon labels; verify grounding and grips during live combat across weapons.
 2. Integrate more generated structures and environment props; audit source archives against the manifest.
 3. Refine model surfaces, weapon support-hand posing and custom-undead visual dismemberment.
 4. Playtest combat balance, formations, full campaign, physical Xbox controller and low-end performance.
@@ -85,7 +88,7 @@ Passing automated tests does not resolve the reported visual/AI polish defects.
 
 ## Next work session
 
-Read the latest implementation and hosting commits, verify deployment, then continue broader environment asset integration and the priorities above.
+Read the latest implementation and hosting commits, then continue broader environment asset integration and the priorities above. Deployment and a live campaign smoke check succeeded for c008b89; do not repeat the old deployment approval request.
 worker.js in neilandrew.dev imports .game-build/src/simulation/game.ts, so game-source.json controls both client and authoritative gameplay builds.
 
 ## Continuity procedure
