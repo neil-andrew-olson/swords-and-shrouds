@@ -1,29 +1,5 @@
 [
   {
-    "name": "hero",
-    "source": "characters/player_vanguard_knight_animated",
-    "before": 314702,
-    "after": 13976,
-    "bytes": 2542208,
-    "gzip": 1697387
-  },
-  {
-    "name": "fallen",
-    "source": "characters/corrupted_knight_animated",
-    "before": 330770,
-    "after": 12564,
-    "bytes": 2522376,
-    "gzip": 1713007
-  },
-  {
-    "name": "ally",
-    "source": "characters/ai_companion_oathsworn_animated",
-    "before": 315324,
-    "after": 11279,
-    "bytes": 2582480,
-    "gzip": 1765252
-  },
-  {
     "name": "trebuchet",
     "source": "defense/defense_castle_trebuchet",
     "before": 631616,
@@ -118,5 +94,71 @@
     "after": 3919,
     "bytes": 417176,
     "gzip": 347168
+  },
+  {
+    "name": "hero",
+    "source": "characters/player_vanguard_knight_animated",
+    "before": 314702,
+    "after": 13900,
+    "bytes": 2805368,
+    "gzip": 1936410
+  },
+  {
+    "name": "fallen",
+    "source": "characters/corrupted_knight_animated",
+    "before": 330770,
+    "after": 12324,
+    "bytes": 3104648,
+    "gzip": 2264632
+  },
+  {
+    "name": "ally",
+    "source": "characters/ai_companion_oathsworn_animated",
+    "before": 315324,
+    "after": 11221,
+    "bytes": 2955620,
+    "gzip": 2122862
+  },
+  {
+    "name": "gatehouse",
+    "source": "structures/castle_gate_tower",
+    "bytes": 44648,
+    "gzip": 2664
+  },
+  {
+    "name": "gate",
+    "source": "structures/castle_portcullis_gate",
+    "bytes": 76696,
+    "gzip": 4496
+  },
+  {
+    "name": "beacon",
+    "source": "defense/defense_signal_brazier",
+    "bytes": 64288,
+    "gzip": 6245
+  },
+  {
+    "name": "firepit",
+    "source": "defense/defense_campsite_firepit",
+    "bytes": 62984,
+    "gzip": 6140
+  },
+  {
+    "name": "pine",
+    "source": "environment/env_pine_tree",
+    "bytes": 24704,
+    "gzip": 2368
+  },
+  {
+    "name": "oak",
+    "source": "environment/env_oak_tree",
+    "bytes": 23512,
+    "gzip": 2262
+  },
+  {
+    "name": "mill",
+    "source": "structures/structure_windmill",
+    "bytes": 34812,
+    "gzip": 3379
   }
 ]
