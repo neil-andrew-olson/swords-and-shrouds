@@ -1,8 +1,25 @@
 import * as THREE from 'three';
+// Measured in the supplied GLBs' scene coordinates: handle center and tip direction.
+export const WEAPON_GRIPS:Record<string,{grip:number[];blade:number[]}>= {
+ sword:{grip:[.005,0,-.69],blade:[0,0,1]},
+ bastard:{grip:[.005,.76,0],blade:[0,-1,0]},
+ hammer:{grip:[.005,-.66,0],blade:[0,1,0]},
+ poleaxe:{grip:[0,-.35,.48],blade:[0,.58,-.815]},
+ zweihander:{grip:[0,-.65,.70],blade:[0,.682,-.731]}
+};
 /** Imports may lie along any axis. Fit by longest extent, never thin Y thickness. */
-export function equipmentModel(source:THREE.Object3D,length:number,shield=false){
+export function equipmentModel(source:THREE.Object3D,length:number,shield=false,asset?:string){
  const item=source.clone(true),root=new THREE.Group();root.add(item);item.updateMatrixWorld(true);
  let bounds=new THREE.Box3().setFromObject(item),size=bounds.getSize(new THREE.Vector3());
+ const profile=asset?WEAPON_GRIPS[asset]:undefined;
+ if(profile){
+  const rotation=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(...profile.blade as [number,number,number]).normalize(),new THREE.Vector3(0,1,0));
+  const wrapper=new THREE.Group();root.remove(item);wrapper.add(item);root.add(wrapper);wrapper.quaternion.copy(rotation);root.updateMatrixWorld(true);
+  const height=new THREE.Box3().setFromObject(root,true).getSize(new THREE.Vector3()).y,scale=length/height;
+  wrapper.scale.setScalar(scale);wrapper.position.copy(new THREE.Vector3(...profile.grip as [number,number,number]).applyQuaternion(rotation).multiplyScalar(-scale));
+  root.traverse(o=>{if(o instanceof THREE.Mesh){o.castShadow=true;o.material=Array.isArray(o.material)?o.material.map(m=>m.clone()):o.material.clone();}});
+  return root;
+ }
  const longest=size.x>=size.y&&size.x>=size.z?'x':size.z>size.y?'z':'y';
  if(longest==='x')item.rotation.z+=Math.PI/2;else if(longest==='z')item.rotation.x-=Math.PI/2;
  item.updateMatrixWorld(true);bounds.setFromObject(item);size=bounds.getSize(new THREE.Vector3());

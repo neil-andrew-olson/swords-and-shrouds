@@ -1,5 +1,29 @@
 [
   {
+    "name": "hero",
+    "source": "characters/player_vanguard_knight_animated",
+    "before": 314702,
+    "after": 13976,
+    "bytes": 2542208,
+    "gzip": 1697387
+  },
+  {
+    "name": "fallen",
+    "source": "characters/corrupted_knight_animated",
+    "before": 330770,
+    "after": 12564,
+    "bytes": 2522376,
+    "gzip": 1713007
+  },
+  {
+    "name": "ally",
+    "source": "characters/ai_companion_oathsworn_animated",
+    "before": 315324,
+    "after": 11279,
+    "bytes": 2582480,
+    "gzip": 1765252
+  },
+  {
     "name": "trebuchet",
     "source": "defense/defense_castle_trebuchet",
     "before": 631616,
@@ -96,69 +120,101 @@
     "gzip": 347168
   },
   {
-    "name": "hero",
-    "source": "characters/player_vanguard_knight_animated",
-    "before": 314702,
-    "after": 13900,
-    "bytes": 2805368,
-    "gzip": 1936410
+    "name": "cauldron",
+    "source": "defense/defense_boiling_pitch_cauldron",
+    "before": 306032,
+    "after": 5320,
+    "bytes": 463392,
+    "gzip": 425794
   },
   {
-    "name": "fallen",
-    "source": "characters/corrupted_knight_animated",
-    "before": 330770,
-    "after": 12324,
-    "bytes": 3104648,
-    "gzip": 2264632
+    "name": "berserker",
+    "source": "characters/player_mercenary_berserker_animated",
+    "before": 369192,
+    "after": 11467,
+    "bytes": 2703908,
+    "gzip": 1881826
   },
   {
-    "name": "ally",
-    "source": "characters/ai_companion_oathsworn_animated",
-    "before": 315324,
-    "after": 11221,
-    "bytes": 2955620,
-    "gzip": 2122862
+    "name": "ranger",
+    "source": "characters/player_scout_ranger_animated",
+    "before": 287342,
+    "after": 11747,
+    "bytes": 2676020,
+    "gzip": 1811075
+  },
+  {
+    "name": "templar",
+    "source": "characters/player_templar_crusader_animated",
+    "before": 323004,
+    "after": 10461,
+    "bytes": 2466340,
+    "gzip": 1665211
+  },
+  {
+    "name": "survivor",
+    "source": "characters/rescued_survivor_animated",
+    "before": 368252,
+    "after": 9287,
+    "bytes": 2635128,
+    "gzip": 1793266
+  },
+  {
+    "name": "skeleton-soldier",
+    "source": "characters/skeleton_soldier_animated",
+    "before": 294518,
+    "after": 11153,
+    "bytes": 2749560,
+    "gzip": 1863780
+  },
+  {
+    "name": "zombie",
+    "source": "characters/zombie_peasant_animated",
+    "before": 328334,
+    "after": 11658,
+    "bytes": 2478992,
+    "gzip": 1667688
   },
   {
     "name": "gatehouse",
     "source": "structures/castle_gate_tower",
-    "bytes": 44648,
-    "gzip": 2664
+    "bytes": 45216,
+    "gzip": 3056
   },
   {
     "name": "gate",
     "source": "structures/castle_portcullis_gate",
-    "bytes": 76696,
-    "gzip": 4496
+    "bytes": 77268,
+    "gzip": 4656
   },
   {
     "name": "beacon",
-    "source": "defense/defense_signal_brazier",
-    "bytes": 64288,
-    "gzip": 6245
+    "source": "defense/defense_signal_beacon",
+    "bytes": 48908,
+    "gzip": 6461
   },
   {
     "name": "firepit",
     "source": "defense/defense_campsite_firepit",
-    "bytes": 62984,
-    "gzip": 6140
+    "bytes": 52956,
+    "gzip": 6562
   },
   {
     "name": "pine",
     "source": "environment/env_pine_tree",
-    "bytes": 24704,
-    "gzip": 2368
+    "bytes": 13440,
+    "gzip": 3804
   },
   {
     "name": "oak",
     "source": "environment/env_oak_tree",
-    "bytes": 23512,
-    "gzip": 2262
+    "bytes": 12664,
+    "gzip": 2508
   },
   {
     "name": "mill",
     "source": "structures/structure_windmill",
-    "bytes": 34812,
-    "gzip": 3379
+    "bytes": 29272,
+    "gzip": 3557
   }
 ]
