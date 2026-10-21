@@ -89,11 +89,48 @@ stick.onpointerdown=e=>{stickId=e.pointerId;stick.setPointerCapture(stickId);sti
 let lookId=-1,lookX=0,lookY=0;const look=$('lookpad');look.onpointerdown=e=>{lookId=e.pointerId;lookX=e.clientX;lookY=e.clientY;look.setPointerCapture(lookId);};look.onpointermove=e=>{if(e.pointerId!==lookId)return;yaw+=(e.clientX-lookX)*.006*sensitivity;pitch=clamp(pitch-(e.clientY-lookY)*.006*sensitivity*(invert?-1:1),-1.05,1.05);lookX=e.clientX;lookY=e.clientY;};look.onpointerup=look.onpointercancel=()=>{lookId=-1;};
 document.querySelectorAll<HTMLButtonElement>('[data-hold]').forEach(b=>{const action=b.dataset.hold as 'attack'|'block'|'interact';b.onpointerdown=e=>{b.setPointerCapture(e.pointerId);touch[action]=true;};b.onpointerup=b.onpointercancel=()=>{touch[action]=false;};});
 function menuGamepad(p:Gamepad){const d=readPad(p,padPrev);menuPrev=d.previous;const root=guide.open?guide:result.open?result:$('landing');const buttons=[...root.querySelectorAll<HTMLButtonElement>('button')].filter(b=>!b.hidden&&!b.disabled&&b.offsetParent!==null);if(!buttons.length)return;const up=(p.buttons[12]?.pressed&&!padPrev[12]),down=(p.buttons[13]?.pressed&&!padPrev[13]);if(up)menuIndex=(menuIndex+buttons.length-1)%buttons.length;if(down)menuIndex=(menuIndex+1)%buttons.length;menuIndex%=buttons.length;if(up||down)buttons[menuIndex].focus();if(p.buttons[0]?.pressed&&!padPrev[0])buttons[menuIndex].click();if(d.menu&&guide.open)guide.close();}
+function updateCompass(p:Actor){
+ const track=$('compassTrack');if(!track||!game)return;
+ track.replaceChildren();
+ const addMark=(angle:number,label:string,className:string)=>{
+  let diff=Math.atan2(Math.sin(angle-yaw),Math.cos(angle-yaw));
+  if(Math.abs(diff)>Math.PI*.45)return;
+  const pct=50+(diff/(Math.PI*.45))*50;
+  const el=document.createElement('div');
+  el.className='compass-marker '+className;
+  el.textContent=label;
+  el.style.left=`${pct}%`;
+  track.append(el);
+ };
+ addMark(0,'N','compass-cardinal');
+ addMark(Math.PI/2,'E','compass-cardinal');
+ addMark(Math.PI,'S','compass-cardinal');
+ addMark(-Math.PI/2,'W','compass-cardinal');
+ for(const c of game.castles){
+  const d=dist(p,c);
+  if(d<120){
+   const a=Math.atan2(c.x-p.x,-(c.z-p.z));
+   addMark(a,c.friendly?'◆':'◇',`compass-castle ${c.friendly?'friendly':''}`);
+  }
+ }
+ for(const c of game.camps){
+  if(!c.rescued&&dist(p,c)<95){
+   const a=Math.atan2(c.x-p.x,-(c.z-p.z));
+   addMark(a,'⛺','compass-survivor');
+  }
+ }
+ if(dist(p,game.nest)<180){
+  const a=Math.atan2(game.nest.x-p.x,-(game.nest.z-p.z));
+  addMark(a,'💀','compass-nest');
+ }
+}
+
 function updateHud(p:Actor){
  const weapon=weaponStats(p.weapon);$('equippedWeapon').textContent=`${weapon.name} · ${p.cd>0?'Recovering '+p.cd.toFixed(1)+'s':(p.stamina??100)<weapon.stamina?'Low stamina':p.block?(weapon.shield?'Shield raised':'Parrying'):'Ready'} · R / LB`;
  for(const id of WEAPON_IDS){const b=$<HTMLButtonElement>('equip-'+id),w=WEAPONS[id],owned=game!.armory.includes(id);b.disabled=!owned||p.hp<=0||p.cd>0||p.weapon===id;b.classList.toggle('equipped',p.weapon===id);b.setAttribute('aria-pressed',String(p.weapon===id));b.querySelector('small')!.textContent=owned?(p.weapon===id?'EQUIPPED':'Equip'):'Find a blue weapon rack';}
  const nearestRack=game!.weaponDrops.filter(d=>!d.taken&&!game!.armory.includes(d.weapon)).sort((a,b)=>dist(a,p)-dist(b,p))[0];$('armoryHint').textContent=nearestRack?`Nearest new weapon: ${WEAPONS[nearestRack.weapon].name} · ${Math.round(dist(p,nearestRack))} m. Blue rings mark weapon racks. Recovering one unlocks it for everyone, including late joiners.`:'All five weapons recovered. Everyone can equip their own choice.';
-$('playerName').textContent=p.name;$('health').style.width=`${p.hp/p.maxHp*100}%`;$('healthText').textContent=p.hp>0?`${Math.ceil(p.hp)} / ${p.maxHp} HEALTH`:`${p.downed?'CORRUPTION':'Returning'} in ${Math.max(0,Math.ceil(p.deadUntil-game!.time))}s`;$('device').textContent=padName?'XBOX / GAMEPAD CONNECTED':'WASD · MOUSE · V VIEW · G GUIDE';
+$('playerName').textContent=p.name;updateCompass(p);
+ $('health').style.width=`${p.hp/p.maxHp*100}%`;$('healthText').textContent=p.hp>0?`${Math.ceil(p.hp)} / ${p.maxHp} HEALTH`:`${p.downed?'CORRUPTION':'Returning'} in ${Math.max(0,Math.ceil(p.deadUntil-game!.time))}s`;$('device').textContent=padName?'XBOX / GAMEPAD CONNECTED':'WASD · MOUSE · V VIEW · G GUIDE';
  $('castleList').replaceChildren(...game!.castles.filter(c=>c.region===REGIONS.reduce((a,b)=>Math.abs(p.z-(a.offset-80))<Math.abs(p.z-(b.offset-80))?a:b).id).map(c=>{const row=document.createElement('div');row.className=c.friendly?'owned':'enemy';const a=document.createElement('span');a.textContent=(c.friendly?'◆ ':'◇ ')+c.name.replace('The ','');const b=document.createElement('span');b.textContent=c.friendly?['KEEP','BASTION','CITADEL'][c.level]:c.capture>0?`${Math.round(c.capture/5*100)}%`:'LOST';row.append(a,b);return row;}));$('rescueCount').textContent=`Survivors rescued  ${game!.camps.filter(c=>c.rescued).length} / ${game!.camps.length}`;$('nestStatus').textContent=game!.castles.every(c=>c.friendly)&&game!.camps.every(c=>c.rescued)?`Plague nest exposed · ${game!.nest.hp} HP`:'Plague nest · protected';const r=game!.resources;$('resources').textContent=`WOOD ${r.wood}   IRON ${r.iron}\nHEAL ${r.medicine}   RECRUITS ${r.recruits}`;$('resources').style.whiteSpace='pre';
  $('regions').textContent=game!.regions.map(r=>`${r.held?'◆':'◇'} ${r.name} ${game!.castles.filter(c=>c.region===r.id&&c.friendly).length}/3${r.held?' · supply income':''}`).join(' | ');
  $('stamina').style.width=`${p.stamina??100}%`;$('staminaText').textContent=`${Math.ceil(p.stamina??100)} STAMINA · ${(p.armor??'light').toUpperCase()} ARMOR`;$('sweepBtn').textContent=(p.abilityCd??0)>0?`Sweep · ${Math.ceil(p.abilityCd!)}s`:'Q / B · Sweep';$<HTMLButtonElement>('sweepBtn').disabled=p.hp<=0||(p.stamina??100)<40||(p.abilityCd??0)>0;
