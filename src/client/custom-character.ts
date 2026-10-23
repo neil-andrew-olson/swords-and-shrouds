@@ -32,6 +32,10 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
   const next=actor.hp<=0?'death_forward':attackTime>0?(serial%2?'attack_1':'attack_2'):actor.block?'block_idle':moving?'run':'idle';
   if(next!==state){actions.get(state)?.fadeOut(.12);const action=actions.get(next)??actions.get(next.startsWith('attack')?'slash_1':'idle');action?.reset().fadeIn(.12).play();if(action&&next.startsWith('attack'))action.setDuration(weaponStats(actor.weapon).cooldown*.85);state=next;}
   const run=actions.get('run');if(run)run.timeScale=actor.armor==='heavy'?.8:1;mixer.update(dt);
+  if(!w.shield&&actor.hp>0&&next!=='block_idle'){
+   const la=model.getObjectByName('mixamorigLeftArm'),lfa=model.getObjectByName('mixamorigLeftForeArm');
+   if(la&&lfa){la.rotation.x+=.25;la.rotation.z-=.35;lfa.rotation.y-=.5;}
+  }
   // Imported armatures rotate their local axes. Remove root travel in character space, not guessed bone axes.
   pivot.updateWorldMatrix(true,true);if(hips){pivot.worldToLocal(hips.getWorldPosition(hipPoint));model.position.x-=hipPoint.x-hipOrigin.x;model.position.z-=hipPoint.z-hipOrigin.z;}
   ground(actor.hp<=0);pivot.updateMatrixWorld(true);for(const {bone,grip} of attachments){const sc=bone.getWorldScale(new THREE.Vector3());grip.scale.set(1/Math.max(.00001,sc.x),1/Math.max(.00001,sc.y),1/Math.max(.00001,sc.z));}

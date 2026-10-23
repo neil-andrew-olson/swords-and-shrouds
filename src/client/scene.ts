@@ -13,14 +13,14 @@ const mats=new Map<string,THREE.MeshStandardMaterial>();
 function mat(color:number,tex=false){const key=color+':'+tex;if(!mats.has(key))mats.set(key,new THREE.MeshStandardMaterial({color,roughness:1,flatShading:true,...(tex?{map:texture('#b8b8b8',color)}:{})}));return mats.get(key)!;}
 function box(parent:THREE.Object3D,x:number,y:number,z:number,w:number,h:number,d:number,color:number,tex=false){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(color,tex));mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
 export class WorldView{
- shake=0;
+ shake=0;previousNestHp=500;
  campRigs:{rig:ReturnType<typeof customCharacter>;actor:Actor;camp:THREE.Group}[]=[];
  weaponRacks=new Map<string,THREE.Group>();
  activeWeapon?:WeaponId;
  fpSerial=-1;fpAttack=0;fpDuration=.6;
  customProps=new Map<string,THREE.Group>();
  characterAssets=new CharacterAssets();animated=new Map<string,NonNullable<ReturnType<CharacterAssets['create']>>>();
- renderer:THREE.WebGLRenderer;scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(68,1,.08,80);actors=new Map<string,THREE.Group>();flags=new Map<string,THREE.Mesh>();gates=new Map<string,THREE.Mesh>();barriers=new Map<string,THREE.Group>();campMeshes=new Map<string,THREE.Group>();cacheMeshes=new Map<string,THREE.Group>();nest=new THREE.Group();weapon=new THREE.Group();shield=new THREE.Group();solid:THREE.Object3D[]=[];torchlights:THREE.PointLight[]=[];upgrades=new Map<string,THREE.Group[]>();previousHp=new Map<string,number>();effects:{mesh:THREE.Sprite;life:number}[]=[];projectiles=new Map<number,THREE.Mesh>();debris:{mesh:THREE.Mesh;life:number;velocity:THREE.Vector3}[]=[];artillery=new Map<string,THREE.Object3D>();
+ renderer:THREE.WebGLRenderer;scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(68,1,.08,80);actors=new Map<string,THREE.Group>();flags=new Map<string,THREE.Mesh>();gates=new Map<string,THREE.Mesh>();barriers=new Map<string,THREE.Group>();keeps=new Map<string,THREE.Group>();campMeshes=new Map<string,THREE.Group>();cacheMeshes=new Map<string,THREE.Group>();nest=new THREE.Group();weapon=new THREE.Group();shield=new THREE.Group();solid:THREE.Object3D[]=[];torchlights:THREE.PointLight[]=[];upgrades=new Map<string,THREE.Group[]>();previousHp=new Map<string,number>();effects:{mesh:THREE.Sprite;life:number}[]=[];projectiles=new Map<number,THREE.Mesh>();debris:{mesh:THREE.Mesh;life:number;velocity:THREE.Vector3}[]=[];artillery=new Map<string,THREE.Object3D>();
  constructor(canvas:HTMLCanvasElement){
   this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.45;this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x1a2629);this.scene.fog=new THREE.Fog(0x1a2629,18,65);this.scene.add(new THREE.HemisphereLight(0xb2ccdd,0x3d4834,2.5));const moon=new THREE.DirectionalLight(0xaec9e0,2);moon.position.set(-40,70,-30);moon.castShadow=true;moon.shadow.mapSize.set(2048,2048);moon.shadow.camera.left=-38;moon.shadow.camera.right=38;moon.shadow.camera.top=38;moon.shadow.camera.bottom=-38;moon.shadow.normalBias=.04;this.scene.add(moon);this.scene.add(moon.target);moon.name="sun";
   for(const region of REGIONS){const ground=box(this.scene,5,-.3,region.offset-80,175,.6,250,region.color,true);const m=(ground.material as THREE.MeshStandardMaterial).clone();m.map=m.map!.clone();m.map.repeat.set(38,55);ground.material=m;}
@@ -44,7 +44,7 @@ export class WorldView{
   }
  }
  async customEnvironment(){
-  for(const name of ['sword','shield','stakes','supplies','plague','trebuchet','iron','medicine','cauldron','gatehouse','gate','beacon','firepit','mill'])try{
+  for(const name of ['sword','shield','stakes','supplies','plague','trebuchet','iron','medicine','cauldron','gatehouse','gate','beacon','firepit','mill','fallen_keep','border_fortress','high_citadel'])try{
    const asset=await loadAsset('custom/'+name);const model=asset.scene.clone(true);model.updateMatrixWorld(true);const bounds=new THREE.Box3().setFromObject(model),size=bounds.getSize(new THREE.Vector3()),center=bounds.getCenter(new THREE.Vector3());
    const normalized=new THREE.Group();model.position.x-=center.x;model.position.z-=center.z;model.position.y-=bounds.min.y;normalized.add(model);normalized.userData.height=size.y;this.customProps.set(name,normalized);
    const fit=(height:number)=>{const o=normalized.clone(true);o.scale.setScalar(height/size.y);o.traverse(n=>{if(n instanceof THREE.Mesh)n.castShadow=n.receiveShadow=true;});return o;};
@@ -58,6 +58,18 @@ export class WorldView{
    if(name==='beacon')for(const c of CASTLES)for(const dx of [-3.6,3.6]){const o=fit(2.1);o.position.set(c.x+dx,0,c.z+11);this.scene.add(o);}
    if(name==='firepit')for(const c of CAMPS){const o=fit(.9);o.position.set(c.x+2,0,c.z+3);this.scene.add(o);}
   }catch(e){console.warn('Custom prop unavailable',name,e);}
+   for(const c of CASTLES){
+    const group=this.keeps.get(c.id);if(!group)continue;
+    const kName=c.id.includes('citadel')?'high_citadel':c.id.includes('border')?'border_fortress':'fallen_keep';
+    const source=this.customProps.get(kName);
+    if(source){
+     group.clear();
+     const h=c.id.includes('citadel')?8.2:c.id.includes('border')?7.2:6.4;
+     const o=source.clone(true);o.scale.setScalar(h/source.userData.height);
+     o.traverse(n=>{if(n instanceof THREE.Mesh)n.castShadow=n.receiveShadow=true;});
+     group.add(o);
+    }
+   }
  }
  async environmentAssets(){
   for(const name of ['tower-square-top-roof-high','siege-catapult','rocks-large']){try{const asset=await loadAsset(name);const bounds=new THREE.Box3().setFromObject(asset.scene),size=bounds.getSize(new THREE.Vector3());const place=(x:number,z:number,height:number,y=0)=>{const o=asset.scene.clone(true);const scale=height/size.y;o.scale.multiplyScalar(scale);o.position.set(x,y-bounds.min.y*scale,z);o.traverse(n=>{if(n instanceof THREE.Mesh)n.castShadow=n.receiveShadow=true;});this.scene.add(o);return o;};
@@ -84,7 +96,7 @@ export class WorldView{
   const stages:THREE.Group[]=[];for(let tier=0;tier<2;tier++){const detail=new THREE.Group();detail.position.set(c.x,0,c.z);detail.visible=false;this.scene.add(detail);stages.push(detail);for(const side of [-1,1]){box(detail,side*7,1.5,-5+tier*5,2,3,2,tier?0x466e75:palette.wood,true);box(detail,side*7,3.2,-5+tier*5,2.5,.4,2.5,palette.gold);box(detail,side*9,4.1,0, .15,1.8,4,tier?palette.gold:0x468f87);}const crest=this.label(tier?'CITADEL':'BASTION');crest.position.set(0,6+tier*1.4,-1);detail.add(crest);}this.upgrades.set(c.id,stages);
   // Banner is the functional keep/capture point; rear architecture stays behind it.
   box(this.scene,c.x,.2,c.z,3,.4,3,0x858a7b,true);box(this.scene,c.x,2.6,c.z,.16,5.2,.16,palette.wood);const flag=box(this.scene,c.x+.8,4.3,c.z,1.7,1.4,.07,0x9a4d47);this.flags.set(c.id,flag);
-  box(this.scene,c.x-5,2.2,c.z-6,4,4.4,4,palette.dark,true);box(this.scene,c.x-5,4.7,c.z-6,4.6,.6,4.6,palette.stone);
+  const keep=new THREE.Group();keep.position.set(c.x-5,0,c.z-6);box(keep,0,2.2,0,4,4.4,4,palette.dark,true);box(keep,0,4.7,0,4.6,.6,4.6,palette.stone);this.scene.add(keep);this.keeps.set(c.id,keep);
   this.fire(c.x-3.6,c.z+11);this.fire(c.x+3.6,c.z+11);
   const gateParent=new THREE.Group();gateParent.position.set(c.x,2,c.z+10);box(gateParent,0,0,0,5.5,4,.35,palette.wood,true);this.scene.add(gateParent);this.gates.set(c.id,gateParent as unknown as THREE.Mesh);gateParent.visible=false;
   const barrier=new THREE.Group();barrier.position.set(c.x,0,c.z+13);for(let i=-2;i<=2;i++){const b=box(barrier,i,.7,0,.25,1.7,.3,palette.wood);b.rotation.x=-.35;}box(barrier,0,.8,0,5,.2,.2,palette.wood);this.scene.add(barrier);this.barriers.set(c.id,barrier);barrier.visible=false;
@@ -113,7 +125,7 @@ export class WorldView{
       spark.position.set(a.x+(Math.random()-.5)*.4,1.4+(Math.random()-.5)*.4,a.z+(Math.random()-.5)*.4);
       this.scene.add(spark);
       this.debris.push({mesh:spark,life:.35,velocity:new THREE.Vector3((Math.random()-.5)*4,2+Math.random()*3,(Math.random()-.5)*4)});
-    }mesh.userData.flashUntil=time+.08;mesh.userData.recoilUntil=time+.16;if(a.id===me?.id)this.shake=Math.min(.35,this.shake+.2);}if(rig)rig.model.position.z=Math.max(0,(mesh.userData.recoilUntil??0)-time)*1.1;const flashing=(mesh.userData.flashUntil??0)>time;if(rig)rig.model.traverse(o=>{if(o instanceof THREE.Mesh)for(const material of Array.isArray(o.material)?o.material:[o.material]){const m=material as THREE.MeshStandardMaterial;if(m.emissive)m.emissive.setHex(flashing?0xffffff:0x000000);}});mesh.getObjectByName('marker')!.visible=a.hp>0||!!a.downed;this.previousHp.set(a.id,a.hp);const bar=mesh.getObjectByName('hp')!;bar.scale.x=Math.max(.001,a.hp/a.maxHp);bar.visible=a.hp<a.maxHp&&a.hp>0;mesh.scale.setScalar(a.kind==='corrupted'?(a.maxHp>=220?1.35:1.15):1);
+    }mesh.userData.flashUntil=time+.08;mesh.userData.recoilUntil=time+.16;if(a.id===me?.id)this.shake=Math.min(.35,this.shake+.2);}if(rig)rig.model.position.z=Math.max(0,(mesh.userData.recoilUntil??0)-time)*1.1;const flashing=(mesh.userData.flashUntil??0)>time;if(rig)rig.model.traverse(o=>{if(o instanceof THREE.Mesh)for(const material of Array.isArray(o.material)?o.material:[o.material]){const m=material as THREE.MeshStandardMaterial;if(m.emissive)m.emissive.setHex(flashing?0xffffff:0x000000);}});mesh.getObjectByName('marker')!.visible=a.hp>0||!!a.downed;this.previousHp.set(a.id,a.hp);const bar=mesh.getObjectByName('hp')!;bar.scale.x=Math.max(.001,a.hp/a.maxHp);bar.visible=a.hp<a.maxHp&&a.hp>0;mesh.scale.setScalar(a.kind==='corrupted'?(a.maxHp>=200?1.4:1.15):1);
   }
   for(const effect of this.effects){effect.life-=dt;effect.mesh.position.y+=dt*1.5;effect.mesh.material.opacity=Math.max(0,effect.life/.8);if(effect.life<=0){this.scene.remove(effect.mesh);effect.mesh.material.map?.dispose();effect.mesh.material.dispose();}}this.effects=this.effects.filter(e=>e.life>0);
   for(const item of this.debris){item.life-=dt;item.velocity.y-=9*dt;item.mesh.position.addScaledVector(item.velocity,dt);item.mesh.rotation.x+=dt*3;if(item.mesh.position.y<.12){item.mesh.position.y=.12;item.velocity.set(0,0,0);}if(item.life<=0){this.scene.remove(item.mesh);item.mesh.geometry.dispose();for(const m of Array.isArray(item.mesh.material)?item.mesh.material:[item.mesh.material])m.dispose();}}this.debris=this.debris.filter(d=>d.life>0);while(this.debris.length>48){const d=this.debris.shift()!;this.scene.remove(d.mesh);d.mesh.geometry.dispose();for(const m of Array.isArray(d.mesh.material)?d.mesh.material:[d.mesh.material])m.dispose();}
@@ -122,7 +134,19 @@ export class WorldView{
   for(const c of g.camps){const mesh=this.campMeshes.get(c.id)!;mesh.visible=!c.rescued&&(!me||dist(c,me)<45);}
   for(const drop of g.weaponDrops){let rack=this.weaponRacks.get(drop.id);if(!rack){rack=new THREE.Group();rack.position.set(drop.x,0,drop.z);for(const x of [-.6,.6])box(rack,x,.7,0,.12,1.4,.12,palette.wood);box(rack,0,1,0,1.5,.1,.12,palette.wood);const sign=this.label(WEAPONS[drop.weapon].name.toUpperCase(),'#b8e1f0');sign.position.set(0,2.4,0);sign.name='sign';rack.add(sign);const ring=new THREE.Mesh(new THREE.RingGeometry(.8,.9,24),new THREE.MeshBasicMaterial({color:0x8ed2e5,side:THREE.DoubleSide,transparent:true,opacity:.7}));ring.rotation.x=-Math.PI/2;ring.position.y=.05;rack.add(ring);this.weaponRacks.set(drop.id,rack);this.scene.add(rack);}const source=this.characterAssets.custom.get(drop.weapon);if(source&&!rack.userData.loaded){const item=equipmentModel(source.scene,WEAPONS[drop.weapon].length,false,drop.weapon);item.position.y=.65;rack.add(item);rack.userData.loaded=true;}rack.visible=!drop.taken&&(!me||dist(drop,me)<35);}
   for(const c of g.caches){let mesh=this.cacheMeshes.get(c.id);if(!mesh){mesh=new THREE.Group();mesh.position.set(c.x,0,c.z);box(mesh,0,.4,0,.8,.8,.7,0xb59151,true);box(mesh,0,.42,0,.85,.1,.75,0xd7b16e);this.cacheMeshes.set(c.id,mesh);this.scene.add(mesh);}if(this.customProps.has('supplies')&&!mesh.userData.custom){mesh.clear();const source=this.customProps.get('supplies')!;const o=source.clone(true);o.scale.setScalar(1/source.userData.height);mesh.add(o);mesh.userData.custom=true;}for(const [name,x] of [['iron',-.8],['medicine',.8]] as const){const source=this.customProps.get(name);if(source&&!mesh.getObjectByName('resource-'+name)){const o=source.clone(true);const b=new THREE.Box3().setFromObject(o),size=b.getSize(new THREE.Vector3());o.scale.setScalar(.45/Math.max(size.x,size.y,size.z));o.position.x=x;o.name='resource-'+name;mesh.add(o);}}mesh.visible=!c.taken&&(!me||dist(c,me)<46);}
-  this.nest.visible=g.nest.hp>0;this.nest.children[8].rotation.y=time*.5;
+  this.nest.visible=g.nest.hp>0;
+   if(this.nest.children[8])this.nest.children[8].rotation.y=time*.5;
+   if(g.nest.hp<this.previousNestHp){
+    const loss=this.previousNestHp-g.nest.hp;
+    this.previousNestHp=g.nest.hp;
+    const damage=this.label(String(Math.ceil(loss)),'#ff4d88');
+    damage.scale.set(2.2,.85,1);damage.position.set(NEST.x,4.2,NEST.z);
+    this.scene.add(damage);this.effects.push({mesh:damage,life:1.2});
+    if(me&&dist(me,NEST)<35)this.shake=Math.min(.8,this.shake+.35);
+    const ring=new THREE.Mesh(new THREE.RingGeometry(1,1.5,32),new THREE.MeshBasicMaterial({color:0xd15b92,side:THREE.DoubleSide,transparent:true,opacity:.85}));
+    ring.rotation.x=-Math.PI/2;ring.position.set(NEST.x,.3,NEST.z);
+    this.scene.add(ring);this.debris.push({mesh:ring,life:.6,velocity:new THREE.Vector3(0,.4,0)});
+   }
   if(me){const sun=this.scene.getObjectByName('sun') as THREE.DirectionalLight;sun.position.set(me.x-25,60,me.z-20);sun.target.position.set(me.x,0,me.z);const model=this.actors.get(me.id);const pos=model?.position??new THREE.Vector3(me.x,0,me.z);const target=new THREE.Vector3(pos.x,1.55,pos.z);const forward=new THREE.Vector3(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch));
    if(first){this.camera.position.copy(target);this.camera.rotation.set(pitch,-yaw,0,'YXZ');}
    else{const desired=target.clone().addScaledVector(forward,-6);desired.y+=2;const delta=desired.clone().sub(target);const ray=new THREE.Raycaster(target,delta.clone().normalize(),0,delta.length());const hits=ray.intersectObjects(this.solid,false);if(hits.length)desired.copy(target).addScaledVector(delta.normalize(),Math.max(.45,hits[0].distance-.3));this.camera.position.copy(desired);this.camera.lookAt(target.clone().addScaledVector(forward,4));}

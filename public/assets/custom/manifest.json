@@ -216,5 +216,23 @@
     "source": "structures/structure_windmill",
     "bytes": 29272,
     "gzip": 3557
+  },
+  {
+    "name": "fallen_keep",
+    "source": "structures/castle_fallen_keep",
+    "bytes": 19344,
+    "gzip": 2065
+  },
+  {
+    "name": "border_fortress",
+    "source": "structures/castle_border_fortress",
+    "bytes": 41380,
+    "gzip": 4941
+  },
+  {
+    "name": "high_citadel",
+    "source": "structures/castle_high_citadel",
+    "bytes": 54316,
+    "gzip": 5264
   }
 ]

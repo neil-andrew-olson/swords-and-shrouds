@@ -14,7 +14,7 @@ export function createGame():Game{
  const g:Game={time:0,armory:['sword'],weaponDrops:[{id:'starter-hammer',weapon:'hammer',x:-3,z:30,taken:false},...CASTLES.map((c,i)=>({id:'rack-'+c.id,weapon:WEAPON_IDS[1+i%4],x:c.x-5,z:c.z+4,taken:false}))],regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0},events:[],nextId:0};
  g.castles.forEach((c,i)=>{for(let n=0;n<4+(i%3)*2+Math.floor(i/3);n++)spawn(g,n===5?'corrupted':'zombie',c.x-5+(n%3)*4,c.z-5+Math.floor(n/3)*4,{castle:c.id});});
  g.camps.forEach(c=>{for(let n=0;n<3;n++)spawn(g,'zombie',c.x+n*2-2,c.z-4);});
- for(let n=0;n<5;n++)spawn(g,n===4?'corrupted':'zombie',NEST.x-6+n*3,NEST.z+5);
+ for(let n=0;n<5;n++)spawn(g,n===4?'corrupted':'zombie',NEST.x-6+n*3,NEST.z+5,n===4?{name:'Plague Champion',hp:200,maxHp:200,weapon:'zweihander'}:{});
  [...CAMPS,...CASTLES,{x:3,z:24},{x:15,z:-25},{x:28,z:-53},{x:16,z:-91},{x:-11,z:-119},{x:-10,z:-164}].forEach((p,i)=>g.caches.push({id:`cache${i}`,x:p.x+4,z:p.z+4,taken:false}));
  spawn(g,'soldier',-2,25,{mode:'follow'});spawn(g,'soldier',2,25,{mode:'follow'});
  event(g,'Reclaim the Fallen Keep. Rescue the survivors. End the plague.');return g;
