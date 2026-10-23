@@ -20,6 +20,18 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
   const asset=equipment.get(name),bone=model.getObjectByName(boneName);if(!asset||!bone)continue;
   const grip=equipmentModel(asset.scene,height,name==='shield',name);grip.name='equipment-'+name;grip.rotation.set(0,0,name==='shield'?Math.PI/2:-Math.PI/2);bone.add(grip);attachments.push({bone,grip});
  }
+ const head=model.getObjectByName('mixamorigHead');
+ if(head&&(a.kind==='corrupted'||a.kind==='zombie')){
+  const eyeColor=a.kind==='corrupted'?0xff253a:0x9ae640;
+  const eyeMat=new THREE.MeshBasicMaterial({color:eyeColor});
+  const eyeGeo=new THREE.SphereGeometry(.025,6,6);
+  for(const dx of [-.05,.05]){
+   const eye=new THREE.Mesh(eyeGeo,eyeMat);
+   eye.position.set(dx,.07,.11);
+   eye.name='undead-eye';
+   head.add(eye);
+  }
+ }
  const mixer=new THREE.AnimationMixer(model),actions=new Map<string,THREE.AnimationAction>();
  for(const clip of source.animations){
   const c=clip.clone();

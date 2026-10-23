@@ -12,6 +12,28 @@ function texture(base:string,seed:number){const canvas=document.createElement('c
 const mats=new Map<string,THREE.MeshStandardMaterial>();
 function mat(color:number,tex=false){const key=color+':'+tex;if(!mats.has(key))mats.set(key,new THREE.MeshStandardMaterial({color,roughness:1,flatShading:true,...(tex?{map:texture('#b8b8b8',color)}:{})}));return mats.get(key)!;}
 function box(parent:THREE.Object3D,x:number,y:number,z:number,w:number,h:number,d:number,color:number,tex=false){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(color,tex));mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
+function createSkyAndMoon(scene:THREE.Scene){
+ const c=document.createElement('canvas');c.width=2;c.height=256;
+ const ctx=c.getContext('2d')!;
+ const grad=ctx.createLinearGradient(0,0,0,256);
+ grad.addColorStop(0,'#060a12');grad.addColorStop(.35,'#0d1722');grad.addColorStop(.75,'#152329');grad.addColorStop(1,'#1c2a2e');
+ ctx.fillStyle=grad;ctx.fillRect(0,0,2,256);
+ const skyTex=new THREE.CanvasTexture(c);skyTex.wrapS=skyTex.wrapT=THREE.ClampToEdgeWrapping;
+ const dome=new THREE.Mesh(new THREE.SphereGeometry(260,24,14,0,Math.PI*2,0,Math.PI*.5),new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide,depthWrite:false}));
+ dome.position.y=-15;scene.add(dome);
+ const starCount=140,starPos=new Float32Array(starCount*3);let s=0;
+ for(let i=0;i<starCount;i++){const th=Math.random()*Math.PI*2,phi=Math.random()*.52+.12,r=252;starPos[s++]=r*Math.sin(phi)*Math.cos(th);starPos[s++]=r*Math.cos(phi)-15;starPos[s++]=r*Math.sin(phi)*Math.sin(th);}
+ const starGeo=new THREE.BufferGeometry();starGeo.setAttribute('position',new THREE.BufferAttribute(starPos,3));
+ scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xdfe8f7,size:1.1,transparent:true,opacity:.65,sizeAttenuation:false})));
+ const moonDir=new THREE.Vector3(-40,70,-30).normalize(),moonGroup=new THREE.Group();
+ moonGroup.position.copy(moonDir.multiplyScalar(225));moonGroup.lookAt(0,0,0);
+ const halo=new THREE.Mesh(new THREE.CircleGeometry(26,32),new THREE.MeshBasicMaterial({color:0x345672,transparent:true,opacity:.35,blending:THREE.AdditiveBlending,depthWrite:false}));
+ moonGroup.add(halo);
+ const outerHalo=new THREE.Mesh(new THREE.CircleGeometry(52,32),new THREE.MeshBasicMaterial({color:0x162c3e,transparent:true,opacity:.2,blending:THREE.AdditiveBlending,depthWrite:false}));
+ moonGroup.add(outerHalo);
+ const disc=new THREE.Mesh(new THREE.CircleGeometry(8.5,32),new THREE.MeshBasicMaterial({color:0xf2f6ff,depthWrite:false}));
+ disc.position.z=.08;moonGroup.add(disc);scene.add(moonGroup);
+}
 export class WorldView{
  shake=0;previousNestHp=500;landscapeUpdate:((t:number)=>void)|null=null;
  campRigs:{rig:ReturnType<typeof customCharacter>;actor:Actor;camp:THREE.Group}[]=[];
@@ -20,9 +42,9 @@ export class WorldView{
  fpSerial=-1;fpAttack=0;fpDuration=.6;
  customProps=new Map<string,THREE.Group>();
  characterAssets=new CharacterAssets();animated=new Map<string,NonNullable<ReturnType<CharacterAssets['create']>>>();
- renderer:THREE.WebGLRenderer;scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(68,1,.08,80);actors=new Map<string,THREE.Group>();flags=new Map<string,THREE.Mesh>();gates=new Map<string,THREE.Mesh>();barriers=new Map<string,THREE.Group>();keeps=new Map<string,THREE.Group>();campMeshes=new Map<string,THREE.Group>();cacheMeshes=new Map<string,THREE.Group>();nest=new THREE.Group();weapon=new THREE.Group();shield=new THREE.Group();solid:THREE.Object3D[]=[];torchlights:THREE.PointLight[]=[];upgrades=new Map<string,THREE.Group[]>();previousHp=new Map<string,number>();effects:{mesh:THREE.Sprite;life:number}[]=[];projectiles=new Map<number,THREE.Mesh>();debris:{mesh:THREE.Mesh;life:number;velocity:THREE.Vector3}[]=[];artillery=new Map<string,THREE.Object3D>();
+ renderer:THREE.WebGLRenderer;scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(68,1,.08,80);actors=new Map<string,THREE.Group>();flags=new Map<string,THREE.Mesh>();gates=new Map<string,THREE.Mesh>();barriers=new Map<string,THREE.Group>();keeps=new Map<string,THREE.Group>();campMeshes=new Map<string,THREE.Group>();cacheMeshes=new Map<string,THREE.Group>();nest=new THREE.Group();weapon=new THREE.Group();shield=new THREE.Group();solid:THREE.Object3D[]=[];torchlights:THREE.PointLight[]=[];flames:{group:THREE.Group;seed:number}[]=[];flagMeshes:{mesh:THREE.Mesh;seed:number}[]=[];upgrades=new Map<string,THREE.Group[]>();previousHp=new Map<string,number>();effects:{mesh:THREE.Sprite;life:number}[]=[];projectiles=new Map<number,THREE.Mesh>();debris:{mesh:THREE.Mesh;life:number;velocity:THREE.Vector3}[]=[];artillery=new Map<string,THREE.Object3D>();
  constructor(canvas:HTMLCanvasElement){
-  this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.65;this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x1a2629);this.scene.fog=new THREE.FogExp2(0x1c2a2e,0.015);this.scene.add(new THREE.HemisphereLight(0xd0e0f0,0x2a3820,3.2));const moon=new THREE.DirectionalLight(0xcadff5,3.5);moon.position.set(-40,70,-30);moon.castShadow=true;moon.shadow.mapSize.set(2048,2048);moon.shadow.camera.left=-52;moon.shadow.camera.right=52;moon.shadow.camera.top=52;moon.shadow.camera.bottom=-52;moon.shadow.normalBias=.04;this.scene.add(moon);this.scene.add(moon.target);moon.name="sun";
+  this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.65;this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x1a2629);this.scene.fog=new THREE.FogExp2(0x1c2a2e,0.015);this.scene.add(new THREE.HemisphereLight(0xd0e0f0,0x2a3820,3.2));const moon=new THREE.DirectionalLight(0xcadff5,3.5);moon.position.set(-40,70,-30);moon.castShadow=true;moon.shadow.mapSize.set(2048,2048);moon.shadow.camera.left=-52;moon.shadow.camera.right=52;moon.shadow.camera.top=52;moon.shadow.camera.bottom=-52;moon.shadow.normalBias=.04;this.scene.add(moon);this.scene.add(moon.target);moon.name="sun";createSkyAndMoon(this.scene);
   for(const region of REGIONS){const ground=box(this.scene,5,-.3,region.offset-80,175,.6,250,region.color,true);const m=(ground.material as THREE.MeshStandardMaterial).clone();m.map=m.map!.clone();m.map.repeat.set(38,55);ground.material=m;}
   const route=[START,...REGIONS.flatMap(r=>[{x:0,z:r.offset+12},{x:0,z:r.offset+24},{x:42,z:r.offset-45},{x:42,z:r.offset-55},{x:42,z:r.offset-43},{x:-24,z:r.offset-113},{x:-24,z:r.offset-123},{x:-24,z:r.offset-112},{x:0,z:r.offset-200}]),NEST];
   for(let i=1;i<route.length;i++){const a=route[i-1],b=route[i];const road=box(this.scene,(a.x+b.x)/2,.005,(a.z+b.z)/2,4,.04,dist(a,b),0x706c56,true);road.rotation.y=Math.atan2(b.x-a.x,b.z-a.z);}
@@ -91,7 +113,7 @@ export class WorldView{
   const ember=new THREE.Mesh(new THREE.ConeGeometry(.45,1.35,6),new THREE.MeshBasicMaterial({color:0xe63914,transparent:true,opacity:.5}));ember.position.y=.65;flameGroup.add(ember);
   this.scene.add(flameGroup);
   const light=new THREE.PointLight(0xff9d42,isCamp?8:12,isCamp?10:14,1.8);light.position.set(x,isCamp?1.2:2.2,z);
-  this.scene.add(light);this.torchlights.push(light);
+  this.scene.add(light);this.torchlights.push(light);this.flames.push({group:flameGroup,seed:Math.random()*20});
  }
  castle(c:{id:string;x:number;z:number}){
   box(this.scene,c.x,.035,c.z,20,.08,20,0x384145,true);
@@ -99,7 +121,7 @@ export class WorldView{
   for(const dx of [-10,10])for(const dz of [-10,10]){this.solid.push(box(this.scene,c.x+dx,3,c.z+dz,3.5,6,3.5,palette.dark,true));for(const sx of [-1,1])for(const sz of [-1,1])box(this.scene,c.x+dx+sx*1.2,6.5,c.z+dz+sz*1.2,.8,1,.8,palette.stone);}
   const stages:THREE.Group[]=[];for(let tier=0;tier<2;tier++){const detail=new THREE.Group();detail.position.set(c.x,0,c.z);detail.visible=false;this.scene.add(detail);stages.push(detail);for(const side of [-1,1]){box(detail,side*7,1.5,-5+tier*5,2,3,2,tier?0x466e75:palette.wood,true);box(detail,side*7,3.2,-5+tier*5,2.5,.4,2.5,palette.gold);box(detail,side*9,4.1,0, .15,1.8,4,tier?palette.gold:0x468f87);}const crest=this.label(tier?'CITADEL':'BASTION');crest.position.set(0,6+tier*1.4,-1);detail.add(crest);}this.upgrades.set(c.id,stages);
   // Banner is the functional keep/capture point; rear architecture stays behind it.
-  box(this.scene,c.x,.2,c.z,3,.4,3,0x858a7b,true);box(this.scene,c.x,2.6,c.z,.16,5.2,.16,palette.wood);const flag=box(this.scene,c.x+.8,4.3,c.z,1.7,1.4,.07,0x9a4d47);this.flags.set(c.id,flag);
+  box(this.scene,c.x,.2,c.z,3,.4,3,0x858a7b,true);box(this.scene,c.x,2.6,c.z,.16,5.2,.16,palette.wood);const flagGeo=new THREE.PlaneGeometry(1.8,1.4,8,4);flagGeo.translate(.9,0,0);const flag=new THREE.Mesh(flagGeo,new THREE.MeshStandardMaterial({color:0x9a4d47,side:THREE.DoubleSide,roughness:.8}));flag.position.set(c.x,4.3,c.z);flag.castShadow=true;this.scene.add(flag);this.flags.set(c.id,flag);this.flagMeshes.push({mesh:flag,seed:this.flagMeshes.length*1.7});
   const keep=new THREE.Group();keep.position.set(c.x-5,0,c.z-6);box(keep,0,2.2,0,4,4.4,4,palette.dark,true);box(keep,0,4.7,0,4.6,.6,4.6,palette.stone);this.scene.add(keep);this.keeps.set(c.id,keep);
   this.fire(c.x-3.6,c.z+11);this.fire(c.x+3.6,c.z+11);
   const gateParent=new THREE.Group();gateParent.position.set(c.x,2,c.z+10);box(gateParent,0,0,0,5.5,4,.35,palette.wood,true);this.scene.add(gateParent);this.gates.set(c.id,gateParent as unknown as THREE.Mesh);gateParent.visible=false;
@@ -112,7 +134,9 @@ export class WorldView{
  }
  draw(g:Game|undefined,me:Actor|undefined,yaw:number,pitch:number,first:boolean,dt:number,time:number){
   for(const {rig,actor,camp} of this.campRigs)if(camp.visible)rig.update(actor,false,dt);
-  for(let i=0;i<this.torchlights.length;i++){const l=this.torchlights[i];l.intensity=8+Math.sin(time*4+i)*1.5;l.visible=!me||dist({x:l.position.x,z:l.position.z},me)<35;}
+  for(let i=0;i<this.torchlights.length;i++){const l=this.torchlights[i];l.intensity=9.5+Math.sin(time*10+i*2.7)*2.2+Math.sin(time*24+i*4.9)*1.1;l.visible=!me||dist({x:l.position.x,z:l.position.z},me)<35;}
+   for(let i=0;i<this.flames.length;i++){const f=this.flames[i],wobble=Math.sin(time*11+f.seed)*.14+Math.sin(time*27+f.seed*2)*.07;f.group.scale.set(1+wobble*.5,1+wobble,1+wobble*.5);f.group.rotation.y=time*2.2+f.seed;}
+   for(const f of this.flagMeshes){const pos=f.mesh.geometry.attributes.position;for(let i=0;i<pos.count;i++){const px=pos.getX(i);pos.setZ(i,Math.sin(time*5.5+px*3+f.seed)*(px/1.8)*.22);}pos.needsUpdate=true;}
   if(!g){const t=time*.025;this.camera.position.set(31+Math.sin(t)*4,15,32);this.camera.lookAt(0,2,0);if(this.shake>0){
    this.camera.position.x+=(Math.random()-.5)*this.shake;
    this.camera.position.y+=(Math.random()-.5)*this.shake;
@@ -129,12 +153,30 @@ export class WorldView{
       spark.position.set(a.x+(Math.random()-.5)*.4,1.4+(Math.random()-.5)*.4,a.z+(Math.random()-.5)*.4);
       this.scene.add(spark);
       this.debris.push({mesh:spark,life:.35,velocity:new THREE.Vector3((Math.random()-.5)*4,2+Math.random()*3,(Math.random()-.5)*4)});
+    }if(previous>0&&a.hp<=0){
+     const evil=a.kind==='zombie'||a.kind==='corrupted';
+     const isBoss=a.name?.includes('Champion')||a.name?.includes('Fallen')||a.id==='boss-plague'||a.maxHp>=200;
+     const count=isBoss?24:(evil?14:8);
+     for(let k=0;k<count;k++){
+      const col=evil?(isBoss?(k%2?0x9e1239:0x4a0a1f):(k%2?0x2e3d30:0x7a2240)):0xf0c850;
+      const p=new THREE.Mesh(new THREE.BoxGeometry(.06,.06,.06),new THREE.MeshBasicMaterial({color:col}));
+      p.position.set(a.x+(Math.random()-.5)*.5,1.2+(Math.random()-.5)*.6,a.z+(Math.random()-.5)*.5);
+      this.scene.add(p);
+      const spd=isBoss?4:2.4;
+      this.debris.push({mesh:p,life:isBoss?.9:.6,velocity:new THREE.Vector3((Math.random()-.5)*spd,2+Math.random()*spd,(Math.random()-.5)*spd)});
+     }
+     if(isBoss){
+      const ring=new THREE.Mesh(new THREE.RingGeometry(.8,1.6,32),new THREE.MeshBasicMaterial({color:0xdf2055,side:THREE.DoubleSide}));
+      ring.rotation.x=-Math.PI/2;ring.position.set(a.x,.25,a.z);this.scene.add(ring);
+      this.debris.push({mesh:ring,life:.75,velocity:new THREE.Vector3(0,.5,0)});
+      if(me&&dist(me,a)<40)this.shake=Math.min(1,this.shake+.45);
+     }
     }mesh.userData.flashUntil=time+.08;mesh.userData.recoilUntil=time+.16;if(a.id===me?.id)this.shake=Math.min(.35,this.shake+.2);}if(rig)rig.model.position.z=Math.max(0,(mesh.userData.recoilUntil??0)-time)*1.1;const flashing=(mesh.userData.flashUntil??0)>time;if(rig)rig.model.traverse(o=>{if(o instanceof THREE.Mesh)for(const material of Array.isArray(o.material)?o.material:[o.material]){const m=material as THREE.MeshStandardMaterial;if(m.emissive)m.emissive.setHex(flashing?0xffffff:0x000000);}});mesh.getObjectByName('marker')!.visible=a.hp>0||!!a.downed;this.previousHp.set(a.id,a.hp);const bar=mesh.getObjectByName('hp')!;bar.scale.x=Math.max(.001,a.hp/a.maxHp);bar.visible=a.hp<a.maxHp&&a.hp>0;mesh.scale.setScalar(a.kind==='corrupted'?(a.maxHp>=200?1.4:1.15):1);
   }
   for(const effect of this.effects){effect.life-=dt;effect.mesh.position.y+=dt*1.5;effect.mesh.material.opacity=Math.max(0,effect.life/.8);if(effect.life<=0){this.scene.remove(effect.mesh);effect.mesh.material.map?.dispose();effect.mesh.material.dispose();}}this.effects=this.effects.filter(e=>e.life>0);
   for(const item of this.debris){item.life-=dt;item.velocity.y-=9*dt;item.mesh.position.addScaledVector(item.velocity,dt);item.mesh.rotation.x+=dt*3;if(item.mesh.position.y<.12){item.mesh.position.y=.12;item.velocity.set(0,0,0);}if(item.life<=0){this.scene.remove(item.mesh);item.mesh.geometry.dispose();for(const m of Array.isArray(item.mesh.material)?item.mesh.material:[item.mesh.material])m.dispose();}}this.debris=this.debris.filter(d=>d.life>0);while(this.debris.length>48){const d=this.debris.shift()!;this.scene.remove(d.mesh);d.mesh.geometry.dispose();for(const m of Array.isArray(d.mesh.material)?d.mesh.material:[d.mesh.material])m.dispose();}
   const shots=new Set(g.shots.map(s=>s.id));for(const [id,m] of this.projectiles)if(!shots.has(id)){this.scene.remove(m);m.geometry.dispose();this.projectiles.delete(id);}for(const shot of g.shots){let m=this.projectiles.get(shot.id);if(!m){m=new THREE.Mesh(new THREE.SphereGeometry(.23,8,6),mat(0xe6bb79));this.scene.add(m);this.projectiles.set(shot.id,m);}const t=Math.max(0,Math.min(1,1-(shot.lands-g.time)/.7));m.position.set(shot.x+(shot.tx-shot.x)*t,2+Math.sin(t*Math.PI)*6,shot.z+(shot.tz-shot.z)*t);const gun=this.artillery.get(shot.castle);if(gun)gun.rotation.y=Math.atan2(shot.tx-shot.x,shot.tz-shot.z);}
-  for(const c of g.castles){this.upgrades.get(c.id)!.forEach((group,i)=>group.visible=c.friendly&&c.level>i);this.flags.get(c.id)!.material=mat(c.friendly?0x77a992:0x9a4d47);const gate=this.gates.get(c.id)!;gate.visible=c.friendly&&c.gate>0;const nearFriendly=g.actors.some(a=>(a.kind==='player'||a.kind==='soldier')&&a.hp>0&&dist(a,{x:c.x,z:c.z+10})<4);gate.scale.y=nearFriendly?.15:1;gate.position.y=nearFriendly?3.9:2;this.barriers.get(c.id)!.visible=c.barrier>0;}
+  for(const c of g.castles){this.upgrades.get(c.id)!.forEach((group,i)=>group.visible=c.friendly&&c.level>i);(this.flags.get(c.id)!.material as THREE.MeshStandardMaterial).color.setHex(c.friendly?0x4ea88c:0x9a4d47);const gate=this.gates.get(c.id)!;gate.visible=c.friendly&&c.gate>0;const nearFriendly=g.actors.some(a=>(a.kind==='player'||a.kind==='soldier')&&a.hp>0&&dist(a,{x:c.x,z:c.z+10})<4);gate.scale.y=nearFriendly?.15:1;gate.position.y=nearFriendly?3.9:2;this.barriers.get(c.id)!.visible=c.barrier>0;}
   for(const c of g.camps){const mesh=this.campMeshes.get(c.id)!;mesh.visible=!c.rescued&&(!me||dist(c,me)<45);}
   for(const drop of g.weaponDrops){let rack=this.weaponRacks.get(drop.id);if(!rack){rack=new THREE.Group();rack.position.set(drop.x,0,drop.z);for(const x of [-.6,.6])box(rack,x,.7,0,.12,1.4,.12,palette.wood);box(rack,0,1,0,1.5,.1,.12,palette.wood);const sign=this.label(WEAPONS[drop.weapon].name.toUpperCase(),'#b8e1f0');sign.position.set(0,2.4,0);sign.name='sign';rack.add(sign);const ring=new THREE.Mesh(new THREE.RingGeometry(.8,.9,24),new THREE.MeshBasicMaterial({color:0x8ed2e5,side:THREE.DoubleSide,transparent:true,opacity:.7}));ring.rotation.x=-Math.PI/2;ring.position.y=.05;rack.add(ring);this.weaponRacks.set(drop.id,rack);this.scene.add(rack);}const source=this.characterAssets.custom.get(drop.weapon);if(source&&!rack.userData.loaded){const item=equipmentModel(source.scene,WEAPONS[drop.weapon].length,false,drop.weapon);item.position.y=.65;rack.add(item);rack.userData.loaded=true;}rack.visible=!drop.taken&&(!me||dist(drop,me)<35);}
   for(const c of g.caches){let mesh=this.cacheMeshes.get(c.id);if(!mesh){mesh=new THREE.Group();mesh.position.set(c.x,0,c.z);box(mesh,0,.4,0,.8,.8,.7,0xb59151,true);box(mesh,0,.42,0,.85,.1,.75,0xd7b16e);this.cacheMeshes.set(c.id,mesh);this.scene.add(mesh);}if(this.customProps.has('supplies')&&!mesh.userData.custom){mesh.clear();const source=this.customProps.get('supplies')!;const o=source.clone(true);o.scale.setScalar(1/source.userData.height);mesh.add(o);mesh.userData.custom=true;}for(const [name,x] of [['iron',-.8],['medicine',.8]] as const){const source=this.customProps.get(name);if(source&&!mesh.getObjectByName('resource-'+name)){const o=source.clone(true);const b=new THREE.Box3().setFromObject(o),size=b.getSize(new THREE.Vector3());o.scale.setScalar(.45/Math.max(size.x,size.y,size.z));o.position.x=x;o.name='resource-'+name;mesh.add(o);}}mesh.visible=!c.taken&&(!me||dist(c,me)<46);}
