@@ -273,5 +273,30 @@
     "name": "castle_high_citadel.glb.gz",
     "bytes": 111792,
     "gzip": 7386
+  },
+  {
+    "name": "templar.glb.gz",
+    "bytes": 2490444,
+    "gzip": 1294729
+  },
+  {
+    "name": "poleaxe.glb.gz",
+    "bytes": 9079760,
+    "gzip": 9035416
+  },
+  {
+    "name": "gatehouse.glb.gz",
+    "bytes": 3558112,
+    "gzip": 3526913
+  },
+  {
+    "name": "supplies.glb.gz",
+    "bytes": 14216536,
+    "gzip": 14046895
+  },
+  {
+    "name": "house.glb.gz",
+    "bytes": 288772,
+    "gzip": 172752
   }
 ]
