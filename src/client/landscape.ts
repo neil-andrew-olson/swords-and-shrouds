@@ -66,11 +66,31 @@ export function addLandscape(scene: THREE.Scene) {
   geom.setAttribute('color', new THREE.Float32BufferAttribute(grassCol, 3));
   geom.computeVertexNormals();
 
+  const windUniform = { value: 0 };
+  const addWind = (mat: THREE.Material, scale = 0.38, power = 1.3, minY = 0.0) => {
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uWindTime = windUniform;
+      shader.vertexShader = `uniform float uWindTime;
+` + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `
+        #include <begin_vertex>
+        float sway = pow(max(0.0, position.y - ${minY.toFixed(2)}), ${power.toFixed(2)}) * ${scale.toFixed(2)};
+        float windPhase = uWindTime * 2.6 + (transformed.x + position.x) * 0.35 + (transformed.z + position.z) * 0.35;
+        transformed.x += sin(windPhase) * sway + cos(windPhase * 0.6) * sway * 0.3;
+        transformed.z += cos(windPhase * 0.85) * sway * 0.65;
+        `
+      );
+    };
+  };
+
   const grassMat = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.88,
     side: THREE.DoubleSide,
   });
+  addWind(grassMat, 0.42, 1.3, 0.0);
 
   const grass = new THREE.InstancedMesh(geom, grassMat, 7000);
   const dummy = new THREE.Object3D();
@@ -118,6 +138,7 @@ export function addLandscape(scene: THREE.Scene) {
   // 3. Fast placeholder trees while 3D GLTF models stream in
   const bark = new THREE.MeshStandardMaterial({ color: 0x3d352e, roughness: 0.95 });
   const needle = new THREE.MeshStandardMaterial({ color: 0x273b32, roughness: 0.9 });
+  addWind(needle, 0.14, 1.2, 0.6);
   const placeholderTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.36, 1, 7), bark, treePositions.length);
   const placeholderCrowns = new THREE.InstancedMesh(new THREE.ConeGeometry(1.6, 3.8, 5), needle, treePositions.length * 2);
   let pti = 0;
@@ -162,8 +183,12 @@ export function addLandscape(scene: THREE.Scene) {
       const pinesCount = treePositions.filter((t) => t.isPine).length;
       const oaksCount = treePositions.length - pinesCount;
 
-      const pineInst = new THREE.InstancedMesh(pineMesh.geometry, pineMesh.material, pinesCount);
-      const oakInst = new THREE.InstancedMesh(oakMesh.geometry, oakMesh.material, oaksCount);
+      const pineMat = (pineMesh.material as THREE.Material).clone();
+      const oakMat = (oakMesh.material as THREE.Material).clone();
+      addWind(pineMat, 0.12, 1.2, 1.0);
+      addWind(oakMat, 0.12, 1.2, 1.0);
+      const pineInst = new THREE.InstancedMesh(pineMesh.geometry, pineMat, pinesCount);
+      const oakInst = new THREE.InstancedMesh(oakMesh.geometry, oakMat, oaksCount);
       let pi = 0;
       let oi = 0;
 
@@ -192,4 +217,10 @@ export function addLandscape(scene: THREE.Scene) {
     .catch((err) => {
       console.warn('3D trees load error, keeping placeholders', err);
     });
+
+  return {
+    update: (time: number) => {
+      windUniform.value = time;
+    }
+  };
 }

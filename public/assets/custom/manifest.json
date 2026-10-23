@@ -234,5 +234,44 @@
     "source": "structures/castle_high_citadel",
     "bytes": 54316,
     "gzip": 5264
+  },
+  {
+    "name": "cart",
+    "source": "structures/prop_cart",
+    "bytes": 198860,
+    "gzip": 30378
+  },
+  {
+    "name": "brazier",
+    "source": "structures/prop_brazier",
+    "bytes": 120372,
+    "gzip": 22129
+  },
+  {
+    "name": "barrels",
+    "source": "structures/prop_barrels",
+    "bytes": 700520,
+    "gzip": 100474
+  },
+  {
+    "name": "grave",
+    "source": "structures/prop_grave",
+    "bytes": 9140,
+    "gzip": 1704
+  },
+  {
+    "name": "castle_fallen_keep.glb.gz",
+    "bytes": 27304,
+    "gzip": 2843
+  },
+  {
+    "name": "castle_border_fortress.glb.gz",
+    "bytes": 56372,
+    "gzip": 4463
+  },
+  {
+    "name": "castle_high_citadel.glb.gz",
+    "bytes": 111792,
+    "gzip": 7386
   }
 ]
