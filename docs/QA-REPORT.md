@@ -2178,3 +2178,51 @@ HUD click→HUD **158 ms** / state **3,945 ms** / join **3,139 ms** (≤3.8 s); 
 screenshot, and hit-hold restored-frame animation as cycle-10 notes. Cycle-10 candidates:
 real-GPU/perceptual/mobile hardware, hardware controller rumble, near-forge audio ear check,
 campaign/siege depth, more enemy variety, balance. After deploy: final live pass + task-87 complete.
+
+### Final live deployment verification — cycle-9 (game `93811dda`, hosting `a16ea8fc`)
+
+Deployed after the Lead accepted the cycle-9 pass. Live verification runs:
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ ^
+    --out qa/live-batch12-deployed --expect-weapons 11 ^
+    --expect-assets custom/templar.glb.gz,custom/hero.glb.gz,custom/berserker.glb.gz,custom/ranger.glb.gz,custom/ally.glb.gz,custom/survivor.glb.gz,custom/fallen.glb.gz,custom/stone_well.glb.gz,custom/blacksmith_stall.glb.gz,custom/stone_altar.glb.gz,custom/forge_furnace.glb.gz,custom/zombie-bloated.glb.gz,custom/skeleton-armoured.glb.gz,custom/spear.glb.gz,custom/abbey_ruin.glb.gz
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --probes --views --out qa/live-feature-c9 --expect-weapons 11 --expect-assets custom/spear.glb.gz,custom/abbey_ruin.glb.gz
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --mobile --out qa/live-mobile-c9
+```
+
+- **Results: PASS 27/27 (deployed) + PASS 75/75 (feature/probes/views) + PASS 22/22 (live mobile).**
+  Live serves **`assets/index-CGiECS4R.js` (901,904 B)** — hosting/base-path build of authoritative
+  `index-2keD53-A.js` (901,729 B; +175 B); `/health` OK; **15/15 expected assets HTTP 200** including
+  **spear 45,176 B** and **abbey_ruin 416,580 B** (zombie-bloated 367,162, skeleton-armoured 292,792,
+  hero 802,229); **11 armory cards**; 0 page/console/errors, 0 bad/404/failed requests; WS
+  opens=1/closes=0. Only log: external Cloudflare-Insights beacon (connection refused in headless).
+- **Live payload:** **18,328,950 B = 17.48 MiB** across 91 assets (curl-verified) — +0.44 MB vs
+  cycle-8 live (spear GLB 45,176 B + abbey GLB 416,580 B, both within SPEC budgets).
+- **Live 11 weapons/spear:** `__ssWeaponReadiness()` `{count:11, ids:[…spear…], loaded:11,
+  allLoaded:true}`, 11 armory cards/equip buttons, `#equip-spear` present; `__ssWeaponState()` live
+  `{weapon:'spear', reach 5.6, damage 32, cooldown .7, stamina 20, shield true, style:'thrust',
+  cardCount 11, drops incl. rack-moor-citadel spear at (−29,−371)}`; `__ssEquipWeapon('spear',
+  {preview:true})` → ok + full stats; live third-person/attack preview stills captured
+  (`spear-thirdperson.png`/`spear-attack.png`; server-authoritative grip evidence remains the owner
+  shot `ingame-spear-thirdperson.png`).
+- **Live hit-hold/audio/abbey:** `__ssSetHitFeedbackHold(true)` + trigger holds `flashActive true`
+  (150 ms remaining after 1.2 s) with a clear still-frame diff (**11.30 / 28.4 % changed**); disable
+  releases to flashActive/staggerActive false. `__ssAudioState()` enabled/running, march bed 0.05;
+  clear `{clear ~0.085, rain 0}` → live downpour **{downpour, intensity 0.507, rain 0.026}**.
+  `content-abbey` live via `__ssQAPose` (40,−40,h3.2)→(62,−46,2.6) yaw 1.3045 pitch −0.0263:
+  `contentFocus {custom,40,−40}`, **1471 colours / mean 45.19**, grounded/clearanced in
+  `view-content-abbey.png`; plague nest/decals, altar/furnace content views and 7/7 atmosphere views
+  live; all weather/snow/fog/low-tier/region/crown checks green.
+- **Live mobile/touch (390×844 + 844×390):** `__ssDeviceProfile` touch/coarse/small, suggested=applied
+  **low**, maxDpr **1.25**; `#touch` HUD stick/lookpad/3 action buttons visible, keyboard hints hidden,
+  no panel overlap, safe insets/in-viewport, pinch/scroll prevented (scale 1), **3-pointer multi-touch**
+  move+look+attack (`__ssTouch`: pointers 3, `held.attack true`, player moved 4.1 m/yaw .36), touch
+  sensitivity 1.4 persists; live mobile `__ssPerf()` **127 calls / 1,309,865 tris**, 0 page errors;
+  `mobile-portrait.png`/`mobile-landscape.png` live.
+- **Live HUD/regression:** join 3.14–4.0 s live (includes QA landing overhead), 11 cards, 0 404s, no
+  page errors; night TP **53.79** (deployed) / **51.37** (feature run) ≤75.
+
+**Cycle-9 live deployment is verified end-to-end: green**; task-87 complete. Cycle-10 candidates:
+near-forge audio ear check, physical-device/real-GPU/perceptual passes, hardware controller rumble,
+server-authoritative spear equip/grip capture, campaign/siege depth, more enemy variety, balance.
