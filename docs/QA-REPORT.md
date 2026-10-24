@@ -11,6 +11,7 @@ Batch-1 baseline/final runs and the batch-2 local, live-URL and co-op runs are r
 | Batch-1 final integration | 2026-10-23 22:38–22:39 | `& $node scripts/smoke-browser.mjs --out qa/final` (bundled Node 24, fresh build) | **PASS 16/16**, 0 page errors, 0 console errors, 0 asset 404s, WS opens=1/closes=0, 8 weapon cards |
 | Batch-2 final local (authoritative, Lead-run; QA-inspected) | 2026-10-24 01:06 | `& $node scripts/smoke-browser.mjs --out qa/final-batch2` | **PASS 16/16**, 10 weapon cards, 0 page/console errors, 0 asset 404s, WS opens=3/closes=2 (1006, auto-resumed) |
 | Batch-2 live URL (deployed batch-1) | 2026-10-24 01:15 | `& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --out qa/live-batch1 --expect-weapons 8` | **PASS 17/17**, 8 weapon cards, 0 page errors, 0 asset 404s, WS opens=1/closes=0 |
+| Batch-2 live deployment: game `657cdde` / hosting `a627cbb` | 2026-10-24 01:21 | `& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --out qa/live-batch2 --expect-weapons 10 --expect-assets custom/flamberge.glb.gz,custom/mace.glb.gz,custom/camp_tent.glb.gz,custom/stone_wall.glb.gz` | **PASS 18/18**, new bundle `index-DZ7lk_yj.js`, 10 weapon cards, 4/4 new assets HTTP 200, 0 page errors, 0 asset 404s, WS opens=1/closes=0 |
 | Batch-2 2-player co-op | 2026-10-24 01:10 | `& $node scripts/smoke-browser.mjs --coop --skip-build --out qa/coop` | **PASS 18/18**, shared armory unlock, both snapshots list both players, 0 page errors |
 
 ## Harness
@@ -391,7 +392,10 @@ software-renderer stalls** — essentially headless-QA-only today, but a very sl
 see a brief reconnect. Recommendation for the Lead (no src changed by QA): relax the server
 heartbeat (tolerate e.g. 2 missed pongs / ~30–45 s window) and/or make the reconnect toast less
 intrusive; world-scene's adaptive quality already reduces the stall frequency. Not a batch-2
-blocker.
+blocker. **Follow-up:** the Lead applied the server-side fix (tolerate 2 consecutive missed pongs
+≈30 s before terminate) to the local authoritative server; the live Cloudflare worker already
+tolerated ~45 s. The final live run at 0.7 fps showed `opens=1/closes=0` with no 1006 reconnects,
+confirming the transport is now robust for slow software-rendered clients.
 
 ### Visual checklist (inspected `qa/final-batch2/`, `qa/coop/`)
 
@@ -427,11 +431,43 @@ Remaining defects / notes (non-blocking):
 
 ### Artifacts
 
-- Screenshots: `qa/final-batch2/` (local final), `qa/live-batch1/` (live batch-1), `qa/coop/`
-  (both co-op pages).
+- Screenshots: `qa/final-batch2/` (local final), `qa/live-batch1/` (live batch-1),
+  `qa/live-batch2/` (live batch-2 deployment), `qa/coop/` (both co-op pages).
 - Machine reports: `%TEMP%\ss-smoke-artifacts\final-batch2-*\report.json`,
-  `live-batch1-*\report.json`, `coop-*\report.json` (include `diagnostics.ws`, `conns`,
-  `maxGapMs`, `health`, `navigationLog`, `coop` details).
-- After the batch-2 deployment: re-run live mode with `--expect-weapons 10` and
-  `--expect-assets custom/flamberge.glb.gz,custom/mace.glb.gz,custom/camp_tent.glb.gz,custom/stone_wall.glb.gz`
-  to validate the new bundle on the live URL.
+  `live-batch1-*\report.json`, `live-batch2-*\report.json`, `coop-*\report.json` (include
+  `diagnostics.ws`, `conns`, `maxGapMs`, `health`, `navigationLog`, `coop` details).
+
+### Final live deployment verification — batch-2 (game `657cdde`, hosting `a627cbb`)
+
+Run after the Lead's Cloudflare deployment:
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch2 --expect-weapons 10 `
+    --expect-assets custom/flamberge.glb.gz,custom/mace.glb.gz,custom/camp_tent.glb.gz,custom/stone_wall.glb.gz
+```
+
+- **Result: PASS 18/18** (new live-mode gates included the weapon-card and asset assertions).
+- **New bundle confirmed from the live network log:** the page fetched
+  `https://neilandrew.dev/games/swords-and-shrouds/assets/index-DZ7lk_yj.js` (774 kB) and
+  `assets/index-DSURmr1-.css`. `HEAD /assets/index-CS9GEA8s.js` (old bundle) returns **404**, and
+  `HEAD /health`, the four new GLBs (`flamberge`, `mace`, `camp_tent`, `stone_wall`) and the new
+  bundle all return **200** — the swap is complete.
+- **10 weapon cards** (`#weaponCards = 10`, matching the local final).
+- **4/4 expected assets HTTP 200** via direct in-page fetch (flamberge, mace, camp_tent,
+  stone_wall `.glb.gz`).
+- **0 uncaught page errors, 0 console errors, 0 bad responses, 0 failed internal requests**
+  (57 internal requests). Log-level errors: 1 — external
+  `static.cloudflareinsights.com/beacon.min.js` `ERR_ADDRESS_UNREACHABLE` (third-party analytics,
+  not gated).
+- **WebSocket:** opens=1, closes=0, errors=0 — **no 1006 reconnects** at 0.7 fps live (the one
+  instrumented >9 s message gap did not trip the transport; Cloudflare's Durable Object already
+  tolerates ~45 s). This is consistent with the Lead's note: the local heartbeat fix (tolerate 2
+  missed pongs) targets the local authoritative server, the live worker was unchanged.
+- Canvas: third-person std 39.8 / 1783 colours; first-person std 48.0 / 1850; combat std 48.0 /
+  1848. Renderer: `ANGLE … SwiftShader` WebGL2 (software).
+- Screenshots `qa/live-batch2/` visually match the local final: dark night sky with moon+halo
+  (and moon+stars in first person), tents at the mill camp, low ruined wall segments flanking the
+  grey road, readable actors, 10-card armory data in the HUD.
+
+**Batch-2 live deployment is verified end-to-end: green.**
