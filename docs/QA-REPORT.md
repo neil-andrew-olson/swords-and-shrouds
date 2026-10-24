@@ -936,4 +936,49 @@ after the earlier teammate-cleanup incident.
 **Cycle-2 verdict: PASS on all gates** (characters 24/24, perf 26/26, fresh-build 16/16 +
 hash reproduced, co-op 18/18, live baseline 17/17); the cycle-2 visuals are a real upgrade over
 `qa/final-batch4` (restored geometry, shadows, atmosphere, character tone/detail), with the seven
-gaps above carried into cycle 3. After deployment the final live pass runs against the new hash.
+gaps above carried into cycle 3.
+
+### Final live deployment verification — cycle-2 (game `5a49f24e`, hosting `d4b71cb7`)
+
+Run after the Lead's Cloudflare deployment (deployed bundle **`index-C_mLlIzi.js`**, 815,640 B —
+the pinned-confirm hosting build; the local `vite build` of the same commit produced
+`index-BfnriryF.js`, 815,540 B; the 100 B delta is the hosting build's asset/base configuration, not
+a code difference — Lead built from the pushed pinned commit and verified the live bundle):
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch5-deployed --expect-weapons 10 `
+    --expect-assets custom/hero.glb.gz,custom/fortress_keep.glb.gz,custom/castle_tower_lod.glb.gz,custom/pine_lod.glb.gz
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --perf --out qa/live-views-b5
+```
+
+- **Results: PASS 18/18 (deployed pass) + PASS 19/19 (live + 7 QA views).** Live network log shows
+  `assets/index-C_mLlIzi.js` + `index-CnBWkizl.css`; `/health` OK; 10 weapon cards; all 4 expected
+  assets HTTP 200; 0 page/console errors, 0 bad responses, 0 failed internal requests; WS
+  `wss://…/ws` opens=1/closes=0; fps 2.8 (SwiftShader). Only log entries: external Cloudflare
+  Insights beacon (third-party, not gated).
+- **Live payload:** 13,665,189 B = **13.03 MiB** across the 67 requested asset URLs (curl-verified)
+  — **+5.0 %** vs the cycle-1 live 12.41 MB (character atlases v2 + fortress_keep atlas +
+  tower/pine LODs), still **−68 % vs the batch-2 live 42.6 MB**. Verified live sizes: hero 621,882 B,
+  templar 627,057 B, fortress_keep 473,607 B, castle_tower_lod 123,177 B, pine_lod 90,446 B,
+  CREDITS 4,697 B. Live perf probe: **169 calls / 1,659,220 tris**, low tier 131 / 1.347 M, medium
+  168 / 1.658 M — matches the local authoritative capture (169 / 1,658,880).
+- **Live QA views:** all 7 `__ssQAView` captures work on the deployed build
+  (`qa/live-views-b5/view-*.png`); `treeline` shows real near/mid trees and
+  `__ssPerf().landscape` reports the same instance counts as local (pine [6,6] full + pineLod
+  [11,11], oak [4,4] + oakLod [14,14] at the treeline; pineCount 231 / oakCount 170) — so the
+  near/far tree band is live.
+- **Visual confirmation vs cycle-1 live (`qa/live-batch4/`):** characters now read as detailed,
+  night-toned armoured figures (no white-out, no black silhouettes); restored chapel ruin / stone
+  walls / well pergola / tent geometry is visible from the live spawn (the cycle-1 live screenshots
+  still showed the old blob artifacts); tent/stone-wall/character shadows and gate braziers/torch
+  glows present; moon + clouds + grass + dressing intact; **no blue-cone towers** in early/mid/settled
+  landing frames; HUD and 10-card armory unchanged.
+- Loading UX live: counts 0/20 → 13/20, join 4.07 s, max frame gap 1.94 s; quality selector
+  persists (medium after reload).
+
+**Cycle-2 live deployment is verified end-to-end: green.** Accepted cycle-3 debt: the seven
+visual/performance gaps listed above (regional identity, tree foliage/LOD band, magenta corruption
+decals, fire/smoke fidelity, character silhouette/detail target, SwiftShader time-to-HUD, moon/tent
+polish).
