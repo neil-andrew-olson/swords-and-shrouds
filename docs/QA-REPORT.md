@@ -1458,3 +1458,144 @@ Deployed after the Lead accepted the cycle-4 pass. Live verification runs:
 blend nit carried into cycle 5.** task-52 complete; cycle-5 candidates: armour art richness (plates),
 crown snowstorm density + snow particle counter, `__ssPreviewBody` framing, survivor identity,
 region-crown pose, real-GPU/controller/mobile.
+
+---
+
+## Iteration cycle 2026-10H (AAA loop, cycle 5) — armour art v3, snowstorm, combat feel, content (in progress)
+
+Cycle 5 clears the cycle-4 art/hook debts: armour art v3 (uniform plate texel density, 1024 atlases,
+survivor identity, optional cloth-wind sway), Frozen Crown snowstorm density + `activeParticles.snow`,
+`__ssPreviewBody` framing + crown camera fixes, combat feel (hit-stop/kick/vignette + reduced motion),
+chapel altar + smithy furnaces, and surface-aware audio.
+
+### Harness additions (`scripts/smoke-browser.mjs`)
+
+- **Armour v3 audit:** cycle-4 7-body close-ups + 10 m silhouettes retained; new gates/report:
+  body-mask close-up colours **≥500 on ≥5/7 bodies** (exact per-body list, remainder as debt; ≥300
+  floor), **plate texel-density** metric (gradient/edge-energy mean+p90 over the body crop) alongside
+  the 2.8 m visual `read_image`, **survivor identity before/after** pixel-diff vs
+  `qa/characters-b7/char-survivor-closeup.png`, and **cloth-wind** two-frame (~0.6 s) body-region diff
+  compared against a static side strip (body motion > background motion), tone/clipping/elite gates
+  retained.
+- **`__ssPreviewBody` render probe:** baseline vs per-body preview screenshot diff for all 7 ids;
+  gates "all 7 bodies render in frame" (cycle-4 hook rendered nothing).
+- **Snowstorm audit:** explicit `__ssWeather().activeParticles.snow` counter (high > low), low quality
+  tier **0 snow particles**, fog/whiteout via `__ssRegionInfo().fog.density` (high > low), optional
+  `snow-compare` 10 m view when shipped, and gate `region-crown` reports `crown` (camera moved out of
+  the moor blend).
+- **Combat feel:** if `__ssCombatFx()` exists, triggers a heavy attack and samples hit-stop/kick/
+  vignette state ~120 ms apart, then repeats under `Emulation.setEmulatedMedia` **prefers-reduced-
+  motion: reduce** and gates reduced fx + reported reduced-motion flag; no-console-error gate retained.
+- **Content:** optional QA poses `content-altar` (Ashen chapel), `content-furnace-village` /
+  `content-furnace-camp` (smithy stalls) for the new altar/furnace props (poses/coords coordinated with
+  ruins-builder).
+- **Perf gates:** cycle-5 SPEC **<270 calls / <2.0 M tris**; tiers/payload/views retained; HUD app
+  path (click→HUD/state, join ≤3.8 s) and nav numbers reported separately.
+
+### Cycle-4 reference values (before cycle-5)
+
+- Perf: 206 calls / 1,708,376 tris / 168 geoms / textures 178 / programs 96 / lights 17 / skinned 74;
+  payload 15.76 MB (live 15.01 MiB across 84 assets).
+- Characters: body-mask torso mean 85.73 / p50 71.31 / black 2.37 %; close-up body-mask colours
+  607–874 (all ≥500 by the crop metric), full-frame 1,288–1,863; elite diff 29.76 / 86.1 %; fixed-crop
+  informational 100.01/97.76.
+- Debts being fixed: plate flat/wood-grain faces at 2.8 m; snow/snowstorm visually identical with no
+  snow counter; `__ssPreviewBody` rendered no synthetic body; `region-crown` reported blend `moor`;
+  survivor used a soldier rig; no QA-readable combat-feel state.
+- **Armour-v3 final data (weapons-armory, final 08:13 bytes; supersedes c5v3-* sheets):** per body —
+  templar 9,276 tris / 3 prims / 694.8 KB; hero 9,388/2/683.4; ally 9,231/3/675.1; berserker 8,749/3/
+  654.2; ranger 9,021/3/665.6; survivor 8,947/3/665.8; fallen 8,838 GLB (8,914 runtime, +76-tri elite
+  add-on) /2/654.9 KB. All bodies have a **1024² albedo + 256² normal/ORM** atlas, one 91-joint skin,
+  12 clips, hand sockets; ≤15,500 tris / ≤900 KB. Plate geometry: max triangle area per plate prim
+  **0.0028–0.0088 m²** (fallen fixed from 0.0353), max edge 0.135–0.467 m (survivor staff; under the
+  0.5 m limit) — stretched-plate debt appears resolved. QA gradient cross-check on the c5final viewer
+  sheets (same crop/definition): mean **9.46–11.06**, p50 0.00–1.51, p90 **27.77–32.16**, edge%
+  **11.26–13.55** across all 7 bodies (survivor highest, hero lowest; no outlier). weapons-armory
+  independently reproduced the same values with a ÷2 central-difference variant (×2 to match QA), so the
+  metric is consistent; QA's in-game gradient pass will be reported per body.
+  Survivor identity = tattered hood/cloak, pale patch panels, bedroll/satchel, rope belt (orange-red
+  accent), walking staff (runtime asserts cloth + plate-accent prims and a staff rigid-weighted to
+  `mixamorigRightHand`). Cloth-wind prims = `*_cloth` materials (templar/ally tabard-skirt, berserker
+  fur/shoulder, ranger hood+cloak, survivor hood/cloak; hero/fallen plate-only); pose-frozen final
+  evidence meanAbsLum **0.619 templar / 0.752 ranger / 0.540 survivor** vs **0.000 hero control**;
+  `setCharacterWindQuality` is implemented and **now wired by world-scene in `scene.ts`** (low tier
+  removes the shader term, medium/high keep the sway) — QA verifies low-tier wind contribution drops in
+  the authoritative run. Masked body tone (all 7): mean **81.5–93.2** /
+  p50 **75.1–91.8** / clip 0 % / black ≤4.31 % — inside gates. Masked palette (5-bit, strict mask):
+  templar 606, berserker 739, survivor 1073, ally 697, hero 402, fallen 424, ranger 376 — **4/7 ≥500
+  masked**; QA's crop metric is the gate and both numbers are reported, with the masked shortfall
+  documented as cycle-6 art debt. Final sheets: `qa/char-viewer/shots/c5final-*`,
+  `c5finalsil-base.png`, `c5finalwind-*`; survivor before/after vs `c4rich-base-closeup-survivor.png`.
+  **Cloth-wind QA method note:** the harness captures two frames ~0.6 s apart with weather forced clear;
+  body-region diff still includes idle animation, so weapons-armory's pose-frozen frames are the precise
+  wind evidence and QA's diff is a motion-presence check (visual read_image decides cloth).
+
+### Cycle-5 authoritative capture + regression — final build `index-CsjSWrV-.js` (879,493 B): PASS
+
+**Artifact:** the Lead's definitive re-gate hash **`index-CsjSWrV-.js` (879,493 B)**. My clean
+bundled-Node-24 build reproduced it exactly (deterministic; earlier `Dewa`/`CyiYOx4j` hashes were
+superseded when a late `scene.ts` edit changed the tree). Fresh-build smoke **22/22 PASS** (`qa/final-c5b`;
+hash reproduced; 0 page/console/log errors, 0 404s, 10 cards, WS 1/0, night TP mean **56.56** with
+weather forced clear). Authoritative runs on this artifact: `--characters` **35/35**
+(`qa/characters-c5`), `--perf` **42/42** (`qa/perf-c5`), `--views` **31/31** (`qa/views-c5`),
+`--coop` **18/18** (`qa/coop-c5`), live baseline **19/19** (`qa/live-batch8-pre`).
+
+**1) Armour art v3 — PASS.** 7 close-ups + 7/7 10 m silhouettes. **QA crop metric: body-mask colours
+618–941 on 7/7 bodies** (≥500 target on ≥5/7 ✅: templar 637, hero 618, berserker 663, ranger 674,
+ally 746, survivor 684, fallen 941; full-frame 1,280–1,962). Strict masked counts (weapons-armory)
+606/739/1073/697/402/424/376 = **4/7 ≥500 masked** — the ranger/hero/fallen shortfall is documented
+cycle-6 art debt (asset-forge has targets). **Plate texel density:** in-game gradient metric 6.66–12.86
+(avg 7.73; fallen brightest at 12.86) with no flat-face outlier; cross-checked on the c5final viewer
+sheets (mean 9.46–11.06 / p90 27.77–32.16; weapons-armory independently reproduced ×2). Visual 2.8 m
+inspection: the cycle-4 oversized wood-grain/flat plates are gone (templar now shows patina/trim/
+heraldry and curved plates; no stretched quad reads). Torso body-mask 68.89 / p50 61.16 / black 8.95 %
+(in gates), clip 0 %, elite-undead diff **29.87 / 86.33 %**. **Survivor identity** changed vs cycle-4
+(meanAbsLum 4.69 / 10.87 % changed; visual: ragged hood/cloak, pale patch panels, bedroll/satchel,
+staff — clearly not a soldier clone). **Cloth wind:** two-frame body diff 7.80–17.92 vs static
+background ≤0.91 on all 7 bodies (motion-presence; includes idle sway), with weapons-armory's
+pose-frozen precision evidence **0.619 templar / 0.752 ranger / 0.540 survivor vs 0.000 hero**;
+`setCharacterWindQuality` is wired in `scene.ts` (low tier drops the shader term) — low-tier visual
+isolation not separately measured.
+
+**2) Frozen Crown snowstorm + hooks — PASS.** `__ssWeather().activeParticles.snow` monotonic:
+**240 (snow 0.3) → 800 (snowstorm 1.0)**; fog/whiteout `__ssRegionInfo().fog.density` **0.0185/0.0192 →
+0.0239/0.0242**; low quality tier → **0 snow particles** (qualityScale 0; rain splash 90 remains for
+rain's low-tier proof). Visuals: snowstorm is clearly dense with large flakes + whiteout haze vs sparse
+snow (read_image; `qa/perf-c5/weather-snow-high.png`). Gust/gusts exposed (1.10→1.78 / 0→4).
+**`region-crown` camera moved fully inside crown → `__ssRegionInfo().region === 'crown'`** (fog
+#4b6678/0.0169), region distinctness 6.03–22.12 colour distance. **`__ssPreviewBody` render probe:
+7/7 bodies rendered in frame** (cycle-4 debt fixed). Note: the `landmark-crown` optional view still
+reports `moor` (it sits at the old border z≈−432) — informational only, not the region-crown gate.
+
+**3) Combat feel — PASS.** `__ssCombatFx()` sampled across heavy attacks: **hit-stop 57.8–60 ms**,
+**vignette opacity 0.648–0.816**, **kick 0.044–0.073**, heavyCount increments each attack; 0 console
+errors, input/state checks unaffected. Reduced-motion via `__ssSetReducedMotion(true)`: hit-stop **0**,
+kick ≤0.013, vignette **0** in two runs (one sample showed a residual 0.546 vignette — partial, noted
+for polish) and the hook reports `reducedMotion:true`; restored with `null` after the probe.
+
+**4) Content — furnaces PASS; altar present with a readability note.** Village furnace
+(52.14,7.3) and camp furnace (32,−42.3) are clearly visible, grounded, with barrel+crate dressing and
+no intersection/z-fighting (`view-content-furnace-village/camp`, read_image). Altar (−27.71,−226.14,
+1.4 m): ritual stone/white dressing is visible at the chapel base from the ruins-builder pose and in
+close-ups, but at night it reads small/low-contrast against the rubble — **cycle-6 readability note**
+(not a blocking defect; owner framing/validator OK). Surface-audio hooks (`__ssSurfaceAt`) present and
+0 errors; audibility cannot be heard headlessly — **ear-verification debt** documented.
+
+**5) Performance — PASS.** Spawn TP **208 calls** (<270 ✅) / **1,726,954 tris** (<2.0 M ✅), geoms 171,
+textures 181, programs 99, quality high; FP 160 calls / 1,609,390 tris; low 162/1,414,322 (−22 % calls);
+medium/high 207/1,726M. Payload **17,037,811 B = 16.25 MiB** (+1.28 MB vs cycle-4 15.76 MB; armour v3 +
+altar/furnace + audio). Tiers/persistence/loading PASS; wind (3-frame max) **1.063** (≥0.8); 7 required
++ 12 optional views (incl. content poses) captured. HUD app path: **click→HUD 158 ms, click→state
+1,146 ms, join enabled 3,330 ms** (≤3.8 s); nav→HUD 20.2 s is QA-landing overhead (20.0 s), reported
+separately; `__ssLoadTimings` marks coreReady 3.1 s / compileSkipped 5.5 s.
+
+**6) Regression — PASS.** Fresh-build **22/22** + exact hash reproduction (`index-CsjSWrV-.js`),
+co-op **18/18** (room join, movement propagation 3 m, shared weapon-rack unlock, both HUDs live),
+live baseline **19/19** (deployed cycle-4: 10 cards, expected assets 200, 0 errors/404s except the
+external Cloudflare beacon), 0 page/console/log errors throughout.
+
+**Cycle-5 verdict: PASS on all gates.** Non-blocking debts for cycle 6: (a) strict-masked palette
+shortfall on ranger/hero/fallen (4/7 ≥500 masked; asset-forge targets set), (b) altar night
+readability/contrast at the Ashen chapel, (c) reduced-motion vignette not fully zero in one sample,
+(d) low-tier cloth-wind shader saving wired but not visually isolated, (e) surface-audio ear check,
+(f) real-GPU/perceptual/controller/mobile passes. After deploy: final live pass + task-59 complete.

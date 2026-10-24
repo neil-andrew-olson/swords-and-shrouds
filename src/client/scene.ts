@@ -2,7 +2,7 @@ import {characterAsset} from '../shared/characters';
 import * as THREE from 'three';
 import {customCharacter} from './custom-character';
 import {equipmentModel,weaponCombatProfile,blockSparkColor} from './equipment';
-import {undeadEliteTier} from './custom-character';
+import {undeadEliteTier,setCharacterWindQuality} from './custom-character';
 import {weaponStats,WEAPONS,type WeaponId} from '../shared/weapons';
 import {addLandscape} from './landscape';
 import {CharacterAssets,loadAsset} from './assets';
@@ -169,6 +169,13 @@ export class WorldView{
   private qaBody:THREE.Group|null=null;private qaBodyRig:ReturnType<typeof customCharacter>|null=null;private qaBodyActor:Actor|null=null;private qaBodyDistance=10;
   private softwareRenderer=false;private weatherFlashCount=0;
   private firstGameFrameMarked=false;
+  // ---- cycle-5: storm snow, frost, combat feel ----
+  private stormSnow:THREE.InstancedMesh|null=null;private stormData:Float32Array|null=null;private readonly stormCap=800;
+  private gustValue=1;private gustCount=0;private lastGustPeakAt=-99;
+  private groundFrost:{m:THREE.MeshStandardMaterial;base:THREE.Color}[]=[];
+  private vignetteEl:HTMLDivElement|null=null;private vignetteLife=0;private vignetteOpacity=0;private vignetteDirX=0;private vignetteDirY=0;
+  private reducedMotion=false;private reducedMotionOverride:boolean|null=null;private hitStop=0;private kickPitch=0;private kickRoll=0;private fovPunch=0;private lastHeavyAt=0;private lastHitAt=0;private lastHeavySerial=-1;private visualScale=1;
+  private lastHitStopMs=0;private lastKickAt=0;private lastKickMag=0;private lastVignetteAt=0;private lastVignetteMag=0;private heavyCount=0;private damageCount=0;
   private lastAmbientTint=new THREE.Color(0xffffff);private lastSaturation=1;
   /** Landmark coordinates per region for the QA landmark views (ruins-builder placements). */
   private landmarkCoords:{green:{x:number;z:number};ashen:{x:number;z:number};crown:{x:number;z:number}}={
@@ -587,7 +594,8 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    }else if(name==='region-ashen'){
     const c=CASTLES.find(x=>x.region==='moor')??CASTLES[3];pose=look(c.x+14,3.2,c.z+34,c.x,2,c.z);
    }else if(name==='region-crown'){
-    const c=CASTLES.find(x=>x.region==='crown')??CASTLES[6];pose=look(c.x+30,3.8,c.z+58,c.x,2.4,c.z);
+    // Fully inside Frozen Crown (z < -455 so __ssRegionInfo reports crown, not the blend).
+    const c=CASTLES.find(x=>x.region==='crown')??CASTLES[6];pose=look(c.x+28,3.6,c.z+18,c.x,2.4,c.z);
    }
    else if(name==='foliage'){
     pose=look(-58.4,2.1,-40.2,-57.3,1.6,-46.7);
@@ -630,7 +638,8 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
   setQuality(tier:string,explicit=false){
    const next=tier as QualityTier;if(!(next in QUALITY_TIERS))return false;
    if(explicit)this.explicitQualityAt=performance.now();
-   this.quality=next;try{localStorage.setItem('ss-quality',next);}catch{}
+   this.quality=next;try{setCharacterWindQuality(next);}catch{}
+   try{localStorage.setItem('ss-quality',next);}catch{}
    const cap=QUALITY_TIERS[next];
    this.renderer.setPixelRatio(Math.min(devicePixelRatio,cap.dpr));
    this.postfx?.setQuality(cap.dpr,cap.bloom);
@@ -676,7 +685,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    return {calls:info.render.calls,triangles:info.render.triangles,software:this.softwareRenderer,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
    win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
@@ -688,6 +697,9 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    win.__ssWeatherForce=(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>view.setWeatherForce(region===undefined?null:region,phase,intensity);
    win.__ssLoadTimings=()=>view.loadTimings();
    win.__ssPreviewBody=(name?:string|null,distance?:number|{distance?:number})=>{const d=typeof distance==='number'?distance:(distance?.distance??10);return view.previewBody(name===undefined?null:name,d);};
+   win.__ssCombatFx=()=>view.combatFx();
+   win.__ssSetReducedMotion=(value?:boolean|null)=>view.setReducedMotion(value===undefined?null:value);
+   win.__ssSurfaceAt=(x:number,z:number)=>view.surfaceAt(x,z);
    win.__ssEliteUndeadInfo=()=>view.eliteUndeadInfo();
    win.__ssSetLandmark=(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>view.setLandmarkCoords(region,x,z);
    win.__ssQuality=(tier?:string)=>{if(typeof tier==='string'&&tier)return {tier:view.quality,applied:view.setQuality(tier,true)};return {tier:view.quality};};
@@ -714,6 +726,16 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.hazeData=new Float32Array(14*3);
    for(let i=0;i<14;i++){this.hazeData[i*3]=Math.random()*40-20;this.hazeData[i*3+1]=.6+Math.random()*1.6;this.hazeData[i*3+2]=90+Math.random()*40;}
    if(this.roadMesh){const m=this.roadMesh.material as THREE.MeshStandardMaterial;if(m.isMeshStandardMaterial)this.roadWet={roughness:m.roughness,envMapIntensity:m.envMapIntensity??1,metalness:m.metalness??0};}
+   // Dense snowstorm flakes (separate from the sparse snow pool): larger, gust-driven billboards.
+   const sc=document.createElement('canvas');sc.width=sc.height=64;const sctx=sc.getContext('2d')!;const sg=sctx.createRadialGradient(32,32,2,32,32,32);sg.addColorStop(0,'rgba(255,255,255,1)');sg.addColorStop(.45,'rgba(235,245,255,0.65)');sg.addColorStop(1,'rgba(210,230,255,0)');sctx.fillStyle=sg;sctx.fillRect(0,0,64,64);
+   const snowTex=new THREE.CanvasTexture(sc);snowTex.colorSpace=THREE.SRGBColorSpace;
+   this.stormSnow=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({map:snowTex,transparent:true,opacity:.9,depthWrite:false,blending:THREE.AdditiveBlending,color:0xe8f2ff}),this.stormCap);
+   this.stormSnow.frustumCulled=false;this.stormSnow.castShadow=false;this.stormSnow.count=0;this.scene.add(this.stormSnow);
+   this.stormData=new Float32Array(this.stormCap*4);
+   for(let i=0;i<this.stormCap;i++){this.stormData[i*4]=Math.random()*60-30;this.stormData[i*4+1]=Math.random()*18;this.stormData[i*4+2]=Math.random()*60-30;this.stormData[i*4+3]=1.1+Math.random()*1.9;}
+   // Directional damage vignette (CSS only; one DOM node, no per-frame allocations).
+   try{const el=document.createElement('div');el.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:9998;opacity:0;transition:none;background:radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 42%, rgba(168,26,38,0.55) 100%);';document.body.appendChild(el);this.vignetteEl=el;}catch{}
+   try{const mq=window.matchMedia('(prefers-reduced-motion: reduce)');this.reducedMotion=mq.matches;const onChange=(e:MediaQueryListEvent)=>{this.reducedMotion=e.matches;};if(mq.addEventListener)mq.addEventListener('change',onChange);else (mq as unknown as {addListener?:(f:(e:MediaQueryListEvent)=>void)=>void}).addListener?.(onChange);}catch{}
   }
   private weatherScale(){return this.quality==='low'?0:this.quality==='medium'?0.55:1;}
   /** Advance regional weather phases, drive pooled particles + wet sheen + lightning. */
@@ -739,8 +761,12 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    }
    this.weatherFlash=Math.max(0,this.weatherFlash-dt*2.2);
    // Fog density contribution by region/weather (crown storm closes visibility).
-   this.weatherFogAdd=(region==='crown'?0.0045*intensity:region==='moor'?0.0022*intensity:0.0012*intensity);
-   this.landscapeWindSet?.((region==='moor'?1+intensity*1.35:region==='crown'?1+intensity*1.2:1+intensity*0.5));
+   // Whiteout: whiteout scales harder than light snow in the crown (density feeds region fog).
+   this.weatherFogAdd=(region==='crown'?0.0018+0.0125*intensity:region==='moor'?0.0022*intensity:0.0012*intensity);
+   const gustTarget=region==='moor'?1+intensity*1.45:region==='crown'?1+intensity*1.25:1+intensity*0.45;
+   this.gustValue+=(gustTarget-this.gustValue)*(1-Math.exp(-dt*0.8));
+   if(this.gustValue>1.55&&time-this.lastGustPeakAt>4){this.lastGustPeakAt=time;this.gustCount++;}
+   this.landscapeWindSet?.(this.gustValue);
    const q=this.camera.getWorldQuaternion(this.rainQuat);
    // Rain streaks (march only; low tier almost none).
    if(this.rainMesh&&this.rainData){
@@ -768,10 +794,21 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     if(this.weatherScale()>0&&Math.random()<dt*(3+8*intensity)*this.weatherScale()){this.tmpV.set(focusX+Math.random()*36-18,2+Math.random()*3,focusZ+Math.random()*36-18);this.fx.flake(this.tmpV,.62,.58,.55,1.1);}
     if(this.weatherScale()>0&&Math.random()<dt*(1.2+2*intensity)*this.weatherScale()){this.tmpV.set(focusX+Math.random()*20-10,.6+Math.random()*1.2,focusZ+Math.random()*20-10);this.fx.embers(this.tmpV,1);}
    }
-   if(region==='crown'&&intensity>.18){
-    const rate=dt*(2+18*intensity)*this.weatherScale();
-    for(let n=0;n<rate;n++){this.tmpV.set(focusX+Math.random()*30-15,2+Math.random()*4,focusZ+Math.random()*30-15);this.fx.flake(this.tmpV,.88,.93,1,1.2);}
-   }
+   // Frozen Crown: dense billboard snow (snow vs snowstorm differ in count + flake size + drift).
+   if(region==='crown'&&this.stormSnow&&this.stormData){
+    const cap=this.stormData.length/4,active=Math.min(cap,Math.floor(cap*intensity*scale));
+    if(active>0){
+     const d=this.stormData,flake=.10+.10*intensity,drift=(this.gustValue-1)*2.2*intensity;
+     for(let i=0;i<cap;i++){const b=i*4;d[b+1]-=d[b+3]*dt;d[b]+=(drift+Math.sin(time*1.7+i*.37)*.25)*dt;d[b+2]+=Math.cos(time*1.1+i*.53)*.2*dt;
+      if(d[b+1]<0){d[b]=focusX+Math.random()*44-22;d[b+1]=16+Math.random()*4;d[b+2]=focusZ+Math.random()*44-22;}
+      if(Math.abs(d[b]-focusX)>26||Math.abs(d[b+2]-focusZ)>26){d[b]=focusX+Math.random()*44-22;d[b+2]=focusZ+Math.random()*44-22;}
+      if(i<active){this.rainDummy.position.set(d[b],d[b+1],d[b+2]);this.rainDummy.quaternion.copy(this.rainQuat);this.rainDummy.scale.set(flake*(.7+((i%7)/10)),flake*(.7+((i%5)/10)),1);this.rainDummy.updateMatrix();this.stormSnow.setMatrixAt(i,this.rainDummy.matrix);}}
+     this.stormSnow.count=active;this.stormSnow.instanceMatrix.needsUpdate=true;
+    }else this.stormSnow.count=0;
+   }else if(this.stormSnow)this.stormSnow.count=0;
+   // Ground frost tint on the region slabs (cheap material colour lerp, no extra draws).
+   if(!this.groundFrost.length){this.scene.traverse(o=>{if(o instanceof THREE.Mesh&&o.userData.surface==='ground'){const m=o.material as THREE.MeshStandardMaterial;if(m.isMeshStandardMaterial)this.groundFrost.push({m,base:m.color.clone()});}});}
+   if(this.groundFrost.length){const k=1-Math.exp(-dt*1.4);const frost=region==='crown'?intensity*.55:0;this.tmpColor.setHex(0xcfe0ea);for(const g of this.groundFrost){g.m.color.lerp(this.tmpColor2.copy(g.base).lerp(this.tmpColor,frost),k);}}
    // Wet-road sheen: rain lowers roughness / lifts reflections, then dries out.
    if(this.roadMesh){const m=this.roadMesh.material as THREE.MeshStandardMaterial;if(m.isMeshStandardMaterial){const wet=region==='march'?intensity:0;const k=1-Math.exp(-dt*1.2);m.roughness+=(this.roadWet.roughness-wet*.42-m.roughness)*k;m.envMapIntensity+=((this.roadWet.envMapIntensity??1)+wet*.7-m.envMapIntensity)*k;m.metalness+=((this.roadWet.metalness??0)+wet*.06-m.metalness)*k;}}
   }
@@ -783,7 +820,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
   /** window.__ssWeather(): current region weather state for audio/QA. */
   weatherInfo(){
    const st=this.weatherStates[this.weatherRegion];
-   return {region:this.weatherRegion,phase:st.name,intensity:+st.intensity.toFixed(3),nextChangeAt:Date.now()+Math.max(0,(st.next-st.t))*1000,nextChangeIn:+Math.max(0,st.next-st.t).toFixed(1),flash:this.weatherFlashCount,flashing:this.weatherFlash>0.01,activeParticles:{rain:this.rainMesh?.count??0,splash:this.splashMesh?.count??0,haze:this.hazeMesh?.count??0},qualityScale:this.weatherScale()};
+   return {region:this.weatherRegion,phase:st.name,intensity:+st.intensity.toFixed(3),nextChangeAt:Date.now()+Math.max(0,(st.next-st.t))*1000,nextChangeIn:+Math.max(0,st.next-st.t).toFixed(1),flash:this.weatherFlashCount,flashing:this.weatherFlash>0.01,activeParticles:{rain:this.rainMesh?.count??0,splash:this.splashMesh?.count??0,haze:this.hazeMesh?.count??0,snow:this.stormSnow?.count??0},gust:+this.gustValue.toFixed(3),gusts:this.gustCount,qualityScale:this.weatherScale()};
   }
   /** window.__ssSetWeather(region, phase, intensity): deterministic QA forcing; null restores. */
   setWeatherForce(region:WeatherRegion|null,phase?:string|null,intensity?:number|null){
@@ -794,6 +831,16 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.weatherRegion=region;this.announceWeather();
    return {ok:true,weather:this.weatherInfo()};
   }
+  /** window.__ssSurfaceAt(x,z): walkable surface id for footstep/audio heuristics. */
+  surfaceAt(x:number,z:number):'stone'|'grass'|'snow'|'ash'|'wood'{
+   for(const c of CASTLES){if(Math.hypot(x-c.x,z-c.z)<9.6)return 'stone';}
+   for(const c of CAMPS){if(Math.hypot(x-c.x,z-c.z)<7)return 'wood';}
+   for(const s of [[48,4],[32,-37]] as const){if(Math.hypot(x-s[0],z-s[1])<6)return 'wood';}
+   // Same route polyline as the merged road mesh.
+   const route=[START,...REGIONS.flatMap(r=>[{x:0,z:r.offset+12},{x:0,z:r.offset+24},{x:42,z:r.offset-45},{x:42,z:r.offset-55},{x:42,z:r.offset-43},{x:-24,z:r.offset-113},{x:-24,z:r.offset-123},{x:-24,z:r.offset-112},{x:0,z:r.offset-200}]),NEST];
+   for(let i=1;i<route.length;i++){const a=route[i-1],b=route[i];const dx=b.x-a.x,dz=b.z-a.z;const len2=dx*dx+dz*dz||1;const t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/len2));const px=a.x+dx*t,pz=a.z+dz*t;if(Math.hypot(x-px,z-pz)<2.4)return 'stone';}
+   return z<-405?'snow':z<-165?'ash':'grass';
+  }
   /** window.__ssLoadTimings(): performance marks for HUD/state attribution. */
   loadTimings(){
    let marks:{name:string;at:number;ms:number}[]=[];
@@ -802,16 +849,85 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    return {marks,summary:{sceneConstruct:get('ss:sceneConstructStart'),coreReady:get('ss:coreReady')??get('ss:coreReady'),firstGameFrame:get('ss:firstGameFrame'),earlyCompileEnd:get('ss:earlyCompileEnd'),compileEnd:get('ss:compileEnd')},software:this.softwareRenderer,quality:this.quality};
   }
   /** window.__ssPreviewBody(name,distance): build an armour-v2 rig for QA close-ups/silhouettes. */
-  previewBody(name:string|null,distance=10){
+  async previewBody(name:string|null,distance=10){
    if(this.qaBody){this.scene.remove(this.qaBody);this.qaBody.traverse(o=>{if(o instanceof THREE.Mesh&&!o.userData.sharedAsset){o.geometry.dispose();}});this.qaBody=null;this.qaBodyRig=null;this.qaBodyActor=null;}
    if(name===null)return {ok:true,character:null,distance:0};
-   const source=name?this.characterAssets.custom.get(name):undefined;if(!source)return {ok:false,character:name??null,distance,reason:'asset-not-loaded'};
+   let source=this.characterAssets.custom.get(name);
+   if(!source){try{source=await loadAsset('custom/'+name);this.characterAssets.custom.set(name,source);}catch{}}
+   if(!source)return {ok:false,character:name,distance,reason:'asset-unavailable'};
    const actor={id:'qa-preview-body',kind:'soldier',hp:100,maxHp:100,attackSerial:0,weapon:'sword',appearance:name} as unknown as Actor;
    const rig=customCharacter(source,actor,this.characterAssets.custom);
    const group=new THREE.Group();group.add(rig.model);this.scene.add(group);
+   // Preview meshes must never be frustum-culled by stale skinned bounds; force visible.
+   group.traverse(o=>{if(o instanceof THREE.Mesh){o.frustumCulled=false;o.visible=true;}});
+   group.updateMatrixWorld(true);
    this.qaBody=group;this.qaBodyRig=rig;this.qaBodyActor=actor;this.qaBodyDistance=Math.max(2,Math.min(30,distance));
-   return {ok:true,character:name,distance:this.qaBodyDistance};
+   return {ok:true,character:name,distance:this.qaBodyDistance,ready:true};
   }
+  /** Heavy attack feedback: brief hit-stop, camera kick and a subtle FOV punch. */
+  private onHeavyAttack(profile:{weight:number}){
+   const now=performance.now();this.lastHeavyAt=now;this.heavyCount++;
+   const w=Math.max(0.8,Math.min(1.6,profile.weight));
+   const reduced=this.reducedMotionOverride??this.reducedMotion;
+   // Persistent last-event magnitudes so QA can sample after the 20-60ms transient has decayed.
+   if(reduced){this.lastHitStopMs=0;this.lastKickMag=0;this.lastVignetteMag=0;this.lastKickAt=0;this.lastVignetteAt=0;return;}
+   this.hitStop=Math.max(this.hitStop,0.045+w*0.016);this.lastHitStopMs=this.hitStop*1000;
+   this.kickPitch=Math.min(.12,(0.035+w*.028));
+   this.kickRoll=(Math.random()-.5)*.05*w;
+   this.fovPunch=-1.1*w;
+   this.lastKickAt=now;this.lastKickMag=Math.hypot(this.kickPitch,this.kickRoll);
+   // Subtle forward swing vignette so heavy attacks read even without taking a hit.
+   this.vignetteDirX=0;this.vignetteDirY=0;this.vignetteLife=.16;this.vignetteOpacity=.32;
+   this.lastVignetteAt=now;this.lastVignetteMag=.32;
+   if(this.vignetteEl){this.vignetteEl.style.background='radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 55%, rgba(175,28,40,0.32) 100%)';}
+  }
+  /** Damage feedback: directional red vignette + stronger kick/shake + hit-stop. */
+  private onPlayerDamaged(g:Game,me:Actor){
+   const now=performance.now();this.lastHitAt=now;this.damageCount++;
+   const reduced=this.reducedMotionOverride??this.reducedMotion;
+   if(reduced){this.lastHitStopMs=0;this.lastKickMag=0;this.lastVignetteMag=0;this.lastKickAt=0;this.lastVignetteAt=0;return;}
+   this.hitStop=Math.max(this.hitStop,0.06);this.lastHitStopMs=this.hitStop*1000;
+   this.shake=Math.min(.9,this.shake+.32);
+   this.kickPitch=Math.min(.16,.07);
+   this.kickRoll=(Math.random()-.5)*.09;
+   this.fovPunch=-1.8;
+   // Direction to the nearest hostile in camera space -> vignette hot edge on the hit side.
+   let best:number=Infinity,bx=0,bz=0;
+   for(const a of g.actors){if(a.hp<=0)continue;if(a.kind==='player'||a.kind==='soldier')continue;const dx=a.x-me.x,dz=a.z-me.z,d2=dx*dx+dz*dz;if(d2<best){best=d2;bx=dx;bz=dz;}}
+   const len=Math.hypot(bx,bz)||1;const camYaw=this.camera.rotation.y;
+   const wx=bx/len,wz=bz/len;const cos=Math.cos(-camYaw),sin=Math.sin(-camYaw);
+   const sx=wx*cos-wz*sin,sz=wx*sin+wz*cos;
+   this.vignetteDirX=sx;this.vignetteDirY=-sz;
+   this.vignetteLife=.42;this.vignetteOpacity=.85;this.lastVignetteAt=now;this.lastVignetteMag=.85;this.lastKickAt=now;this.lastKickMag=Math.hypot(this.kickPitch,this.kickRoll);
+   if(this.vignetteEl)this.vignetteEl.style.background=`radial-gradient(circle at ${(50+sx*46).toFixed(1)}% ${(50-sz*46).toFixed(1)}%, rgba(0,0,0,0) 38%, rgba(175,28,40,0.62) 100%)`;
+  }
+  /** Per-frame camera fx (decayed); allocation-free. */
+  private applyCombatCamera(dt:number){
+   const reduced=this.reducedMotionOverride??this.reducedMotion;
+   if(this.hitStop>0)this.hitStop=Math.max(0,this.hitStop-dt);
+   this.visualScale=this.hitStop>0?0.22:1;
+   if(!reduced){
+    this.camera.rotation.x+=this.kickPitch;
+    this.camera.rotation.z+=this.kickRoll;
+   }
+   const k=1-Math.exp(-dt*8.5);
+   this.kickPitch+=(0-this.kickPitch)*k;this.kickRoll+=(0-this.kickRoll)*k;
+   this.fovPunch+=(0-this.fovPunch)*k*1.15;
+   const targetFov=68+this.fovPunch;
+   if(Math.abs(this.camera.fov-targetFov)>.02){this.camera.fov=targetFov;this.camera.updateProjectionMatrix();}
+   if(this.vignetteLife>0){this.vignetteLife=Math.max(0,this.vignetteLife-dt);this.vignetteOpacity=Math.max(0,this.vignetteLife/.42)*.85;if(this.vignetteEl)this.vignetteEl.style.opacity=String(this.vignetteOpacity);}
+  }
+  /** window.__ssCombatFx(): QA-readable combat-feel state (read-only). */
+  combatFx(){
+   const now=performance.now();
+   const recentHeavy=now-this.lastHeavyAt<1000,recentHit=now-this.lastHitAt<1000;
+   const hitStopMs=this.hitStop>0?this.hitStop*1000:(recentHeavy||recentHit?this.lastHitStopMs:0);
+   const kickMag=this.hitStop>0||recentHeavy||recentHit?this.lastKickMag:0;
+   const vig=this.vignetteOpacity>0?this.vignetteOpacity:(recentHeavy||recentHit?this.lastVignetteMag:0);
+   return {reducedMotion:this.reducedMotionOverride??this.reducedMotion,hitStopMs:+hitStopMs.toFixed(1),hitStopActive:this.hitStop>0,kick:{x:+this.kickPitch.toFixed(4),y:+this.kickRoll.toFixed(4),magnitude:+kickMag.toFixed(4)},shake:+this.shake.toFixed(3),fov:+this.camera.fov.toFixed(2),vignette:{opacity:+vig.toFixed(3),direction:{x:+this.vignetteDirX.toFixed(3),y:+this.vignetteDirY.toFixed(3)}},lastHeavyAt:+this.lastHeavyAt.toFixed(0),lastHitAt:+this.lastHitAt.toFixed(0),heavyCount:this.heavyCount,damageCount:this.damageCount,lastHitStopMs:+this.lastHitStopMs.toFixed(1)};
+  }
+  /** window.__ssSetReducedMotion(bool|null): QA override for the reduced-motion path. */
+  setReducedMotion(value:boolean|null){this.reducedMotionOverride=value;return {reducedMotion:this.reducedMotionOverride??this.reducedMotion};}
   fire(x:number,z:number,isCamp=false){
    // Flames are drawn from 3 instanced cone meshes; only the data + pooled torch source are kept.
    this.flames.push({x,z,isCamp,seed:Math.random()*20});
@@ -987,8 +1103,10 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    if(dt>0.028)this.slowQualityAccum+=dt;else this.slowQualityAccum=Math.max(0,this.slowQualityAccum-dt*0.5);
    if(this.slowQualityAccum>8&&this.quality!=='low'&&performance.now()-this.explicitQualityAt>30000){this.slowQualityAccum=0;this.setQuality(this.quality==='high'?'medium':'low');}
    this.renderer.info.reset();
+   // Heavy-hit hit-stop: briefly slow visual simulation (input/network time untouched).
+   this.visualScale=this.hitStop>0?0.22:1;
    if(time-this.shadowTrimAt>1.5&&time<40){this.shadowTrimAt=time;this.trimShadowCasters();}
-   for(const {rig,actor,camp} of this.campRigs)if(camp.visible)rig.update(actor,false,dt);
+   for(const {rig,actor,camp} of this.campRigs)if(camp.visible)rig.update(actor,false,dt*this.visualScale);
    const focusX=this.qaView?this.qaView.x:(me?.x??this.camera.position.x),focusZ=this.qaView?this.qaView.z:(me?.z??this.camera.position.z);
    this.updateWeather(dt,time,focusX,focusZ);
    this.atmosphere(me,time,dt);
@@ -1010,7 +1128,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.flameCore.count=flameCount;this.flameOuter.count=flameCount;this.flameEmber.count=flameCount;if(flameCount){this.flameCore.instanceMatrix.needsUpdate=true;this.flameOuter.instanceMatrix.needsUpdate=true;this.flameEmber.instanceMatrix.needsUpdate=true;}
    if(this.corruptionMat)this.corruptionMat.opacity=.42+Math.sin(time*.8)*.07;
    for(const f of this.flagMeshes){const pos=f.mesh.geometry.attributes.position;for(let i=0;i<pos.count;i++){const px=pos.getX(i);pos.setZ(i,Math.sin(time*5.5+px*3+f.seed)*(px/1.8)*.22);}pos.needsUpdate=true;}
-   this.updateEffects(dt,time,me);
+   this.updateEffects(dt*this.visualScale,time,me);
    this.ruinsUpdate?.(g,me,time);
    if(!g){const t=time*.025;this.camera.position.set(31+Math.sin(t)*4,15,32);this.camera.lookAt(0,2,0);if(this.shake>0){
     this.camera.position.x+=(Math.random()-.5)*this.shake;
@@ -1034,7 +1152,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     mesh.rotation.y=-a.yaw;mesh.visible=a.id===this.previewActorId||(!(a.id===me?.id&&first)&&(!me||dist(a,me)<46));mesh.rotation.z=a.hp<=0&&!rig?Math.PI/2:0;
     mesh.getObjectByName('tell')!.visible=a.windup>0&&a.hp>0;mesh.getObjectByName('tell')!.scale.setScalar(1+a.windup);const moving=Math.abs(oldX-a.x)+Math.abs(oldZ-a.z)>.03;
     if(moving&&!me||moving&&dist(a,me!)<26){const speed=Math.hypot(oldX-a.x,oldZ-a.z)/Math.max(0.0001,dt);if(speed>4.2){const next=(mesh.userData.dustAt??0) as number;if(time>=next){mesh.userData.dustAt=time+0.18+Math.random()*0.14;this.fx.dust(this.tmpV2.set(a.x,0.05,a.z),Math.min(1,(speed-4)/5));}}}
-    rig?.update(a,moving,dt);if(rig)for(const fragment of rig.fragments.splice(0)){this.scene.add(fragment);this.debris.push({mesh:fragment,life:4,velocity:new THREE.Vector3(a.id.length%2?2:-2,3,1.2)});}mesh.position.y=0;const previous=this.previousHp.get(a.id);if(previous!==undefined&&a.hp<previous){this.spawnDamageLabel(String(Math.ceil(previous-a.hp)),a.kind==='player'?'#ff8d78':'#ffe1a0',a.x,2.6,a.z,1.5,.6,.8);
+    rig?.update(a,moving,dt*this.visualScale);if(rig)for(const fragment of rig.fragments.splice(0)){this.scene.add(fragment);this.debris.push({mesh:fragment,life:4,velocity:new THREE.Vector3(a.id.length%2?2:-2,3,1.2)});}mesh.position.y=0;const previous=this.previousHp.get(a.id);if(previous!==undefined&&a.hp<previous){this.spawnDamageLabel(String(Math.ceil(previous-a.hp)),a.kind==='player'?'#ff8d78':'#ffe1a0',a.x,2.6,a.z,1.5,.6,.8);
      const evil=a.kind==='zombie'||a.kind==='corrupted';
      this.tmpV.set(a.x,1.35,a.z);
      this.fx.sparks(this.tmpV,evil?'undead':a.armor==='heavy'?'metal':'flesh');
@@ -1052,7 +1170,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
        if(me&&dist(me,a)<40)this.shake=Math.min(1,this.shake+.45);
       }
      }
-     mesh.userData.flashUntil=time+.08;mesh.userData.recoilUntil=time+.16;if(a.id===me?.id)this.shake=Math.min(.35,this.shake+.2);}if(rig)rig.model.position.z=Math.max(0,(mesh.userData.recoilUntil??0)-time)*1.1;const flashing=(mesh.userData.flashUntil??0)>time;if(rig){
+     mesh.userData.flashUntil=time+.08;mesh.userData.recoilUntil=time+.16;if(a.id===me?.id){this.shake=Math.min(.35,this.shake+.2);this.onPlayerDamaged(g,me);}}if(rig)rig.model.position.z=Math.max(0,(mesh.userData.recoilUntil??0)-time)*1.1;const flashing=(mesh.userData.flashUntil??0)>time;if(rig){
      if(flashing&&!mesh.userData.flashLit){mesh.userData.flashLit=true;const flashHex=(a.kind==='zombie'||a.kind==='corrupted')?0x5a1f22:0x2a3440;rig.model.traverse(o=>{if(o instanceof THREE.Mesh)for(const material of Array.isArray(o.material)?o.material:[o.material]){const m=material as THREE.MeshStandardMaterial;if(m.emissive){if(m.userData.originalEmissive===undefined){m.userData.originalEmissive=m.emissive.getHex();m.userData.originalEmissiveIntensity=m.emissiveIntensity;}m.emissive.setHex(flashHex);m.emissiveIntensity=1;}}});}
      else if(!flashing&&mesh.userData.flashLit){mesh.userData.flashLit=false;rig.model.traverse(o=>{if(o instanceof THREE.Mesh)for(const material of Array.isArray(o.material)?o.material:[o.material]){const m=material as THREE.MeshStandardMaterial;if(m.emissive&&m.userData.originalEmissive!==undefined){m.emissive.setHex(m.userData.originalEmissive);m.emissiveIntensity=m.userData.originalEmissiveIntensity??1;}}});}
     }if(rig){const staggerK=Math.min(1,Math.max(0,((mesh.userData.staggerUntil??0)-time)/.22));rig.model.rotation.x=-(staggerK*staggerK)*.32;}mesh.getObjectByName('marker')!.visible=a.hp>0||!!a.downed;this.previousHp.set(a.id,a.hp);const bar=mesh.getObjectByName('hp')!;bar.scale.x=Math.max(.001,a.hp/a.maxHp);bar.visible=a.hp<a.maxHp&&a.hp>0;mesh.scale.setScalar(a.kind==='corrupted'?(a.maxHp>=200?1.4:1.15):1);
@@ -1079,7 +1197,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    if(me){const model=this.actors.get(me.id);const pos=model?.position??this.tmpV2.set(me.x,0,me.z);const target=this.camTarget.set(pos.x,1.55,pos.z);const forward=this.camForward.set(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch));
     if(first){this.camera.position.copy(target);this.camera.rotation.set(pitch,-yaw,0,'YXZ');}
     else{const desired=this.camDesired.copy(target).addScaledVector(forward,-6);desired.y+=2;const delta=this.camDelta.copy(desired).sub(target);this.camRay.set(target,delta.clone().normalize());this.camRay.far=delta.length();const hits=this.camRay.intersectObjects(this.solid,false);if(hits.length)desired.copy(target).addScaledVector(delta.normalize(),Math.max(.45,hits[0].distance-.3));this.camera.position.copy(desired);this.camera.lookAt(this.tmpV.copy(target).addScaledVector(forward,4));}
-    const selected=me.weapon??'sword',stats=weaponStats(selected),source=this.characterAssets.custom.get(selected);if(source&&this.activeWeapon!==selected){this.weapon.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])if(this.activeWeapon)m.dispose();});this.weapon.clear();this.weapon.add(equipmentModel(source.scene,stats.length*.78,false,selected));this.weapon.traverse(o=>{o.castShadow=false;});this.activeWeapon=selected;if(this.trailSerial!==(me.attackSerial??0)){if(this.trailSerial>=0&&!first&&me.hp>0){const trailColor=weaponCombatProfile(selected).trail;this.tmpV2.set(me.x,0,me.z);this.fx.trail(this.tmpV2,me.yaw??yaw,stats.reach,trailColor[0],trailColor[1],trailColor[2]);}this.trailSerial=me.attackSerial??0;}}
+    const selected=me.weapon??'sword',stats=weaponStats(selected),source=this.characterAssets.custom.get(selected);const combatProfile=weaponCombatProfile(selected);if(this.lastHeavySerial!==(me.attackSerial??0)){this.lastHeavySerial=me.attackSerial??0;if(combatProfile.weight>0)this.onHeavyAttack(combatProfile);}if(source&&this.activeWeapon!==selected){this.weapon.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])if(this.activeWeapon)m.dispose();});this.weapon.clear();this.weapon.add(equipmentModel(source.scene,stats.length*.78,false,selected));this.weapon.traverse(o=>{o.castShadow=false;});this.activeWeapon=selected;if(this.trailSerial!==(me.attackSerial??0)){if(this.trailSerial>=0&&!first&&me.hp>0){const trailColor=weaponCombatProfile(selected).trail;this.tmpV2.set(me.x,0,me.z);this.fx.trail(this.tmpV2,me.yaw??yaw,stats.reach,trailColor[0],trailColor[1],trailColor[2]);}this.trailSerial=me.attackSerial??0;}}
     this.weapon.visible=first&&me.hp>0;this.shield.visible=first&&me.hp>0&&stats.shield;this.weapon.position.set(.32,-.4,-.78);this.weapon.rotation.set(me.block&&!stats.shield?-.5:.1,0,me.block&&!stats.shield?-1.1:-.2);if(this.fpSerial!==(me.attackSerial??0)){if(this.fpSerial>=0){this.fpDuration=stats.cooldown*.85;this.fpAttack=this.fpDuration;}this.fpSerial=me.attackSerial??0;}this.fpAttack=Math.max(0,this.fpAttack-dt);if(this.fpAttack>0){const t=1-this.fpAttack/this.fpDuration,arc=Math.sin(Math.PI*t),strike=Math.sin(Math.PI*Math.min(1,t*1.6)),style=swingStyle(selected);if(style==='thrust'){this.weapon.position.z-=strike*.6;this.weapon.position.y+=strike*.05;this.weapon.rotation.x-=strike*.18;this.weapon.rotation.z-=arc*.05;this.weapon.position.x+=arc*.05;}else if(style==='cleave'){this.weapon.rotation.z-=arc*1.9;this.weapon.rotation.x-=strike*.65;this.weapon.rotation.y+=arc*.35;this.weapon.position.x-=arc*.45;this.weapon.position.z-=strike*.18;}else if(style==='crush'){this.weapon.rotation.x-=strike*1.7;this.weapon.rotation.z+=arc*.35;this.weapon.position.y+=arc*.22-strike*.18;this.weapon.position.z-=strike*.24;this.weapon.position.x-=arc*.12;}else{this.weapon.rotation.z-=arc*2;this.weapon.rotation.y-=arc*.5;this.weapon.position.x-=arc*.5;this.weapon.position.z-=arc*.22;this.weapon.position.y+=strike*.08;}}this.shield.position.lerp(this.shieldTarget.set(me.block?-.12:-.38,me.block?-.12:-.38,-.82),1-Math.exp(-dt*16));
    }
    if(this.previewActorId){
@@ -1102,7 +1220,8 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     this.camera.rotation.set(this.qaView.pitch,-this.qaView.yaw,0,'YXZ');
     this.weapon.visible=false;this.shield.visible=false;
    }
-   if(this.qaBody&&this.qaBodyActor){this.camera.getWorldDirection(this.tmpV);this.qaBody.position.set(this.camera.position.x+this.tmpV.x*this.qaBodyDistance,0,this.camera.position.z+this.tmpV.z*this.qaBodyDistance);this.qaBody.rotation.y=Math.atan2(this.camera.position.x-this.qaBody.position.x,this.camera.position.z-this.qaBody.position.z);this.qaBodyRig?.update(this.qaBodyActor,false,dt);}
+   this.applyCombatCamera(dt);
+   if(this.qaBody&&this.qaBodyActor){this.camera.getWorldQuaternion(this.rainQuat);this.tmpV2.set(0,0,-1).applyQuaternion(this.rainQuat);this.tmpV2.y=0;const flen=Math.hypot(this.tmpV2.x,this.tmpV2.z)||1;this.tmpV2.x/=flen;this.tmpV2.z/=flen;this.qaBody.position.set(this.camera.position.x+this.tmpV2.x*this.qaBodyDistance,0,this.camera.position.z+this.tmpV2.z*this.qaBodyDistance);this.qaBody.visible=true;this.qaBody.rotation.y=Math.atan2(this.camera.position.x-this.qaBody.position.x,this.camera.position.z-this.qaBody.position.z);this.qaBody.updateMatrixWorld(true);this.qaBodyRig?.update(this.qaBodyActor,false,dt*this.visualScale);}
    if(g&&!this.firstGameFrameMarked){this.firstGameFrameMarked=true;try{performance.mark('ss:firstGameFrame');}catch{}}
    if(this.postfx)this.postfx.render();else this.renderer.render(this.scene,this.camera);
   }

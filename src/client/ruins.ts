@@ -443,6 +443,27 @@ export const CYCLE4_PROPS = {
   smithyCrates: SMITHY_CRATES.length
 } as const;
 
+// ---------------------------------------------------------------------------------------------
+// Cycle-5 ritual / smithy depth: a gothic stone altar in front of the Ashen Moor chapel landmark and
+// a forge furnace beside each blacksmith stall (both new warehouse props, same culled dressing path).
+// ---------------------------------------------------------------------------------------------
+
+/** Gothic candle altar on the chapel approach, in front of the Ashen Moor chapel (its front faces east). */
+export const STONE_ALTARS: readonly PropPlacement[] = [
+  {x: -27.71, z: -226.14, yaw: 2.9208}
+];
+
+/** Forge furnaces beside the two blacksmith stalls (village landmark + crossing camp). */
+export const FORGE_FURNACES: readonly PropPlacement[] = [
+  {x: 52.14, z: 7.3, yaw: 2.4668},
+  {x: 32, z: -42.3, yaw: -Math.PI / 2}
+];
+
+export const CYCLE5_PROPS = {
+  altars: STONE_ALTARS.length,
+  furnaces: FORGE_FURNACES.length
+} as const;
+
 function landmarkPose(key: LandmarkKey, cx: number, cz: number, height: number, tx: number, tz: number, ty: number) {
   const dx = tx - cx;
   const dz = tz - cz;
@@ -462,6 +483,27 @@ export const LANDMARK_QA_POSES = [
   landmarkPose('green', 69.2, -21, 2.8, 56, -6, 3.0),
   landmarkPose('ashen', -36, -190, 3.2, -36, -228, 5.0),
   landmarkPose('crown', -34, -432, 3.2, -34, -472, 7.3)
+] as const;
+
+function contentPose(key: string, cx: number, cz: number, height: number, tx: number, tz: number, ty: number) {
+  const dx = tx - cx;
+  const dz = tz - cz;
+  return {
+    key,
+    x: cx,
+    z: cz,
+    height,
+    yaw: Math.atan2(dx, -dz),
+    pitch: Math.atan2(ty - height, Math.max(0.01, Math.hypot(dx, dz))),
+    distance: Math.hypot(dx, dz)
+  };
+}
+
+/** QA framing for the cycle-5 content: chapel altar + both smithies (stall + furnace + dressing). */
+export const CONTENT_QA_POSES = [
+  contentPose('altar', -16, -224, 2.8, -31, -226.5, 2.4),
+  contentPose('furnace-village', 48, 18, 2.8, 50, 5, 1.5),
+  contentPose('furnace-camp', 40, -44, 2.6, 32, -41, 1.5)
 ] as const;
 
 const RACK_DX = 5.0;
@@ -1120,7 +1162,10 @@ export function addRuins(scene: THREE.Scene): {
     placeDressingAsset('stone_well', STONE_WELLS, 1.7, 'dressing:wells', {scaleVariance: true}),
     placeDressingAsset('blacksmith_stall', BLACKSMITH_STALLS, 2.6, 'dressing:stalls'),
     placeDressingAsset('barrels', SMITHY_BARRELS, 1.45, 'dressing:smithy-barrels', {scaleVariance: true}),
-    placeDressingAsset('chest', SMITHY_CRATES, 0.57, 'dressing:smithy-crates', {scaleVariance: true})
+    placeDressingAsset('chest', SMITHY_CRATES, 0.57, 'dressing:smithy-crates', {scaleVariance: true}),
+    // cycle 5: chapel altar + forge furnaces (new warehouse props)
+    placeDressingAsset('stone_altar', STONE_ALTARS, 1.4, 'dressing:altar'),
+    placeDressingAsset('forge_furnace', FORGE_FURNACES, 2.4, 'dressing:furnaces')
   ]).catch((error) => console.warn('[ruins] asynchronous placement failed', error));
   buildBanners();
   buildFlames();

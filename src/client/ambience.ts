@@ -1,5 +1,6 @@
 import type {Actor, Game} from '../shared/types';
-import {REGIONS,dist} from '../shared/world';
+import {REGIONS,START,NEST,dist} from '../shared/world';
+import {FORGE_FURNACES,STONE_ALTARS} from './ruins';
 const clamp01=(v:number)=>(v<0?0:v>1?1:v);
 /** Region audio profiles derived from shared/world. Region centres use the same offset-80 mapping
  * the HUD uses to pick the player's region, so the audio regions match the visible region zones. */
@@ -15,7 +16,39 @@ const REGION_HYSTERESIS=14;
 /** Weather hook contract from world-scene (window.__ssWeather). All fields optional/defensive. */
 type WeatherState={region?:string;phase?:string;intensity?:number;nextChangeAt?:number;flash?:number};
 type WeatherWindow={__ssWeather?:()=>WeatherState|undefined};
+/** Optional world-scene surface helper (window.__ssSurfaceAt) — preferred over our local heuristic. */
+type SurfaceWindow={__ssSurfaceAt?:(x:number,z:number)=>string|undefined};
 const WEATHER_VOLUMES=[.055,.06,.05];
+/** Surface-aware footsteps: surface at the player derived from shared/world + ruins placements. */
+type SurfaceKind='stone'|'grass'|'snow'|'ash'|'wood';
+const SURFACE_INDEX:Record<SurfaceKind,number>={stone:0,grass:1,snow:2,ash:3,wood:4};
+/** Base filter frequency per surface (varied ±6 % per step for light randomization). */
+const SURFACE_FREQS:number[]=[900,430,1200,900,330];
+/** Mirrors scene.ts's merged road mesh route (START → per-region spurs → NEST), road half-width ~2.4 m. */
+const ROAD_ROUTE:{x:number;z:number}[]=[START,...REGIONS.flatMap(region=>[
+ {x:0,z:region.offset+12},{x:0,z:region.offset+24},{x:42,z:region.offset-45},{x:42,z:region.offset-55},
+ {x:42,z:region.offset-43},{x:-24,z:region.offset-113},{x:-24,z:region.offset-123},{x:-24,z:region.offset-112},{x:0,z:region.offset-200}
+]),NEST];
+const ROAD_HALF_WIDTH=2.4;
+const CASTLE_COURT_RADIUS=9.6;
+const WOOD_RADIUS=7;
+/** Landmark ambience anchors imported from ruins.ts (shipped placements = single source of truth). */
+const ASHEN_ALTAR=STONE_ALTARS[0]??{x:-27.71,z:-226.14};
+const FORGE_SITES=FORGE_FURNACES.length>0?FORGE_FURNACES:[{x:52.14,z:7.3},{x:32,z:-42.3}];
+const CHAPEL_RADIUS=20;
+const FORGE_RADIUS=16;
+function distanceToRoad(x:number,z:number){
+ let best=Infinity;
+ for(let i=1;i<ROAD_ROUTE.length;i++){
+  const a=ROAD_ROUTE[i-1],b=ROAD_ROUTE[i];
+  const abx=b.x-a.x,abz=b.z-a.z,lengthSq=abx*abx+abz*abz;
+  let t=lengthSq>0?((x-a.x)*abx+(z-a.z)*abz)/lengthSq:0;
+  t=Math.max(0,Math.min(1,t));
+  const dx=x-(a.x+abx*t),dz=z-(a.z+abz*t),distance=Math.hypot(dx,dz);
+  if(distance<best)best=distance;
+ }
+ return best;
+}
 /**
  * Procedural WebAudio ambience + adaptive music. Every layer is synthesised at runtime — no audio
  * files: wind, a horde drone that rises with nearby undead, a plague-nest hum/pad (and a dissonant
@@ -31,6 +64,12 @@ const WEATHER_VOLUMES=[.055,.06,.05];
  * with gusts (Frozen Crown), ash hiss/ember drift/distant groans with haze-driven bus muffling
  * (Ashen Moor). Weather layers crossfade with the region ambience, duck under combat, fade when
  * paused/Sound is off, and are lazily built/torn down.
+ *
+ * Footsteps are surface-aware (stone road/courtyard, grass, snow crunch, dry ash, wood planks at
+ * smithy stalls/camps) and gait-aware (walk/jog/run levels and cadence, with light pitch/pan
+ * variation). Quiet landmark beds crossfade by distance: a chapel/ritual choir + candle hiss near
+ * the Ashen chapel altar, and a forge bed (fire roar + rate-limited hammer clinks/quench hiss) at
+ * the two blacksmith stalls, both lazily built and torn down when out of range.
  *
  * The music bed is adaptive: it fades in during exploration, swells near the plague nest and during
  * an active siege, eases down for a while after a castle capture, ducks under combat via duck()
@@ -54,7 +93,27 @@ export class Ambience{
  private nestPadGain?:GainNode;
  private fireGain?:GainNode;
  private fireLowGain?:GainNode;
- private stepGain?:GainNode;
+ // Surface-aware footsteps: one pre-built filtered-noise chain per surface + a shared panner/thump.
+ private stepPanner?:StereoPannerNode;
+ private stepLayers:(GainNode|undefined)[]=[undefined,undefined,undefined,undefined,undefined];
+ private stepFilters:(BiquadFilterNode|undefined)[]=[undefined,undefined,undefined,undefined,undefined];
+ private stepThumpGain?:GainNode;
+ private surface:SurfaceKind='grass';
+ // Landmark ambience (lazily built, distance-faded, torn down when out of range).
+ private chapelGain?:GainNode;
+ private chapelBuilt=false;
+ private chapelIdle=0;
+ private chapelNear=0;
+ private chapelSources:AudioScheduledSourceNode[]=[];
+ private chapelNodes:AudioNode[]=[];
+ private forgeGain?:GainNode;
+ private forgeBuilt=false;
+ private forgeIdle=0;
+ private forgeNear=0;
+ private forgeSources:AudioScheduledSourceNode[]=[];
+ private forgeNodes:AudioNode[]=[];
+ private hammerTimer=1.6;
+ private quenchTimer=7;
  private heartGain?:GainNode;
  private started=false;
  private noise?:AudioBuffer;
@@ -232,12 +291,8 @@ export class Ambience{
   const ember=c.createBufferSource();ember.buffer=this.noise;ember.loop=true;
   ember.connect(emberFilter);emberFilter.connect(emberGain);emberGain.connect(master);ember.start();
   this.fireLowGain=emberGain;
-  // Footsteps: looped noise gated by short envelopes scheduled on movement.
-  const stepFilter=c.createBiquadFilter();stepFilter.type='bandpass';stepFilter.frequency.value=380;stepFilter.Q.value=1.1;
-  const stepGain=c.createGain();stepGain.gain.value=.0001;
-  const steps=c.createBufferSource();steps.buffer=this.noise;steps.loop=true;
-  steps.connect(stepFilter);stepFilter.connect(stepGain);stepGain.connect(master);steps.start();
-  this.stepGain=stepGain;
+  // Surface-aware footsteps: one filtered-noise chain per surface, gated by per-step envelopes.
+  this.buildFootsteps(c,master);
   // Heartbeat: one low sine, pulsed by gain envelopes.
   const heart=c.createOscillator();heart.type='sine';heart.frequency.value=46;
   const heartGain=c.createGain();heartGain.gain.value=.0001;
@@ -571,12 +626,177 @@ export class Ambience{
   }
   if(!pending)for(const node of nodes){try{node.disconnect();}catch{}}
  }
- private footstep(){
-  const c=this.context,step=this.stepGain;if(!c||!step)return;
-  const t=c.currentTime+.005;step.gain.cancelScheduledValues(t);
-  step.gain.setValueAtTime(.0001,t);
-  step.gain.exponentialRampToValueAtTime(.045+Math.random()*.02,t+.014);
-  step.gain.exponentialRampToValueAtTime(.0001,t+.11);
+ /** Pre-build the five surface footstep chains (stone/grass/snow/ash/wood) sharing one panner. */
+ private buildFootsteps(c:AudioContext,master:GainNode){
+  const noise=this.noise;if(!noise)return;
+  const panner=typeof c.createStereoPanner==='function'?c.createStereoPanner():undefined;
+  if(panner)panner.connect(master);
+  const sink:AudioNode=panner??master;
+  const specs:{type:BiquadFilterType;f:number;q:number;second?:{type:BiquadFilterType;f:number;q:number}}[]=[
+   {type:'highpass',f:320,q:.7,second:{type:'bandpass',f:900,q:1.2}},   // stone road / castle courtyard
+   {type:'bandpass',f:430,q:1,second:{type:'lowpass',f:950,q:.6}},      // grass / soil
+   {type:'highpass',f:1200,q:.8,second:{type:'bandpass',f:2100,q:.8}},  // snow (crunchy high band)
+   {type:'lowpass',f:900,q:.8},                                         // ash (soft, dry)
+   {type:'bandpass',f:330,q:2,second:{type:'highpass',f:700,q:.7}}      // wood planks
+  ];
+  const layers:(GainNode|undefined)[]=[];const filters:(BiquadFilterNode|undefined)[]=[];
+  for(const spec of specs){
+   const source=c.createBufferSource();source.buffer=noise;source.loop=true;
+   const first=c.createBiquadFilter();first.type=spec.type;first.frequency.value=spec.f;first.Q.value=spec.q;
+   let last:AudioNode=first;source.connect(first);
+   if(spec.second){const second=c.createBiquadFilter();second.type=spec.second.type;second.frequency.value=spec.second.f;second.Q.value=spec.second.q;first.connect(second);last=second;}
+   const gain=c.createGain();gain.gain.value=.0001;last.connect(gain);gain.connect(sink);source.start();
+   layers.push(gain);filters.push(first);
+  }
+  const thump=c.createOscillator();thump.type='sine';thump.frequency.value=72;
+  const thumpGain=c.createGain();thumpGain.gain.value=.0001;
+  thump.connect(thumpGain);thumpGain.connect(sink);thump.start();
+  this.stepPanner=panner;this.stepLayers=layers;this.stepFilters=filters;this.stepThumpGain=thumpGain;
+ }
+ /** Which surface is the player standing on? Prefer world-scene's `window.__ssSurfaceAt(x,z)` (it
+  * uses the real merged-road mesh route/courtyards/camps/stalls); fall back to our local heuristic
+  * when the helper is absent or returns something unexpected (stub/offline). */
+ private surfaceAt(game:Game,me:Actor):SurfaceKind{
+  if(typeof window!=='undefined'){
+   const hook=(window as unknown as SurfaceWindow).__ssSurfaceAt;
+   if(typeof hook==='function'){
+    try{
+     const surface=hook(me.x,me.z);
+     if(surface==='stone'||surface==='grass'||surface==='snow'||surface==='ash'||surface==='wood')return surface;
+    }catch{}
+   }
+  }
+  for(const site of FORGE_SITES)if(dist(me,site)<WOOD_RADIUS)return 'wood';
+  for(const camp of game.camps)if(dist(me,camp)<5.5)return 'wood';
+  if(dist(me,ASHEN_ALTAR)<10)return 'stone';
+  for(const castle of game.castles)if(dist(me,castle)<CASTLE_COURT_RADIUS)return 'stone';
+  if(distanceToRoad(me.x,me.z)<ROAD_HALF_WIDTH)return 'stone';
+  let region=this.regionIndex,best=-1;
+  for(let i=0;i<3;i++){if(this.regionWeights[i]>best){best=this.regionWeights[i];region=i;}}
+  return region===2?'snow':region===1?'ash':'grass';
+ }
+ /** One short synthesized step on the current surface; gait scales level, cadence and timber. */
+ private footstep(run:boolean){
+  const c=this.context;if(!c)return;
+  const index=SURFACE_INDEX[this.surface],layer=this.stepLayers[index];if(!layer)return;
+  const now=c.currentTime+.004;
+  const peak=(run?.075:.05)*(.85+Math.random()*.3);
+  const duration=(this.surface==='snow'?(run?.16:.14):this.surface==='wood'?(run?.1:.09):(run?.11:.1))*(.9+Math.random()*.2);
+  layer.gain.cancelScheduledValues(now);
+  layer.gain.setValueAtTime(.0001,now);
+  layer.gain.exponentialRampToValueAtTime(Math.max(.0002,peak),now+.012);
+  layer.gain.exponentialRampToValueAtTime(.0001,now+duration);
+  const filter=this.stepFilters[index];
+  if(filter)filter.frequency.setTargetAtTime(SURFACE_FREQS[index]*(.94+Math.random()*.12),now,.01);
+  const panner=this.stepPanner;
+  if(panner)panner.pan.setValueAtTime((Math.random()*2-1)*.32,now);
+  const thump=this.stepThumpGain;
+  if(thump){
+   const thumpPeak=(run?.045:.032)*(.8+Math.random()*.4);
+   thump.gain.cancelScheduledValues(now);
+   thump.gain.setValueAtTime(.0001,now);
+   thump.gain.exponentialRampToValueAtTime(thumpPeak,now+.015);
+   thump.gain.exponentialRampToValueAtTime(.0001,now+.12);
+  }
+ }
+ /** Chapel/ritual bed: low choir-ish pad + drone + candle flicker hiss. */
+ private ensureChapel(){
+  const c=this.context,master=this.master;
+  if(!c||!master||this.chapelBuilt)return;
+  const gain=c.createGain();gain.gain.value=0;gain.connect(master);
+  const sources:AudioScheduledSourceNode[]=[];const nodes:AudioNode[]=[gain];
+  const choir=c.createGain();choir.gain.value=.5;choir.connect(gain);nodes.push(choir);
+  for(const [freq,level] of [[146.83,.5],[174.61,.4],[220,.32],[293.66,.18]] as const){
+   const osc=c.createOscillator();osc.type='triangle';osc.frequency.value=freq;
+   const g=c.createGain();g.gain.value=level;osc.connect(g);g.connect(choir);osc.start();sources.push(osc);nodes.push(g);
+  }
+  const trem=c.createOscillator();trem.type='sine';trem.frequency.value=.07;
+  const tremGain=c.createGain();tremGain.gain.value=.12;
+  trem.connect(tremGain);tremGain.connect(choir.gain);trem.start();sources.push(trem);nodes.push(tremGain);
+  const drone=c.createOscillator();drone.type='sine';drone.frequency.value=73.42;
+  const droneGain=c.createGain();droneGain.gain.value=.3;
+  drone.connect(droneGain);droneGain.connect(gain);drone.start();sources.push(drone);nodes.push(droneGain);
+  const hiss=this.noiseLoop(c,'highpass',2400,.7,.22,gain,sources,nodes);
+  if(hiss){
+   const flicker=c.createOscillator();flicker.type='sine';flicker.frequency.value=.4;
+   const flickerGain=c.createGain();flickerGain.gain.value=.07;
+   flicker.connect(flickerGain);flickerGain.connect(hiss.gain.gain);flicker.start();sources.push(flicker);nodes.push(flickerGain);
+  }
+  this.chapelGain=gain;this.chapelSources=sources;this.chapelNodes=nodes;this.chapelBuilt=true;
+ }
+ private stopChapel(){
+  if(!this.chapelBuilt)return;
+  for(const source of this.chapelSources){try{source.stop();}catch{}try{source.disconnect();}catch{}}
+  for(const node of this.chapelNodes){try{node.disconnect();}catch{}}
+  this.chapelSources=[];this.chapelNodes=[];this.chapelGain=undefined;this.chapelBuilt=false;this.chapelIdle=0;
+ }
+ /** Forge bed: fire roar + crackle loop (hammer/quench one-shots are separate). */
+ private ensureForge(){
+  const c=this.context,master=this.master;
+  if(!c||!master||this.forgeBuilt)return;
+  const gain=c.createGain();gain.gain.value=0;gain.connect(master);
+  const sources:AudioScheduledSourceNode[]=[];const nodes:AudioNode[]=[gain];
+  this.noiseLoop(c,'lowpass',300,.8,.5,gain,sources,nodes);
+  const crackle=this.crackle;
+  if(crackle){
+   const source=c.createBufferSource();source.buffer=crackle;source.loop=true;
+   const filter=c.createBiquadFilter();filter.type='bandpass';filter.frequency.value=900;filter.Q.value=.9;
+   const g=c.createGain();g.gain.value=.35;
+   source.connect(filter);filter.connect(g);g.connect(gain);source.start();sources.push(source);nodes.push(filter,g);
+  }
+  this.forgeGain=gain;this.forgeSources=sources;this.forgeNodes=nodes;this.forgeBuilt=true;
+ }
+ private stopForge(){
+  if(!this.forgeBuilt)return;
+  for(const source of this.forgeSources){try{source.stop();}catch{}try{source.disconnect();}catch{}}
+  for(const node of this.forgeNodes){try{node.disconnect();}catch{}}
+  this.forgeSources=[];this.forgeNodes=[];this.forgeGain=undefined;this.forgeBuilt=false;this.forgeIdle=0;
+ }
+ /** Rate-limited metallic hammer clink (occasionally a double tap) while near a forge. */
+ private forgeHammer(){
+  const c=this.context,out=this.forgeGain;
+  if(!c||!out||!this.enabled()||this.paused)return;
+  const now=c.currentTime,nodes:AudioNode[]=[];let pending=0;
+  const cleanup=()=>{if(--pending<=0)for(const node of nodes){try{node.disconnect();}catch{}}};
+  const clink=(delay:number)=>{
+   const start=now+delay,level=.006+.004*this.forgeNear;
+   const osc=c.createOscillator(),gain=c.createGain();
+   osc.type='sine';osc.frequency.setValueAtTime(1500+Math.random()*500,start);
+   osc.frequency.exponentialRampToValueAtTime(900,start+.18);
+   gain.gain.setValueAtTime(.0001,start);
+   gain.gain.exponentialRampToValueAtTime(level,start+.006);
+   gain.gain.exponentialRampToValueAtTime(.0001,start+.2);
+   osc.connect(gain);gain.connect(out);nodes.push(gain);
+   pending++;osc.onended=cleanup;osc.start(start);osc.stop(start+.22);
+   const noise=this.noise;
+   if(noise){
+    const source=c.createBufferSource(),filter=c.createBiquadFilter(),noiseGain=c.createGain();
+    source.buffer=noise;filter.type='bandpass';filter.frequency.value=3200;filter.Q.value=5;
+    noiseGain.gain.setValueAtTime(.0001,start);
+    noiseGain.gain.exponentialRampToValueAtTime(.012,start+.005);
+    noiseGain.gain.exponentialRampToValueAtTime(.0001,start+.09);
+    source.connect(filter);filter.connect(noiseGain);noiseGain.connect(out);nodes.push(filter,noiseGain);
+    pending++;source.onended=cleanup;source.start(start,Math.random()*.3);source.stop(start+.1);
+   }
+  };
+  clink(0);
+  if(Math.random()<.4)clink(.12+Math.random()*.07);
+  if(!pending)for(const node of nodes){try{node.disconnect();}catch{}}
+ }
+ /** Occasional quench hiss while near a forge. */
+ private forgeQuench(){
+  const c=this.context,out=this.forgeGain,noise=this.noise;
+  if(!c||!out||!noise||!this.enabled()||this.paused)return;
+  const now=c.currentTime;
+  const source=c.createBufferSource(),filter=c.createBiquadFilter(),gain=c.createGain();
+  source.buffer=noise;
+  filter.type='highpass';filter.frequency.setValueAtTime(2600,now);filter.frequency.exponentialRampToValueAtTime(1200,now+.7);
+  gain.gain.setValueAtTime(.0001,now);
+  gain.gain.exponentialRampToValueAtTime(.008,now+.02);
+  gain.gain.exponentialRampToValueAtTime(.0001,now+.75);
+  source.connect(filter);filter.connect(gain);gain.connect(out);
+  source.onended=()=>{source.disconnect();filter.disconnect();gain.disconnect();};
+  source.start(now,Math.random()*.5);source.stop(now+.8);
  }
  private heartbeat(intensity:number){
   const c=this.context,heart=this.heartGain;if(!c||!heart)return;
@@ -663,7 +883,13 @@ export class Ambience{
     for(const camp of game.camps){const d=dist(me,camp);if(d<fireD)fireD=d;}
     if(fireD<28){const near=1-fireD/28;fireLevel=near*near*(.62+Math.random()*.38);}
     this.coverLevel=archD<14?clamp01((14-archD)/8):0;
-   }
+    this.surface=this.surfaceAt(game,me);
+    const chapelDistance=dist(me,ASHEN_ALTAR);
+    this.chapelNear=chapelDistance<CHAPEL_RADIUS?1-chapelDistance/CHAPEL_RADIUS:0;
+    let forgeDistance=Infinity;
+    for(const site of FORGE_SITES){const d=dist(me,site);if(d<forgeDistance)forgeDistance=d;}
+    this.forgeNear=forgeDistance<FORGE_RADIUS?1-forgeDistance/FORGE_RADIUS:0;
+   }else{this.chapelNear=0;this.forgeNear=0;}
    this.nearbyUndead=undead;
    // Capture easing: the bed eases down for ~24 s after a castle is taken.
    if(game){
@@ -731,6 +957,23 @@ export class Ambience{
     else if(weatherKind===0)cutoff*=1-.12*weatherInfluence;
     if(this.coverLevel>0)cutoff=Math.min(cutoff,2400-900*(1-this.coverLevel));
     masterFilter.frequency.setTargetAtTime(Math.max(1200,cutoff),now,.4);
+   }
+   // ---- landmark ambience: chapel ritual + forge, distance-crossfaded and lazily torn down ----
+   const chapelTarget=enabled?this.chapelNear*this.chapelNear*.022:0;
+   if(chapelTarget>.0008){
+    this.ensureChapel();this.chapelIdle=0;
+    const chapel=this.chapelGain;if(chapel)chapel.gain.setTargetAtTime(chapelTarget,now,.6);
+   }else if(this.chapelBuilt){
+    const chapel=this.chapelGain;if(chapel)chapel.gain.setTargetAtTime(0,now,.5);
+    this.chapelIdle+=.08;if(this.chapelIdle>2.5)this.stopChapel();
+   }
+   const forgeTarget=enabled?this.forgeNear*this.forgeNear*.024:0;
+   if(forgeTarget>.0008){
+    this.ensureForge();this.forgeIdle=0;
+    const forge=this.forgeGain;if(forge)forge.gain.setTargetAtTime(forgeTarget,now,.5);
+   }else if(this.forgeBuilt){
+    const forge=this.forgeGain;if(forge)forge.gain.setTargetAtTime(0,now,.4);
+    this.forgeIdle+=.08;if(this.forgeIdle>2.5)this.stopForge();
    }
    const wind=this.windGain,windFilter=this.windFilter;
    if(wind){
@@ -812,12 +1055,23 @@ export class Ambience{
     if(this.ashGroanTimer<=0){this.ashGroan();this.ashGroanTimer=(8+Math.random()*10)*(1-.5*this.weatherIntensity);}
    }
   }
+  // Forge one-shots: hammer clinks + occasional quench hiss while the forge layer is audible.
+  if(enabled&&playing&&this.forgeBuilt&&this.forgeNear>.12){
+   this.hammerTimer-=dt;
+   if(this.hammerTimer<=0){this.forgeHammer();this.hammerTimer=(.8+Math.random()*1.9)*(1.5-.9*this.forgeNear);}
+   this.quenchTimer-=dt;
+   if(this.quenchTimer<=0){this.forgeQuench();this.quenchTimer=6+Math.random()*8;}
+  }else if(this.hammerTimer<.6)this.hammerTimer=.6;
   if(me){
    if(this.hasPrev){
     const speed=Math.hypot(me.x-this.prevX,me.z-this.prevZ)/dt;
-    if(enabled&&speed>1.2&&speed<16&&me.hp>0&&!me.downed){
+    if(enabled&&playing&&speed>1.2&&speed<16&&me.hp>0&&!me.downed){
      this.stepTimer-=dt;
-     if(this.stepTimer<=0){this.footstep();this.stepTimer=speed>5.4?.3:speed>2.8?.4:.52;}
+     if(this.stepTimer<=0){
+      const run=speed>4.8;
+      this.footstep(run);
+      this.stepTimer=(run?.3:speed>2.8?.4:.52)*(.9+Math.random()*.2);
+     }
     }else this.stepTimer=.1;
    }
    this.prevX=me.x;this.prevZ=me.z;this.hasPrev=true;

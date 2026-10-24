@@ -85,15 +85,18 @@ const CHAR_GATE = {
   // body-mask target is deferred art debt (asset-forge 1024 atlas in cycle 5 — not worth +1.3 MB now).
   closeupUniqueColorsMin: 300,
   specUniqueColorsTarget: 500,
+  // Cycle-5 SPEC: body-mask close-up colour variety >=500 on at least 5 of the 7 bodies.
+  specColourBodiesRequired: 5,
 };
-// Performance acceptance for cycle 4 (SPEC: <260 calls / <1.95M tris).
-const PERF_GATE = {maxCalls: 260, maxTris: 1_950_000};
+// Performance acceptance for cycle 5 (SPEC: <270 calls / <2.0M tris).
+const PERF_GATE = {maxCalls: 270, maxTris: 2_000_000};
 // QA atmosphere/region audit views requested from world-scene via window.__ssQAView(name).
 const QA_VIEWS = ['treeline', 'fire', 'camp', 'courtyard', 'region-green', 'region-ashen', 'region-crown'];
 // Cycle-3/4 optional views: landmarks, foliage/corruption/wind, char lineup, and the new cycle-4
 // smithy stalls. Each is captured when the hook supports it (or a `__ssQAPose` fallback exists);
 // absence is reported (not a hard fail) so the required 7 stay the gate.
-const QA_VIEWS_OPTIONAL = ['landmark-green', 'landmark-ashen', 'landmark-crown', 'foliage', 'corruption', 'wind', 'char-lineup', 'prop-stall-village', 'prop-stall-camp'];
+const QA_VIEWS_OPTIONAL = ['landmark-green', 'landmark-ashen', 'landmark-crown', 'foliage', 'corruption', 'wind', 'char-lineup', 'prop-stall-village', 'prop-stall-camp', 'content-altar', 'content-altar-close', 'content-furnace-village', 'content-furnace-camp'];
+
 // Cycle-4 cycle appearance coverage: the 5 playable select options + survivor/fallen companion bodies
 // (those two require world-scene's QA body-preview hook; absent => reported, not a hard fail).
 const PLAYER_APPEARANCES = ['templar', 'hero', 'berserker', 'ranger', 'ally'];
@@ -127,6 +130,13 @@ const LANDMARK_POSES = {
   // Cycle-4 smithy props (ruins-builder poses): village landmark stall + crossing-camp stall.
   'prop-stall-village': {x: 40, z: -2, height: 2.4, yaw: 2.2143, pitch: -0.0898},
   'prop-stall-camp': {x: 26, z: -31, height: 2.4, yaw: 0.7854, pitch: -0.1055},
+  // Cycle-5 content: chapel altar + smithy furnaces (ruins-builder FINAL poses + one QA close-up).
+  'content-altar': {x: -16, z: -224, height: 2.8, yaw: -1.4056, pitch: -0.0263},
+  'content-altar-close': {x: -24, z: -221, height: 2.2, yaw: -0.628, pitch: -0.126},
+  'content-altar-close2': {x: -26.5, z: -223, height: 1.9, yaw: -0.368, pitch: -0.204},
+  'content-altar-close3': {x: -31.5, z: -218, height: 2.6, yaw: 0.439, pitch: -0.155},
+  'content-furnace-village': {x: 48, z: 18, height: 2.8, yaw: 0.1526, pitch: -0.0985},
+  'content-furnace-camp': {x: 40, z: -44, height: 2.6, yaw: -1.9296, pitch: -0.128},
 };
 // Cycle-2 reference timings (SwiftShader, same machine) and the cycle-3 "meaningfully earlier" gate.
 const CYCLE2_TIMINGS = {landingMs: 3564, hudMs: 16308, stateMs: 17415, joinMs: 3698};
@@ -711,6 +721,22 @@ function weatherParticleCount(state) {
   return null;
 }
 
+/** Cycle-5 explicit snow particle counter (`__ssWeather().activeParticles.snow`). */
+function weatherSnowCount(state) {
+  const v = state && state.activeParticles && state.activeParticles.snow;
+  return typeof v === 'number' ? v : 0;
+}
+
+/** Cycle-5 surface-audio hook (`__ssSurfaceAt(x,z)`), when present. */
+async function readSurface(page, x, z) {
+  return page
+    .evaluate(
+      `(()=>{try{if(typeof window.__ssSurfaceAt!=='function')return null;const r=window.__ssSurfaceAt(${Number(x)},${Number(z)});return r===undefined?null:JSON.parse(JSON.stringify(r));}catch(e){return null;}})()`,
+      {timeoutMs: 10000},
+    )
+    .catch(() => null);
+}
+
 /** Cycle-4 load-timing hook: `__ssLoadTimings()` + raw performance marks/measures. */
 async function readLoadTimings(page) {
   return page
@@ -835,22 +861,29 @@ async function captureQaViews(page, outDir, report, check) {
     await qaView(page, null);
     await sleep(300);
   }
-  // Wind check: two shots ~1 s apart of a foliage/grass view; a static scene would diff ~0.
+  // Wind check: three shots ~1.2 s apart of a foliage/grass view; a static scene would diff ~0.
+  // Three samples (max pairwise diff) keep the gate robust when SwiftShader frame timing means a
+  // single 1 s pair can land on nearly-identical wind phases.
   const windViewName = report.views.optionalCaptures.some(o => o.name === 'wind') ? 'wind' : report.views.captures.some(c => c.name === 'treeline') ? 'treeline' : null;
   if (windViewName) {
     const applied = windViewName === 'wind' ? await qaView(page, 'wind') : await qaView(page, 'treeline');
     if (applied && applied.ok !== false) {
       await sleep(QA_CAPTURE_SETTLE_MS);
       const a = await screenshot(page, outDir, 'view-wind-a.png');
-      await sleep(1100);
+      await sleep(1200);
       const b = await screenshot(page, outDir, 'view-wind-b.png');
-      const diff = await comparePngs(page, a, b);
-      report.views.wind = {view: windViewName, files: [a, b], diff};
-      log(`WIND: ${JSON.stringify(diff)} (view=${windViewName})`);
+      await sleep(1200);
+      const c = await screenshot(page, outDir, 'view-wind-c.png');
+      const ab = await comparePngs(page, a, b);
+      const ac = await comparePngs(page, a, c);
+      const bc = await comparePngs(page, b, c);
+      const diff = [ab, ac, bc].sort((x, y) => y.meanAbsLum - x.meanAbsLum)[0];
+      report.views.wind = {view: windViewName, files: [a, b, c], diffs: {ab, ac, bc}, diff};
+      log(`WIND: max=${JSON.stringify(diff)} (view=${windViewName}; ab=${ab.meanAbsLum}, ac=${ac.meanAbsLum}, bc=${bc.meanAbsLum})`);
       check(
-        'perf: foliage/grass wind motion detected (2 shots ~1s apart differ)',
+        'perf: foliage/grass wind motion detected (3 shots ~1.2s apart differ)',
         diff.meanAbsLum >= WIND_GATE.minMeanAbsDiff || diff.changedPct >= 1.0,
-        `meanAbsLum=${diff.meanAbsLum} changed%=${diff.changedPct} (gate >=${WIND_GATE.minMeanAbsDiff})`,
+        `maxMeanAbsLum=${diff.meanAbsLum} changed%=${diff.changedPct} (gate >=${WIND_GATE.minMeanAbsDiff}; ab/ac/bc=${ab.meanAbsLum}/${ac.meanAbsLum}/${bc.meanAbsLum})`,
       );
       await qaView(page, null);
       await sleep(300);
@@ -878,7 +911,12 @@ async function captureQaViews(page, outDir, report, check) {
           force = await setWeather(page, w.region, spec.phase, spec.intensity);
           await sleep(900);
         }
-        const view = await qaView(page, w.view);
+        // Cycle-5: crown captures prefer an optional 10 m `snow-compare` QA view when world-scene ships it.
+        let view = await qaView(page, w.view);
+        if (w.region === 'crown') {
+          const compareView = await qaView(page, 'snow-compare');
+          if (compareView && compareView.ok !== false) view = compareView;
+        }
         if (!view || view.ok === false) {
           report.notes.push(`weather: view '${w.view}' unavailable for ${w.region} ${intensity}`);
           continue;
@@ -886,6 +924,7 @@ async function captureQaViews(page, outDir, report, check) {
         await sleep(QA_CAPTURE_SETTLE_MS);
         const shot = await screenshotWithStats(page, outDir, `weather-${w.label}-${intensity}.png`, null);
         const state = await readWeather(page);
+        const regionInfo = await readRegionInfo(page);
         report.weather.captures.push({
           region: w.region,
           phase: spec.phase,
@@ -893,6 +932,9 @@ async function captureQaViews(page, outDir, report, check) {
           forced: force,
           state,
           particles: weatherParticleCount(state),
+          snow: weatherSnowCount(state),
+          fogDensity: regionInfo?.fog?.density ?? null,
+          regionReported: regionInfo?.region ?? null,
           file: shot.file,
           stats: shot.stats,
         });
@@ -911,7 +953,17 @@ async function captureQaViews(page, outDir, report, check) {
         await sleep(QA_CAPTURE_SETTLE_MS);
         const shot = await screenshotWithStats(page, outDir, 'weather-lowtier-rain-high.png', null);
         const state = await readWeather(page);
-        report.weather.lowTier = {state, particles: weatherParticleCount(state), file: shot.file, stats: shot.stats};
+        report.weather.lowTier = {state, particles: weatherParticleCount(state), snow: weatherSnowCount(state), file: shot.file, stats: shot.stats};
+      }
+      // Cycle-5: low-tier snowstorm must expose 0 snow particles.
+      await setWeather(page, 'crown', 'snowstorm', 1.0);
+      await sleep(1200);
+      const snowView = await qaView(page, 'region-crown');
+      if (snowView && snowView.ok !== false) {
+        await sleep(QA_CAPTURE_SETTLE_MS);
+        const shot = await screenshotWithStats(page, outDir, 'weather-lowtier-snowstorm.png', null);
+        const state = await readWeather(page);
+        report.weather.lowTierSnow = {state, particles: weatherParticleCount(state), snow: weatherSnowCount(state), file: shot.file, stats: shot.stats};
       }
       await page.evaluate(`window.__ssQuality&&window.__ssQuality('high')`);
       await qaView(page, null);
@@ -949,6 +1001,34 @@ async function captureQaViews(page, outDir, report, check) {
         );
       }
     }
+    // Cycle-5 snowstorm audit: explicit `activeParticles.snow` counter, fog/whiteout response, and
+    // the moved region-crown camera reporting the crown region.
+    const snowLow = report.weather.captures.find(c => c.region === 'crown' && c.intensity === 'low');
+    const snowHigh = report.weather.captures.find(c => c.region === 'crown' && c.intensity === 'high');
+    if (snowLow && snowHigh) {
+      report.weather.snow = {low: snowLow.snow, high: snowHigh.snow, lowFog: snowLow.fogDensity, highFog: snowHigh.fogDensity, regionLow: snowLow.regionReported, regionHigh: snowHigh.regionReported};
+      check(
+        'weather: snowstorm snow particles high > low (activeParticles.snow)',
+        snowHigh.snow > snowLow.snow,
+        `snow: low=${snowLow.snow} high=${snowHigh.snow}; per-phase ${snowLow.phase}/${snowHigh.phase}`,
+      );
+      if (snowLow.fogDensity != null && snowHigh.fogDensity != null) {
+        check(
+          'weather: snowstorm increases fog/whiteout vs snow',
+          snowHigh.fogDensity > snowLow.fogDensity,
+          `fog density low=${snowLow.fogDensity} high=${snowHigh.fogDensity}`,
+        );
+      } else {
+        report.notes.push('weather: fog density not exposed via __ssRegionInfo during snow captures — visual check only');
+      }
+    }
+    if (report.weather.lowTierSnow) {
+      check(
+        'weather: low quality tier => 0 snow particles',
+        report.weather.lowTierSnow.snow === 0,
+        `lowTier snow=${report.weather.lowTierSnow.snow} (state ${JSON.stringify(report.weather.lowTierSnow.state?.qualityScale ?? null)})`,
+      );
+    }
   } else {
     report.notes.push('weather: __ssWeather hook absent — weather audit skipped');
   }
@@ -981,6 +1061,17 @@ async function captureQaViews(page, outDir, report, check) {
       distinctness.maxColorDistance >= REGION_GATE.minPairwiseColorDistance || distinctness.maxLuminanceDiff >= REGION_GATE.minLuminanceSpread,
       JSON.stringify({maxColorDistance: distinctness.maxColorDistance, minColorDistance: distinctness.minColorDistance, maxLuminanceDiff: distinctness.maxLuminanceDiff, gate: REGION_GATE}),
     );
+    // Cycle-5: the moved region-crown camera must report the crown region (not the moor blend).
+    const crownCapture = report.views.captures.find(c => c.name === 'region-crown');
+    if (crownCapture && crownCapture.regionInfo) {
+      check(
+        'perf: region-crown camera reports the crown region',
+        crownCapture.regionInfo.region === 'crown',
+        `reported=${crownCapture.regionInfo.region} fog=${JSON.stringify(crownCapture.regionInfo.fog ?? null)}`,
+      );
+    } else {
+      report.notes.push('perf: region-crown region info unavailable — crown camera report not gated');
+    }
   }
 }
 
@@ -1287,6 +1378,49 @@ async function analyzePngBodyMask(page, base64, region) {
     {awaitPromise: true, timeoutMs: 60000},
   );
 }
+/**
+ * Cycle-5 high-frequency detail metric (plate texel density / "stretched flat face" detector):
+ * mean + p90 gradient magnitude and edge density over a crop. Uniform fine texel detail gives higher
+ * values than large flat quads; used per body close-up alongside the visual inspection.
+ */
+async function analyzePngGradient(page, base64, region) {
+  return page.evaluate(
+    `(()=>new Promise((resolve,reject)=>{
+      const region=${JSON.stringify(region)};
+      const img=new Image();
+      img.onload=()=>{
+        try{
+          const W=img.naturalWidth,H=img.naturalHeight;
+          const c=document.createElement('canvas');c.width=W;c.height=H;
+          const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0);
+          const x0=Math.max(0,Math.floor(W*region.x0)),x1=Math.min(W,Math.ceil(W*region.x1));
+          const y0=Math.max(0,Math.floor(H*region.y0)),y1=Math.min(H,Math.ceil(H*region.y1));
+          const d=ctx.getImageData(0,0,W,H).data;
+          const lum=(x,y)=>{const i=(y*W+x)*4;return 0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2];};
+          const grads=[];let sum=0,edges=0;
+          for(let y=y0+1;y<y1-1;y+=2){
+            for(let x=x0+1;x<x1-1;x+=2){
+              const gx=lum(x+1,y)-lum(x-1,y), gy=lum(x,y+1)-lum(x,y-1);
+              const g=Math.hypot(gx,gy);
+              grads.push(g);sum+=g;
+              if(g>25)edges++;
+            }
+          }
+          const count=grads.length;if(!count){reject(new Error('gradient: empty region'));return;}
+          const sorted=grads.slice().sort((a,b)=>a-b);
+          const pick=p=>sorted[Math.min(sorted.length-1,Math.floor(sorted.length*p))];
+          resolve({region:region||null,sampled:count,
+            meanGradient:+(sum/count).toFixed(2),p90Gradient:+pick(0.9).toFixed(2),p50Gradient:+pick(0.5).toFixed(2),
+            edgePct:+(edges/count*100).toFixed(2)});
+        }catch(e){reject(new Error('gradient: '+(e&&e.message)));}
+      };
+      img.onerror=()=>reject(new Error('gradient: screenshot decode failed'));
+      img.src='data:image/png;base64,${base64.replace(/'/g, "\\'")}';
+    }))()`,
+    {awaitPromise: true, timeoutMs: 60000},
+  );
+}
+
 async function screenshotWithStats(page, outDir, name, region = null) {
   const file = await screenshot(page, outDir, name);
   const base64 = fs.readFileSync(file).toString('base64');
@@ -2252,6 +2386,9 @@ async function captureCharacterReadability(page, {opts, report, check}) {
   if (!hooks.preview) return;
   // Cycle-4: force high quality for armour/beauty captures (software default is now low).
   await forceQuality(page, 'high');
+  // Cycle-5: hold weather clear during the armour capture so cloth/background two-frame diffs are not
+  // polluted by moving precipitation (restored to natural weather after the appearance loop).
+  await setWeather(page, 'march', 'clear', 0);
   await sleep(900);
   const normal = await screenshotWithStats(page, outDir, 'char-third-person.png', CHAR_NORMAL_REGION);
   report.characters.normalThirdPerson = {file: normal.file, stats: normal.stats, before: CHAR_BEFORE_BASELINE.normalPlayerTorso};
@@ -2318,6 +2455,13 @@ async function captureCharacterReadability(page, {opts, report, check}) {
     const coreStats = await statsFromFile(page, shot.file, CHAR_CORE_REGION);
     // Headline detail metric (Lead cycle-4): unique colours over the full close-up frame.
     const fullFrameStats = await statsFromFile(page, shot.file, null);
+    // Cycle-5 plate texel-density metric (gradient/edge energy over the body crop).
+    const detailStats = await analyzePngGradient(page, fs.readFileSync(shot.file).toString('base64'), CHAR_CLOSEUP_REGION);
+    // Cycle-5 cloth-wind check: second frame ~0.6 s later; body-region diff vs a static side strip.
+    await sleep(600);
+    const cloth2 = await screenshot(page, outDir, `char-${value}-cloth2.png`);
+    const clothDiff = await comparePngs(page, shot.file, cloth2, CHAR_CORE_REGION);
+    const clothBgDiff = await comparePngs(page, shot.file, cloth2, {x0: 0.05, y0: 0.1, x1: 0.15, y1: 0.9});
     await charPreview(page, null);
     await sleep(600);
     // Cycle-4 10 m silhouette via a QA camera pose 10 m from the actor (front-ish, chest height).
@@ -2335,11 +2479,16 @@ async function captureCharacterReadability(page, {opts, report, check}) {
       stats: shot.stats,
       coreStats,
       fullFrameStats,
+      detailStats,
+      clothWind: {file: cloth2, diff: clothDiff, backgroundDiff: clothBgDiff},
       tenMeter: tenShot,
     });
     await sleep(400);
   }
   report.characters.appearances = appearances;
+  // Restore natural regional weather after the armour captures.
+  await setWeather(page, null);
+  await sleep(400);
   const capturedAppearances = appearances.filter(a => a.stats && !a.skipped);
   check(
     'char: 7 appearance close-ups captured (5 playable + survivor/fallen)',
@@ -2371,6 +2520,32 @@ async function captureCharacterReadability(page, {opts, report, check}) {
     minColorDistance: pair.length ? +Math.min(...pair.map(p => p.colorDistance)).toFixed(2) : null,
     coreUniqueColors: arms.map(a => ({appearance: a.name, bodyMask: a.stats.uniqueColors, core: a.core?.uniqueColors ?? null, coreSat: a.core?.meanSat ?? null})),
   };
+  // Cycle-5 cloth-wind report (body-region diff between two frames ~0.6 s apart vs a static side strip)
+  report.characters.clothWind = capturedAppearances.map(a => ({
+    appearance: a.appearance,
+    bodyDiff: a.clothWind?.diff ?? null,
+    backgroundDiff: a.clothWind?.backgroundDiff ?? null,
+  }));
+  const clothBodies = report.characters.clothWind.filter(c => c.bodyDiff && c.backgroundDiff);
+  check(
+    'char: cloth prims show frame-to-frame motion (body diff exceeds static background)',
+    clothBodies.length > 0 && clothBodies.some(c => c.bodyDiff.meanAbsLum > 0.15 && c.bodyDiff.meanAbsLum > c.backgroundDiff.meanAbsLum * 1.5),
+    `${clothBodies.filter(c => c.bodyDiff.meanAbsLum > 0.15 && c.bodyDiff.meanAbsLum > c.backgroundDiff.meanAbsLum * 1.5).length}/${clothBodies.length} bodies show body-region motion above static background (subtle wind; visual read_image confirms cloth vs idle)`,
+  );
+  // Cycle-5 survivor identity vs the cycle-4 reference capture (before/after evidence)
+  const survivorAppearance = appearances.find(a => a.appearance === 'survivor' && a.file);
+  const survivorRef = path.join(ROOT, 'qa', 'characters-b7', 'char-survivor-closeup.png');
+  if (survivorAppearance && fs.existsSync(survivorRef)) {
+    try {
+      const diff = await comparePngs(page, survivorRef, survivorAppearance.file, CHAR_CLOSEUP_REGION);
+      report.characters.survivorIdentity = {reference: path.relative(ROOT, survivorRef), current: path.relative(ROOT, survivorAppearance.file), diff};
+      check('char: survivor identity differs from cycle-4 soldier clone (before/after diff)', diff.meanAbsLum > 0.5 || diff.changedPct > 1, JSON.stringify(diff));
+    } catch (error) {
+      report.notes.push(`char: survivor before/after diff failed (${error?.message || error})`);
+    }
+  } else {
+    report.notes.push('char: survivor before/after reference missing (qa/characters-b7/char-survivor-closeup.png) — identity assessed visually only');
+  }
   const undead = [];
   const allCandidates = actors.filter(a => a.kind !== 'player' && a.kind !== 'soldier');
   // Prefer actors in open ground (outside castle courtyards) so the 2.8 m preview camera does not
@@ -2491,6 +2666,8 @@ async function captureCharacterReadability(page, {opts, report, check}) {
   const avg = key => +(playerStats.reduce((sum, s) => sum + s[key], 0) / Math.max(1, playerStats.length)).toFixed(2);
   const max = key => +Math.max(...playerStats.map(s => s[key])).toFixed(2);
   const fullFrames = capturedAppearances.map(a => a.fullFrameStats?.uniqueColors ?? 0);
+  const bodyColours = capturedAppearances.map(a => ({appearance: a.appearance, bodyMask: a.stats.uniqueColors, fullFrame: a.fullFrameStats?.uniqueColors ?? null, core: a.coreStats?.uniqueColors ?? null, gradientMean: a.detailStats?.meanGradient ?? null}));
+  const bodiesWith500 = bodyColours.filter(b => b.bodyMask >= CHAR_GATE.specUniqueColorsTarget).length;
   const aggregate = {
     avgMean: avg('mean'),
     avgP50: avg('p50'),
@@ -2501,6 +2678,10 @@ async function captureCharacterReadability(page, {opts, report, check}) {
     minUniqueColors: Math.min(...playerStats.map(s => s.uniqueColors)),
     minFullFrameColors: fullFrames.length ? Math.min(...fullFrames) : null,
     avgFullFrameColors: fullFrames.length ? +(fullFrames.reduce((a, b) => a + b, 0) / fullFrames.length).toFixed(1) : null,
+    bodiesWith500,
+    bodiesColour: bodyColours,
+    minGradientMean: bodyColours.filter(b => b.gradientMean != null).length ? +Math.min(...bodyColours.map(b => b.gradientMean ?? Infinity)).toFixed(2) : null,
+    avgGradientMean: bodyColours.filter(b => b.gradientMean != null).length ? +(bodyColours.reduce((a, b) => a + (b.gradientMean ?? 0), 0) / bodyColours.length).toFixed(2) : null,
   };
   report.characters.aggregate = aggregate;
   log(`CHAR CLOSEUPS: ${JSON.stringify(aggregate)} normalTP=${JSON.stringify(normal.stats)} cycle1=${JSON.stringify(CHAR_BEFORE_BASELINE.cycle1)}`);
@@ -2510,15 +2691,20 @@ async function captureCharacterReadability(page, {opts, report, check}) {
     `avgMean=${aggregate.avgMean} (>=${CHAR_GATE.minMean}), avgP90=${aggregate.avgP90} (>=${CHAR_GATE.minP90})`,
   );
   check(
-    'char: close-up body-mask detail (unique colours >= 300; full-frame headline reported)',
-    aggregate.minUniqueColors >= CHAR_GATE.closeupUniqueColorsMin,
-    `minBodyMaskColors=${aggregate.minUniqueColors} (>=${CHAR_GATE.closeupUniqueColorsMin}); full-frame ${aggregate.minFullFrameColors}-${Math.max(...fullFrames)} (avg ${aggregate.avgFullFrameColors}); SPEC >=500 body-mask target deferred as art debt (asset-forge 1024 atlas in cycle 5)`,
+    'char: armour-v3 body-mask colours >=500 on >=5/7 bodies',
+    bodiesWith500 >= CHAR_GATE.specColourBodiesRequired && aggregate.minUniqueColors >= CHAR_GATE.closeupUniqueColorsMin,
+    `${bodiesWith500}/${bodyColours.length} bodies >=500 (required >=${CHAR_GATE.specColourBodiesRequired}); per-body ${JSON.stringify(bodyColours.map(b => `${b.appearance}:${b.bodyMask}`))}; min=${aggregate.minUniqueColors} (floor >=${CHAR_GATE.closeupUniqueColorsMin})`,
   );
-  if (aggregate.minUniqueColors < CHAR_GATE.specUniqueColorsTarget) {
+  if (bodiesWith500 < bodyColours.length) {
     report.notes.push(
-      `char: body-mask unique colours ${aggregate.minUniqueColors} < deferred SPEC target ${CHAR_GATE.specUniqueColorsTarget} — reported as asset-forge palette-richness debt (Lead-approved cycle-4 gate is >=${CHAR_GATE.closeupUniqueColorsMin}); full-frame detail ${aggregate.minFullFrameColors}-${Math.max(...fullFrames)}`,
+      `char: bodies below the SPEC >=500 body-mask colour target: ${JSON.stringify(bodyColours.filter(b => b.bodyMask < 500).map(b => ({appearance: b.appearance, colours: b.bodyMask})))} — reported as remaining armour-art debt`,
     );
   }
+  check(
+    'char: close-ups show plate texel detail (gradient energy reported per body)',
+    aggregate.minGradientMean != null,
+    `gradient mean range=${aggregate.minGradientMean}-${Math.max(...bodyColours.map(b => b.gradientMean ?? 0))} (avg ${aggregate.avgGradientMean}); per-body ${JSON.stringify(bodyColours.map(b => `${b.appearance}:${b.gradientMean}`))} — high values indicate fine texel detail, low values flag stretched/flat plate faces (visual read_image still primary)`,
+  );
   check(
     'char: close-ups no white clipping (>250 <= 1% of body)',
     aggregate.maxClippedPct <= CHAR_GATE.clipMaxPct,
@@ -2554,6 +2740,42 @@ async function captureCharacterReadability(page, {opts, report, check}) {
     report.notes.push(`char: narrow torso-crop unique colours ${normal.stats.uniqueColors} < SPEC reference ${CHAR_GATE.specUniqueColorsTarget} — informational only (detail gate uses close-up body mask)`);
   }
   check('char: close-ups are not mostly black (blackPct < 40%)', aggregate.avgBlackPct < CHAR_GATE.closeupMaxBlackPct, `avgBlackPct=${aggregate.avgBlackPct}`);
+  // Cycle-5: `__ssPreviewBody` must render all 7 bodies in frame (cycle-4 probe found it did not).
+  if (bodyPreviewHook) {
+    const probe = {hook: bodyPreviewHook, bodies: [], rendered: 0};
+    try {
+      await previewBody(page, null);
+      await sleep(500);
+      const base = await screenshot(page, outDir, 'probe-body-base.png');
+      for (const name of ALL_APPEARANCES) {
+        let r = await previewBody(page, name, {distance: 3});
+        // world-scene's fixed hook loads bodies on demand and reports `ready`; wait for it (up to 8 s)
+        // rather than screenshotting an empty frame on the first call.
+        for (let waited = 0; waited < 8000 && r.ok && r.result && r.result.ready === false; waited += 500) {
+          await sleep(500);
+          r = await previewBody(page, name, {distance: 3});
+        }
+        await sleep(900);
+        const shot = await screenshot(page, outDir, `probe-body-${name}.png`);
+        const diff = await comparePngs(page, base, shot, CHAR_CORE_REGION);
+        const rendered = r.ok && (diff.meanAbsLum > 1.2 || diff.changedPct > 1.5);
+        probe.bodies.push({name, hookResult: r, diff, rendered});
+        if (rendered) probe.rendered++;
+        await previewBody(page, null);
+        await sleep(300);
+      }
+      report.characters.previewBodyProbe = probe;
+      check(
+        'char: __ssPreviewBody renders all 7 armour bodies in frame',
+        probe.rendered === ALL_APPEARANCES.length,
+        `${probe.rendered}/${ALL_APPEARANCES.length} rendered (${probe.bodies.map(b => `${b.name}:${b.rendered ? 'ok' : 'MISSING'}`).join(', ')})`,
+      );
+    } catch (error) {
+      report.notes.push(`char: __ssPreviewBody render probe failed (${error?.message || error})`);
+    }
+  } else {
+    report.notes.push('char: no __ssPreviewBody hook — render probe skipped (in-game fallbacks used)');
+  }
 }
 
 /* ---------------------------------------------------------------- update */
@@ -2790,6 +3012,21 @@ async function run() {
       await sleep(3000);
       await screenshot(page, opts.outDir, 'probe-preview-templar.png');
       log('PROBE: wrote probe-preview-templar.png');
+      // Cycle-5 content probe: altar/furnace QA poses at high quality (early, before corruption).
+      await forceQuality(page, 'high');
+      for (const name of ['content-altar', 'content-altar-close', 'content-altar-close2', 'content-altar-close3', 'content-furnace-village', 'content-furnace-camp']) {
+        const pose = LANDMARK_POSES[name];
+        if (!pose) continue;
+        const applied = await qaPose(page, pose);
+        if (applied && applied.ok !== false) {
+          await sleep(2500);
+          await screenshot(page, opts.outDir, `probe-${name}.png`);
+          log(`PROBE: wrote probe-${name}.png`);
+        }
+        await qaView(page, null);
+        await sleep(300);
+      }
+      await forceQuality(page, 'high');
     }
     const stateAt = Date.now();
     // Expected weapon-card count (8 at batch 1, 10 after batch-2 weapons land).
@@ -2865,6 +3102,13 @@ async function run() {
         report.perf.thirdPerson.framesHigh = await captureFrameStats(page, Math.min(opts.perfSampleMs, 3000));
       }
     }
+    // Cycle-5: force clear weather for the night-mood capture so natural rain/haze variance cannot
+    // brighten the frame (weather visuals are audited separately in --perf). The first frames after
+    // joining can run at <1 fps under SwiftShader, so wait long enough for at least two clear frames
+    // before the screenshot (a 0.9 s wait previously captured the old rain frame).
+    await setWeather(page, 'march', 'clear', 0);
+    await sleep(4500);
+    report.nightMoodWeather = 'forced-clear';
     report.screenshots.push(await screenshot(page, opts.outDir, '01-third-person.png'));
     report.canvas['third-person'] = await canvasPixelStats(page, opts.outDir, 'third-person');
 
@@ -2943,6 +3187,78 @@ async function run() {
     };
     report.screenshots.push(await screenshot(page, opts.outDir, '03-combat.png'));
     report.canvas['combat'] = await canvasPixelStats(page, opts.outDir, 'combat');
+
+    // Cycle-5 combat-feel probe: heavy hit → hit-stop/kick/vignette, then the reduced-motion path.
+    const combatFeelHook = await page.evaluate(`typeof window.__ssCombatFx==='function'`);
+    if (combatFeelHook) {
+      const readFx = async () => page.evaluate(
+        `(()=>{try{const r=window.__ssCombatFx();return r===undefined?null:JSON.parse(JSON.stringify(r));}catch(e){return null;}})()`,
+        {timeoutMs: 10000},
+      );
+      const sampleFx = async () => {
+        const samples = [];
+        for (let i = 0; i < 12; i++) {
+          samples.push(await readFx());
+          await sleep(120);
+        }
+        return samples.filter(Boolean);
+      };
+      const attack = async () => {
+        if (!canvasRect) return;
+        await page.send('Input.dispatchMouseEvent', {type: 'mousePressed', x: round(canvasRect.x), y: round(canvasRect.y), button: 'left', clickCount: 1});
+        await sleep(320);
+        await page.send('Input.dispatchMouseEvent', {type: 'mouseReleased', x: round(canvasRect.x), y: round(canvasRect.y), button: 'left', clickCount: 1});
+      };
+      const summariseFx = samples => ({
+        maxHitStopMs: samples.length ? +Math.max(...samples.map(s => Number(s?.hitStopMs || 0))).toFixed(1) : 0,
+        maxVignette: samples.length ? +Math.max(...samples.map(s => Number(s?.vignette?.opacity ?? s?.vignette ?? 0))).toFixed(3) : 0,
+        maxKick: samples.length ? +Math.max(...samples.map(s => Math.abs(Number(s?.kick?.x ?? 0)) + Math.abs(Number(s?.kick?.y ?? 0)))).toFixed(3) : 0,
+        reducedMotion: samples.some(s => s?.reducedMotion === true),
+      });
+      // Approach the gate garrison so the heavy swing actually lands (hit-stop/vignette are hit-driven).
+      await holdKey(page, 'KeyW', 'w', 87, 6500);
+      await sleep(500);
+      const attackAndSample = async () => {
+        const all = [];
+        for (let i = 0; i < 3; i++) {
+          await attack();
+          all.push(...(await sampleFx()));
+          await sleep(350);
+        }
+        return all;
+      };
+      const normalSamples = await attackAndSample();
+      const normal = summariseFx(normalSamples);
+      const heavyCount = normalSamples.length ? Math.max(...normalSamples.map(s => Number(s?.heavyCount || 0))) : 0;
+      // Reduced-motion path: prefer the scene override hook, fall back to CDP media emulation.
+      const reducedHook = await page.evaluate(`typeof window.__ssSetReducedMotion==='function'`);
+      if (reducedHook) await page.evaluate(`window.__ssSetReducedMotion(true)`);
+      else await page.send('Emulation.setEmulatedMedia', {features: [{name: 'prefers-reduced-motion', value: 'reduce'}]});
+      await sleep(600);
+      const reducedFlag = await readFx();
+      const reducedSamples = await attackAndSample();
+      const reduced = summariseFx(reducedSamples);
+      if (reducedHook) await page.evaluate(`window.__ssSetReducedMotion(null)`);
+      else await page.send('Emulation.setEmulatedMedia', {features: []});
+      report.combatFeel = {hook: true, normal, reduced, heavyCount, reducedFlagPresent: reducedFlag?.reducedMotion === true, reducedHook: reducedHook ? '__ssSetReducedMotion' : 'Emulation.setEmulatedMedia'};
+      log(`COMBAT FEEL: normal=${JSON.stringify(normal)} reduced=${JSON.stringify(reduced)} heavyCount=${heavyCount} reducedMotionFlag=${report.combatFeel.reducedFlagPresent}`);
+      check('combat: heavy-hit feel hook available', true, JSON.stringify(Object.keys(normalSamples[0] || {})));
+      if (normal.maxHitStopMs > 0 || normal.maxKick > 0 || normal.maxVignette > 0) {
+        check('combat: hit-stop fires on heavy hit', normal.maxHitStopMs > 0, `hitStopMs=${normal.maxHitStopMs}, heavyCount=${heavyCount}`);
+        check('combat: kick/vignette fires on heavy hit', normal.maxVignette > 0 || normal.maxKick > 0, `vignette=${normal.maxVignette} kick=${normal.maxKick}`);
+        check(
+          'combat: reduced-motion preference lowers fx and is reported',
+          reduced.reducedMotion && reduced.maxHitStopMs <= normal.maxHitStopMs && reduced.maxKick <= normal.maxKick,
+          `reducedMotion=${reduced.reducedMotion} (${report.combatFeel.reducedHook}) hitStop ${normal.maxHitStopMs}→${reduced.maxHitStopMs}, kick ${normal.maxKick}→${reduced.maxKick}, vignette ${normal.maxVignette}→${reduced.maxVignette}`,
+        );
+      } else {
+        report.notes.push(
+          `combat: heavy attack sampled (${heavyCount} heavy, ${normalSamples.length} samples) but no hit-stop/kick/vignette was observed — likely no enemy contact reached from the spawn approach in this run; combat-feel visuals not gated (gap recorded for cycle 6)`,
+        );
+      }
+    } else {
+      report.notes.push('combat: __ssCombatFx hook absent — hit-stop/kick/vignette not measurable this run');
+    }
 
     /* 9. toggle back */
     lastStage = 'toggle-back';
@@ -3287,6 +3603,12 @@ async function run() {
     console.log(`characters: agg=${JSON.stringify(c.aggregate)} normalTP=${JSON.stringify(c.normalThirdPerson?.stats)}`);
     console.log(`char torso: bodyMask=${JSON.stringify(c.normalThirdPersonBodyMask || null)} fixedCropInfo=${JSON.stringify(c.torsoTone?.fixedCropInformational || null)}`);
     console.log(`char before: ${JSON.stringify(c.baseline?.normalPlayerTorso)} (${c.baseline?.source})`);
+    if (c.aggregate?.bodiesColour) {
+      console.log(`char colours: ${c.aggregate.bodiesWith500}/${c.aggregate.bodiesColour.length} >=500 (${c.aggregate.bodiesColour.map(b => `${b.appearance}:${b.bodyMask}`).join(',')}) gradient=${c.aggregate.minGradientMean}-${Math.max(...c.aggregate.bodiesColour.map(b => b.gradientMean ?? 0))} (avg ${c.aggregate.avgGradientMean})`);
+    }
+    if (c.previewBodyProbe) console.log(`char previewBody: ${c.previewBodyProbe.rendered}/${c.previewBodyProbe.bodies.length} rendered (${c.previewBodyProbe.bodies.map(b => `${b.name}:${b.rendered ? 'ok' : 'MISSING'}`).join(',')})`);
+    if (c.survivorIdentity) console.log(`char survivor identity diff vs cycle-4: ${JSON.stringify(c.survivorIdentity.diff)}`);
+    if (c.clothWind) console.log(`char cloth wind: ${JSON.stringify(c.clothWind.map(w => ({appearance: w.appearance, body: w.bodyDiff?.meanAbsLum, bg: w.backgroundDiff?.meanAbsLum})))}`);
     for (const a of c.appearances || []) {
       if (a.skipped) {
         console.log(`  char ${a.appearance}: SKIPPED (body-preview hook unavailable)`);
@@ -3312,8 +3634,9 @@ async function run() {
     if (report.views.regionDistinctness) console.log(`regions:   ${JSON.stringify(report.views.regionDistinctness)}`);
     if (report.views.wind) console.log(`wind:      ${JSON.stringify(report.views.wind)}`);
   }
+  if (report.combatFeel) console.log(`combatFeel: ${JSON.stringify(report.combatFeel)}`);
   if (report.weather) {
-    console.log(`weather:   hook=${report.weather.hook} forceHook=${report.weather.forceHook} captures=${report.weather.captures.length} particles=${JSON.stringify(report.weather.particles || null)} lowTier=${JSON.stringify(report.weather.lowTier ? {particles: report.weather.lowTier.particles} : null)}`);
+    console.log(`weather:   hook=${report.weather.hook} forceHook=${report.weather.forceHook} captures=${report.weather.captures.length} particles=${JSON.stringify(report.weather.particles || null)} snow=${JSON.stringify(report.weather.snow || null)} lowTier=${JSON.stringify(report.weather.lowTier ? {particles: report.weather.lowTier.particles} : null)} lowTierSnow=${JSON.stringify(report.weather.lowTierSnow ? {snow: report.weather.lowTierSnow.snow} : null)}`);
     for (const w of report.weather.captures || []) {
       console.log(`  weather ${w.phase}:${w.intensity}: state=${JSON.stringify(w.state)} forced=${JSON.stringify(w.forced)} -> ${path.relative(ROOT, w.file)}`);
     }

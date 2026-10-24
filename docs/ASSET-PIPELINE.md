@@ -589,3 +589,67 @@ Preview: `temp_sketchlab/armour/props_sheet.png`; armour sheets `temp_sketchlab/
 Staged mirrors validated before every install (74/74 after the armour pass, 76/76 after the props),
 atomic install (copy-to-.tmp + single rename), live `validate-assets.mjs` **76/76**,
 `tests/assets` 5/5, `tests/equipment` 5/5, `tests/armory` 5/5 (all after both phases).
+
+## Batch 2026-10H — armour art v3 + altar/forge props
+
+### Phase A — armour v3 (7 bodies, installed)
+
+Cleared the cycle-4 art debt:
+- **Uniform texel density**: the per-piece 0–1 band mapping was replaced by world-scale UVs — each
+  piece's own parametrisation is scaled by its real size (≈1 tile / 2.6 world units; revolved pieces
+  by circumference × height, sheets by real width/height, boxes by planar world mapping), so plate
+  faces no longer stretch one tile across a whole panel. The atlas content was also moved to
+  low-frequency gradients + broad patina (the earlier high-frequency seams/rivets tiled visibly and
+  read as "wood grain"), and the normal relief was softened (S = 1.3).
+- **Hue-separated detail**: plate = blue-grey steel tones + teal-green patina + rust-orange + dark
+  oxide patches; cloth = hue-shifted brown/olive/purple stains + accent trim; heraldry = three hue
+  families with broad cross/band patterns. Armour atlas is **1024² on all seven bodies** (all fit the
+  budget; no 512 fallback needed).
+- **Survivor identity**: no plate at all — tattered hood, tattered cloak (jagged hem + sewn patches),
+  bedroll/satchel pack, rope belt, walking staff rigid-weighted to RightHand, faded brown/tan palette
+  with orange-red patch accents (+498 armour tris).
+| body | armour tris | total tris | prims | gz |
+| --- | --- | --- | --- | --- |
+| templar | +863 | 9,312 | 3 | 781.7 KB |
+| hero | +984 | 9,433 | 2 | 767.5 KB |
+| ally | +818 | 9,267 | 3 | 783.8 KB |
+| berserker | +300 | 8,749 | 3 | 743.1 KB |
+| ranger | +572 | 9,021 | 3 | 731.9 KB |
+| survivor | +552 | 9,001 | 3 | 766.4 KB |
+| fallen | +425 | 8,874 | 2 | 706.6 KB |
+**Final cycle-5 pass** (hue chips + plate-triangle split, atlas-only for the colours): cloth band got
+per-panel hue-shifted patchwork panels, contrasting stitch lines and a per-texel hue-jittered weave;
+the ranger palette was darkened to forest-leather with an ochre accent; armour geometry now splits any
+triangle over 0.5 bind-unit² so no plate face reads as one big quad (fallen max face 0.0353 → 0.0095 m²,
+max edge ≤0.479 m across all bodies). Proxy 5-bit masked close-up colour variety after the pass:
+templar 1427 · hero 1047 · ally 1213 · berserker 679 · ranger 509 · survivor 1048 · fallen 588 →
+**7/7 above 500 on the local proxy**.
+
+**Authoritative masked numbers** (weapons-armory's body-silhouette mask, 5-bit unique colours, 2.8 m
+close-up) for the frozen final bytes: templar **606** (was 521), berserker **739** (519), survivor
+**1073** (519), ally **697** (495), hero **402** (379), fallen **424** (363), ranger **376** (203) —
+4/7 ≥500 on the strict mask. Cycle-6 backlog targets (per weapons-armory's per-prim analysis):
+- ranger (376): the big pale hood/cloak panels dominate; break up the **cloak exterior** with
+  hue-separated panels/patches (the hood already shows the chips).
+- hero (402): plate prim dominates (all-hard-armour body) — add **plate hue chips / coloured trim**
+  on the large pauldron and cuirass faces.
+- fallen (424): plate prim dominates — add **patina/rust hue chips across the large corrupted plates**
+  (the crest/back piece is split now but still smooth).
+Evidence: `temp_sketchlab/armour/v3h_close_{body}.png`, `v3_sil_sheet.png`.
+
+### Phase B — stone altar + forge furnace (installed)
+
+| asset | tris | prims | gz | bbox (x × y × z) | source |
+| --- | --- | --- | --- | --- | --- |
+| `stone_altar` | 3,944 | 1 | 215.7 KB | 1.02 × 1.10 × 1.84 | gothic candle/wax/ritual-book altar scan (1.9 M tris simplified, scaled to 1.1 m) |
+| `forge_furnace` | 6,979 | 1 | 274.2 KB | 5.87 × 2.90 × 3.45 | furnace asset (brick/stone forge with hood and fire bowl, scaled to 2.9 m) |
+
+Both ground-centred (min y = 0, centred x/z), single night-toned embedded base colour (512 / 1024),
+`KHR_mesh_quantization`, gzip-9, atomically installed. Preview:
+`temp_sketchlab/armour/props5_sheet.png`.
+
+### Verification
+
+Staged mirrors validated before each install (76/76 armour v3, 78/78 props), atomic install
+(copy-to-.tmp + single rename), live `validate-assets.mjs` **78/78**, `tests/assets` 5/5,
+`tests/equipment` 5/5, `tests/armory` 5/5 after both phases.

@@ -1,6 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import * as THREE from 'three';import {equipmentModel} from '../src/client/equipment';
 test('weapon fit handles sideways, flat and upright exports without oversized geometry',()=>{for(const dimensions of [[.01,100,.01],[100,.01,.01],[.01,.01,100]]){const source=new THREE.Group();const mesh=new THREE.Mesh(new THREE.BoxGeometry(...dimensions as [number,number,number]),new THREE.MeshStandardMaterial());mesh.position.set(4,8,-6);source.add(mesh);const fit=equipmentModel(source,.9);fit.updateMatrixWorld(true);const size=new THREE.Box3().setFromObject(fit).getSize(new THREE.Vector3());assert.ok(Math.abs(Math.max(size.x,size.y,size.z)-.9)<1e-5);assert.ok(size.y>.89);}});
-import {readFileSync} from 'node:fs';import {gunzipSync} from 'node:zlib';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {customCharacter,undeadEliteTier} from '../src/client/custom-character';import type {Actor} from '../src/shared/types';
+import {readFileSync} from 'node:fs';import {gunzipSync} from 'node:zlib';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {customCharacter,undeadEliteTier,setCharacterWindQuality,clothWindState} from '../src/client/custom-character';import type {Actor} from '../src/shared/types';
 async function geometryAsset(name:string){const b=gunzipSync(readFileSync(`public/assets/custom/${name}.glb.gz`));const len=b.readUInt32LE(12),j=JSON.parse(b.toString('utf8',20,20+len));delete j.images;delete j.textures;delete j.samplers;
  // Keep material names/indices (armour-prim classification) but drop texture references so no image decode is needed.
  j.materials=(j.materials??[{}]).map((m:any)=>({name:m.name||'mat',doubleSided:!!m.doubleSided,pbrMetallicRoughness:{metallicFactor:m.pbrMetallicRoughness?.metallicFactor??1,roughnessFactor:m.pbrMetallicRoughness?.roughnessFactor??1}}));
@@ -66,7 +66,9 @@ test('all nine animated bodies stay grounded through idle, movement, block and a
   const trisOf=(prim:THREE.SkinnedMesh)=>{const g=prim.geometry;return (g.index?g.index.count:g.attributes.position.count)/3;};
   const bodyPrim=prims.reduce((best,prim)=>trisOf(prim)>trisOf(best)?prim:best,prims[0]);
   const skinnedBox=(prim:THREE.SkinnedMesh)=>{prim.skeleton.update();const box=new THREE.Box3(),v=new THREE.Vector3(),positions=prim.geometry.attributes.position;for(let i=0;i<positions.count;i++){prim.getVertexPosition(i,v);box.expandByPoint(v.applyMatrix4(prim.matrixWorld));}return box;};
-  const bodyBox=skinnedBox(bodyPrim);let totalTris=0,armourHeadWeight=0,plateCount=0;
+  // World-space triangle size for plate/cloth prims (the v3 "no stretched single quads" gate).
+  const triStats=(prim:THREE.SkinnedMesh)=>{const geometry=prim.geometry,index=geometry.index,positions=geometry.attributes.position;const a=new THREE.Vector3(),b=new THREE.Vector3(),c=new THREE.Vector3();let maxEdge=0,maxArea=0;for(let t=0;t<(index?index.count:positions.count);t+=3){prim.getVertexPosition(index?index.getX(t):t,a);prim.getVertexPosition(index?index.getX(t+1):t+1,b);prim.getVertexPosition(index?index.getX(t+2):t+2,c);a.applyMatrix4(prim.matrixWorld);b.applyMatrix4(prim.matrixWorld);c.applyMatrix4(prim.matrixWorld);maxEdge=Math.max(maxEdge,a.distanceTo(b),b.distanceTo(c),c.distanceTo(a));maxArea=Math.max(maxArea,new THREE.Vector3().subVectors(b,a).cross(new THREE.Vector3().subVectors(c,a)).length()/2);}return {maxEdge,maxArea};};
+  const bodyBox=skinnedBox(bodyPrim);let totalTris=0,armourHeadWeight=0,plateCount=0,clothPrims=0,clothSample:THREE.MeshStandardMaterial|undefined;
   const materialName=(prim:THREE.SkinnedMesh)=>(Array.isArray(prim.material)?prim.material:[prim.material]).map((material:{name?:string})=>material.name||'').join('|');
   for(const prim of prims){
    totalTris+=trisOf(prim);
@@ -90,6 +92,7 @@ test('all nine animated bodies stay grounded through idle, movement, block and a
     assert.ok(!/_addon/i.test(mats),name+' old add-on folded ('+mats+')');
     assert.ok(box.intersectsBox(bodyBox),name+' '+(mats||'addon')+' overlaps the body');
     if(/_plate/i.test(mats))plateCount++;
+    if(/_cloth/i.test(mats)){clothPrims++;for(const material of (Array.isArray(prim.material)?prim.material:[prim.material]) as THREE.MeshStandardMaterial[])if((material.userData as {cloth?:boolean}).cloth)clothSample=material;}
     // Weighted-bone semantics: plates and cloth must ride upper-body/torso anthropomorphic joints.
     let dominant=0,allowed=0;
     for(let i=0;i<indices.count;i+=step){
@@ -104,10 +107,25 @@ test('all nine animated bodies stay grounded through idle, movement, block and a
     }
     if(/_plate/i.test(mats))assert.ok(dominant>0&&allowed/dominant>.8,name+' plate skinned to armour bones '+allowed+'/'+dominant);
     if(/_cloth/i.test(mats))assert.ok(dominant>0&&allowed/dominant>.8,name+' cloth skinned to torso bones '+allowed+'/'+dominant);
+    if(/_plate/i.test(mats)||/_cloth/i.test(mats)){
+     // Cycle-5 v3: plate/cloth geometry must not contain stretched single-quad faces (~m units).
+     const stats=triStats(prim);
+     assert.ok(stats.maxEdge<.5,name+' '+(/_plate/i.test(mats)?'plate':'cloth')+' max triangle edge '+stats.maxEdge.toFixed(3));
+     assert.ok(stats.maxArea<.04,name+' '+(/_plate/i.test(mats)?'plate':'cloth')+' max triangle area '+stats.maxArea.toFixed(4));
+    }
    }
   }
   assert.ok(plateCount>=1,name+' has an armour plate prim');
   assert.ok(armourHeadWeight>0,name+' armour prim includes head/neck weighting');
+  if(name==='survivor'){
+   // Cycle-5 survivor identity: ragged cloth + plate/staff accents, walking staff rigid to the hand.
+   const survivorPrims=prims.filter(prim=>prim!==bodyPrim).map(prim=>({prim,mats:materialName(prim)}));
+   assert.ok(survivorPrims.some(p=>/_plate/i.test(p.mats)),'survivor has plate accents');
+   assert.ok(survivorPrims.some(p=>/_cloth/i.test(p.mats)),'survivor has ragged cloth');
+   let staff=false;
+   for(const {prim} of survivorPrims){const indices=prim.geometry.attributes.skinIndex as THREE.BufferAttribute,weights=prim.geometry.attributes.skinWeight as THREE.BufferAttribute;for(let i=0;i<indices.count&&!staff;i++){let best=0,bc=0;for(const c of [0,1,2,3]){const w=weights.getComponent(i,c);if(w>best){best=w;bc=c;}}if(best>.99&&/righthand/i.test((prim.skeleton.bones[indices.getComponent(i,bc)]?.name??'').replace(/^mixamorig:?/i,'')))staff=true;}}
+   assert.ok(staff,'survivor walking staff rigid-weighted to the right hand');
+  }
   if(name==='fallen')assert.ok(rig.model.getObjectByName('undead-elite-addon') instanceof THREE.SkinnedMesh,name+' elite add-on still present');
   assert.ok(totalTris<=16000,name+' total tri budget '+totalTris);
   for(const socket of ['mixamorigRightHand','mixamorigLeftHand']){

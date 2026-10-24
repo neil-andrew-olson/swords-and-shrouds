@@ -170,12 +170,14 @@ const ARMOUR = {
     pieces: ['hornedHelm', 'bracers', 'furShoulder', 'belt'],
   },
   ranger: {
-    palette: {metal: [0.32, 0.40, 0.24], cloth: [0.20, 0.26, 0.17], accent: [0.44, 0.34, 0.22]},
+    palette: {metal: [0.30, 0.38, 0.20], cloth: [0.16, 0.22, 0.13], accent: [0.52, 0.38, 0.18]},
     pieces: ['hood', 'longCloak', 'leatherCuirass', 'quiver', 'bracers'],
   },
   survivor: {
-    palette: {metal: [0.52, 0.50, 0.45], cloth: [0.46, 0.38, 0.28], accent: [0.36, 0.30, 0.21]},
-    pieces: ['hood', 'raggedCloak', 'pack', 'bracers'],
+    // ragged camp survivor: no plate at all, patched cloth layers, bedroll/pack, walking staff,
+    // rope belt ??? faded browns/tans with orange-red patch accents (distinct from the soldier bodies)
+    palette: {metal: [0.34, 0.30, 0.24], cloth: [0.42, 0.36, 0.27], accent: [0.60, 0.30, 0.14]},
+    pieces: ['tatteredHood', 'tatteredCloak', 'survivorPack', 'ropeBelt', 'walkingStaff'],
   },
   fallen: {
     palette: {metal: [0.34, 0.25, 0.44], cloth: [0.12, 0.10, 0.16], accent: [0.40, 0.34, 0.42]},
@@ -183,9 +185,39 @@ const ARMOUR = {
   },
 };
 
-/* ---------------------------------------------------------------- armour atlas (512 albedo + 256 normal/ORM) */
-async function makeAtlas(palette) {
-  const W = 512, H = 512;
+/* ---------------------------------------------------------------- armour atlas (hue-rich albedo + normal/ORM) */
+function hsv(h, s, v) {
+  // h,s,v in 0..1 -> rgb 0..1
+  const i = Math.floor(h * 6);
+  const f = h * 6 - i;
+  const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+  switch (i % 6) {
+    case 0: return [v, t, p];
+    case 1: return [q, v, p];
+    case 2: return [p, v, t];
+    case 3: return [p, q, v];
+    case 4: return [t, p, v];
+    default: return [v, p, q];
+  }
+}
+function hueShift(rgb, dh, ds, dv) {
+  // approximate: convert to HSV then shift
+  const r = rgb[0], g = rgb[1], b = rgb[2];
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d > 1e-6) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+  }
+  h = ((h / 6) + dh + 1) % 1;
+  const s = Math.min(1, Math.max(0, (max ? d / max : 0) + ds));
+  const v = Math.min(1, Math.max(0, max + dv));
+  return hsv(h, s, v);
+}
+
+async function makeAtlas(palette, dim = 1024) {
+  const W = dim, H = dim;
   const NW = 256, NH = 256;
   const hash = (x, y) => {
     const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
@@ -199,12 +231,24 @@ async function makeAtlas(palette) {
     const a = hash(x0, y0), b = hash(x0 + 1, y0), c = hash(x0, y0 + 1), d = hash(x0 + 1, y0 + 1);
     return (a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy;
   };
-  const metalDark = palette.metal.map((c) => c * 0.62);
-  const metalLight = palette.metal.map((c) => Math.min(1, c * 1.25));
-  const clothDark = palette.cloth.map((c) => c * 0.66);
-  const clothLight = palette.cloth.map((c) => Math.min(1, c * 1.2));
-  const accentDark = palette.accent.map((c) => c * 0.6);
-  const accentLight = palette.accent.map((c) => Math.min(1, c * 1.22));
+  const metal = palette.metal, cloth = palette.cloth, accent = palette.accent;
+  const metalDark = metal.map((c) => c * 0.55);
+  const metalLight = metal.map((c) => Math.min(1, c * 1.3));
+  // hue-separated patina / rust / oxide / trim colours
+  const patina = hueShift(metal, 0.42, 0.35, -0.12);     // teal-green patina
+  const rust = hueShift(metal, 0.06, 0.55, -0.18);       // warm rust
+  const oxide = hueShift(metal, -0.05, 0.18, -0.22);     // dark blue oxide
+  const rustLight = hueShift(metal, 0.08, 0.75, 0.15);   // bright rust flakes
+  const rivetGold = hueShift(accent, 0.02, 0.55, 0.28);
+  const clothDark = cloth.map((c) => c * 0.6);
+  const clothLight = cloth.map((c) => Math.min(1, c * 1.28));
+  const stainBrown = hueShift(cloth, 0.05, 0.45, -0.14);
+  const stainOlive = hueShift(cloth, 0.20, 0.40, -0.06);
+  const stainPurple = hueShift(cloth, 0.72, 0.35, -0.10);
+  const accentDark = accent.map((c) => c * 0.5);
+  const accentLight = accent.map((c) => Math.min(1, c * 1.35));
+  const accentAlt = hueShift(accent, 0.45, 0.55, 0.05);  // contrasting heraldic hue
+  const accentCream = [0.78, 0.74, 0.64];
   const height = new Float32Array(NW * NH);
   const albedo = Buffer.alloc(W * H * 3);
   for (let y = 0; y < H; y++) {
@@ -212,64 +256,88 @@ async function makeAtlas(palette) {
     for (let x = 0; x < W; x++) {
       const i = (y * W + x) * 3;
       const u = x / W;
-      const grain = (hash(x, y) - 0.5) * 0.14;
+      const grain = (hash(x, y) - 0.5) * 0.03;
       const mott1 = smooth(u, v, 7);
-      const mott2 = smooth(u, v, 23);
+      const mott2 = smooth(u, v, 19);
+      const mott3 = smooth(u, v, 41);
+      const hi = (Math.min(NH - 1, Math.floor(y * NH / H)) * NW) + Math.min(NW - 1, Math.floor(x * NW / W));
       let col;
       if (v < 0.42) {
-        // worn plate: two steel tones + rust/patina patches + seams, rivets, scratches
+        // ---------------- plate: steel tones + patina/rust/oxide patches + gold rivets/trim
         const mix = mott1;
-        const base = [
+        let base = [
           metalDark[0] + (metalLight[0] - metalDark[0]) * mix,
           metalDark[1] + (metalLight[1] - metalDark[1]) * mix,
           metalDark[2] + (metalLight[2] - metalDark[2]) * mix,
         ];
-        const patina = mott2 > 0.62 ? (mott2 - 0.62) * 2.4 : 0;
-        const seam = Math.abs(((y / H) * 6) % 1 - 0.5) > 0.455 ? 0.6 : 1;
-        const rivet = (Math.abs(((x / W) * 20) % 1 - 0.5) > 0.455 && Math.abs(((y / H) * 12) % 1 - 0.5) > 0.44) ? 1.25 : 1;
-        const scratch = (hash(Math.floor(x / 2), y) > 0.985) ? 1.2 : 1;
-        const k = (0.92 + grain) * seam * rivet * scratch;
-        col = [base[0] * k + patina * 0.10, base[1] * k + patina * 0.05, base[2] * k + patina * 0.01];
-        height[(Math.min(NH - 1, Math.floor(y / 2)) * NW) + Math.min(NW - 1, Math.floor(x / 2))] =
-          0.5 + (seam < 1 ? -0.25 : 0) + (rivet > 1 ? 0.18 : 0) + grain;
+        const seam = 1.0;
+        const rivet = 0;
+        const trim = false;
+        let k = (0.92 + grain) * seam;
+        base = [base[0] * k, base[1] * k, base[2] * k];
+        if (mott2 > 0.72) { const t = Math.min(1, (mott2 - 0.72) * 3.2); base = base.map((c, ci) => c * (1 - t) + patina[ci] * t); }
+        if (mott3 > 0.78) { const t = Math.min(1, (mott3 - 0.78) * 3.0); base = base.map((c, ci) => c * (1 - t) + rust[ci] * t); }
+        if (mott2 < 0.16) { const t = Math.min(1, (0.16 - mott2) * 3.0); base = base.map((c, ci) => c * (1 - t) + oxide[ci] * t); }
+        if (grain > 0.055) { base = base.map((c, ci) => c * 0.9 + rustLight[ci] * 0.12); }
+        if (rivet) base = base.map((c, ci) => c * 0.55 + rivetGold[ci] * 0.42);
+        if (trim) base = base.map((c, ci) => c * 0.78 + accentLight[ci] * 0.22);
+        col = base;
+        height[hi] = 0.5 + smooth(u, v, 6) * 0.18;
       } else if (v < 0.80) {
-        // cloth: weave + colour drift + stains + fold shading
+        // ---------------- cloth: two-tone drift + hue-separated stains + patchwork + stitch lines
         const mix = smooth(u, v, 11);
         const weave = 0.9 + 0.16 * ((Math.floor(x / 2) + Math.floor(y / 2)) % 2) + 0.06 * smooth(u, v, 60);
         const fold = 0.86 + 0.18 * Math.sin(x * 0.021 + mott1 * 4.5);
-        const stain = mott2 > 0.66 ? (mott2 - 0.66) * 0.9 : 0;
-        const base = [
+        let base = [
           clothDark[0] + (clothLight[0] - clothDark[0]) * mix,
           clothDark[1] + (clothLight[1] - clothDark[1]) * mix,
           clothDark[2] + (clothLight[2] - clothDark[2]) * mix,
         ];
-        col = [base[0] * weave * fold + stain * 0.05, base[1] * weave * fold + stain * 0.035, base[2] * weave * fold + stain * 0.015];
-        height[(Math.min(NH - 1, Math.floor(y / 2)) * NW) + Math.min(NW - 1, Math.floor(x / 2))] =
-          0.5 + weave * 0.2 + fold * 0.12 - stain * 0.2;
+        if (mott2 > 0.74) { const t = Math.min(1, (mott2 - 0.74) * 2.4); base = base.map((c, ci) => c * (1 - t) + stainBrown[ci] * t); }
+        if (mott3 > 0.80) { const t = Math.min(1, (mott3 - 0.80) * 2.6); base = base.map((c, ci) => c * (1 - t) + stainOlive[ci] * t); }
+        if (mott2 < 0.12) { const t = Math.min(1, (0.12 - mott2) * 2.6); base = base.map((c, ci) => c * (1 - t) + stainPurple[ci] * t); }
+        // patchwork panels + stitch lines + hue-jittered weave: big smooth cloth surfaces (ranger
+        // hood/cloak) otherwise shade into very few quantised colours at 2.8 m
+        const panelId = Math.floor(u * 5) * 7 + Math.floor(v * 5) * 13;
+        const panelHue = (hash(panelId, 3) - 0.5) * 0.9;
+        const panelVal = 0.86 + hash(panelId, 9) * 0.3;
+        const stitchU = Math.abs((u * 5) % 1 - 0.5) > 0.475;
+        const stitchV = Math.abs((v * 5) % 1 - 0.5) > 0.478;
+        const weaveHue = (hash(Math.floor(x / 2), Math.floor(y / 2)) - 0.5) * 0.5;
+        base = hueShift(base, panelHue, 0.06, panelVal - 1.0);
+        base = hueShift(base, weaveHue, 0.04, 0);
+        if (stitchU || stitchV) base = base.map((c, ci) => c * 0.62 + accentDark[ci] * 0.45);
+        col = [base[0] * weave * fold, base[1] * weave * fold, base[2] * weave * fold];
+        height[hi] = 0.5 + smooth(u, v, 5) * 0.22 + ((stitchU || stitchV) ? 0.16 : 0);
       } else {
-        // heraldry: three accent tones, cross + chevron bands, trim lines
+        // ---------------- heraldry: three hue families + cross/chevron + trim lines
         const chev = Math.abs(((x / W) * 4) % 1 - 0.5);
-        const crossBand = (Math.abs(u - 0.5) < 0.05 || Math.abs(x / W - 0.2) < 0.03) ? accentLight : null;
-        const band = (Math.abs(v - 0.86) < 0.02 || Math.abs(v - 0.94) < 0.012) ? accentLight : null;
+        const uu = (u - 0.5) / 0.5;
+        const crossBand = Math.abs(uu) < 0.09;
+        const bandLine = (Math.abs(v - 0.86) < 0.02 || Math.abs(v - 0.94) < 0.012);
+        let base;
+        if (crossBand) base = accentAlt;
+        else if (bandLine) base = accentCream;
+        else {
+          base = [
+            accentDark[0] + (accentLight[0] - accentDark[0]) * (1 - chev),
+            accentDark[1] + (accentLight[1] - accentDark[1]) * (1 - chev),
+            accentDark[2] + (accentLight[2] - accentDark[2]) * (1 - chev),
+          ];
+          if (mott2 > 0.7) base = base.map((c, ci) => c * 0.35 + accentCream[ci] * 0.65);
+        }
         const stripe = ((Math.floor(x / 20) % 2) === 0) ? 1.05 : 0.78;
-        const base = crossBand || band ? crossBand || band : [
-          accentDark[0] + (accentLight[0] - accentDark[0]) * (1 - chev),
-          accentDark[1] + (accentLight[1] - accentDark[1]) * (1 - chev),
-          accentDark[2] + (accentLight[2] - accentDark[2]) * (1 - chev),
-        ];
         const k = (0.9 + grain) * stripe;
         col = [base[0] * k, base[1] * k, base[2] * k];
-        height[(Math.min(NH - 1, Math.floor(y / 2)) * NW) + Math.min(NW - 1, Math.floor(x / 2))] =
-          0.5 + (crossBand || band ? 0.3 : 0) + grain * 0.5;
+        height[hi] = 0.5 + smooth(u, v, 4) * 0.2;
       }
       albedo[i] = Math.max(0, Math.min(255, Math.round(col[0] * 255)));
       albedo[i + 1] = Math.max(0, Math.min(255, Math.round(col[1] * 255)));
       albedo[i + 2] = Math.max(0, Math.min(255, Math.round(col[2] * 255)));
     }
   }
-  // normal from height (tangent space, +Y up in UV space)
   const normal = Buffer.alloc(NW * NH * 3);
-  const S = 7.0;
+  const S = 1.3;
   for (let y = 0; y < NH; y++) {
     for (let x = 0; x < NW; x++) {
       const i = y * NW + x;
@@ -283,14 +351,13 @@ async function makeAtlas(palette) {
       normal[i * 3 + 2] = Math.round((nz * 0.5 + 0.5) * 255);
     }
   }
-  // ORM: R AO, G roughness, B metalness — band-aligned
   const orm = Buffer.alloc(NW * NH * 3);
   for (let y = 0; y < NH; y++) {
     const v = y / NH;
     for (let x = 0; x < NW; x++) {
       const i = (y * NW + x) * 3;
       const n = smooth(x / NW, v, 30);
-      if (v < 0.42) { orm[i] = 205 + n * 40; orm[i + 1] = 105 + n * 40; orm[i + 2] = 150 + n * 40; }
+      if (v < 0.42) { orm[i] = 205 + n * 40; orm[i + 1] = 95 + n * 45; orm[i + 2] = 150 + n * 40; }
       else if (v < 0.80) { orm[i] = 215 + n * 30; orm[i + 1] = 205 + n * 35; orm[i + 2] = 0; }
       else { orm[i] = 220 + n * 25; orm[i + 1] = 150 + n * 40; orm[i + 2] = 90 + n * 30; }
     }
@@ -504,6 +571,77 @@ function buildPieces(name, cfg, piv) {
     push(g2, 'Spine2', 'accent');
   };
 
+  /* ---------------- survivor identity: ragged camp survivor (no plate, patched cloth, staff) ---------------- */
+  const raggedSheet = (top, width, height, right, down, back, cols, rows, bow, flare, tearAmount) => {
+    const g = new Geo();
+    const grid = [];
+    for (let r = 0; r <= rows; r++) {
+      const t = r / rows;
+      const row = [];
+      for (let c = 0; c <= cols; c++) {
+        const u = c / cols - 0.5;
+        // jagged hem: the lowest row gets a per-column irregular length + sideways wander
+        const tear = r === rows ? (rng() - 0.5) * tearAmount : (r / rows) * tearAmount * 0.25;
+        const p = add(add(top, mul(right, u * width * (1 + flare * t))), mul(down, -height * (t + tear)));
+        const p2 = add(p, mul(back, Math.sin(t * Math.PI) * bow + t * t * 0.7));
+        row.push(g.vert(p2, norm(add(back, mul(down, -0.15 * t))), c / cols, 1 - t));
+      }
+      grid.push(row);
+    }
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) g.quad(grid[r][c], grid[r][c + 1], grid[r + 1][c + 1], grid[r + 1][c]);
+    return g;
+  };
+  const addTatteredHood = () => {
+    const g = new Geo();
+    const basis = basisFrom(up);
+    dome(g, add(add(headC, mul(up, 0.28)), mul(forward, -0.12)), basis, 1.58, 1.5, 14, 5);
+    g.merge(raggedSheet(add(add(headC, mul(up, -0.65)), mul(forward, -1.1)), 3.1, 3.4, side, up, mul(forward, -1), 6, 5, 0.3, 0.45, 0.45));
+    push(g, 'Head', 'cloth');
+  };
+  const addTatteredCloak = () => {
+    const g = new Geo();
+    const top = add(spine2, mul(up, 1.35));
+    g.merge(raggedSheet(add(top, mul(forward, -1.25)), 4.6, 7.4, side, up, mul(forward, -1), 9, 8, 0.9, 0.35, 0.6));
+    push(g, 'Spine2', 'cloth');
+    // patchwork patches (accent) stitched onto the cloak
+    for (let i = 0; i < 4; i++) {
+      const g2 = new Geo();
+      const off = add(mul(side, (rng() - 0.5) * 3.2), mul(up, -1.2 - rng() * 3.4));
+      box(g2, add(add(top, mul(forward, -1.35)), off), basisFrom(up), 0.7, 0.7, 0.06);
+      push(g2, 'Spine2', 'accent');
+    }
+  };
+  const addSurvivorPack = () => {
+    // bedroll across the shoulders + satchel + straps
+    const g = new Geo();
+    const axis = norm(add(mul(side, 0.9), mul(up, 0.35)));
+    const c = add(add(spine2, mul(up, 1.55)), mul(forward, -0.95));
+    frustum(g, add(c, mul(axis, -1.5)), add(c, mul(axis, 1.5)), 0.34, 0.34, 8);
+    push(g, 'Spine2', 'cloth');
+    const g2 = new Geo();
+    box(g2, add(add(spine2, mul(up, -0.4)), mul(forward, -1.35)), basisFrom(up), 1.5, 1.2, 0.7);
+    push(g2, 'Spine2', 'cloth');
+    const g3 = new Geo();
+    box(g3, add(add(spine2, mul(up, 1.58)), mul(forward, -0.95)), basisFrom(up), 3.2, 0.16, 0.14);
+    push(g3, 'Spine2', 'accent');
+  };
+  const addRopeBelt = () => {
+    const g = new Geo();
+    lathe(g, add(hips, mul(up, 0.42)), basisFrom(up), [{t: 0, r: 1.86}, {t: 0.14, r: 1.92}, {t: 0.24, r: 1.86}], 14);
+    push(g, 'Hips', 'accent');
+    const g2 = new Geo();
+    box(g2, add(add(hips, mul(up, 0.2)), mul(forward, 1.55)), basisFrom(up), 0.5, 0.7, 0.12);
+    push(g2, 'Hips', 'metal');
+  };
+  const addWalkingStaff = () => {
+    const g = new Geo();
+    const hand = piv.pivot('RightHand');
+    const axis = norm(add(mul(up, 1.0), mul(forward, 0.18)));
+    const base = add(add(hand, mul(up, -1.6)), mul(forward, 0.55));
+    frustum(g, base, add(base, mul(axis, 4.4)), 0.11, 0.085, 6);
+    push(g, 'RightHand', 'metal');
+  };
+
   const addBackPlate = () => {
     const g = new Geo();
     const c = add(spine2, mul(forward, -1.15));
@@ -548,6 +686,11 @@ function buildPieces(name, cfg, piv) {
       case 'belt': addBelt(); break;
       case 'furShoulder': addFurShoulder(); break;
       case 'hood': addHood(); break;
+      case 'tatteredHood': addTatteredHood(); break;
+      case 'tatteredCloak': addTatteredCloak(); break;
+      case 'survivorPack': addSurvivorPack(); break;
+      case 'ropeBelt': addRopeBelt(); break;
+      case 'walkingStaff': addWalkingStaff(); break;
       case 'longCloak': addCloak(false); break;
       case 'raggedCloak': addCloak(true); break;
       case 'quiver': addQuiver(); break;
@@ -594,7 +737,7 @@ function jointPivots(skin) {
   return map;
 }
 
-async function processBody(name, cfg) {
+async function processBody(name, cfg, opts = {}) {
   console.log(`\n== ${name}`);
   const src = path.join(BASE, name + '.glb.gz');
   if (!fs.existsSync(src)) throw new Error('missing base ' + src);
@@ -625,7 +768,14 @@ async function processBody(name, cfg) {
   const headC = add(head, mul(up, 0.55));
   const piv = {up, forward, side, headC, head, hips, spine1, spine2, pivot};
 
+  const TILE_UNITS = 2.6; // world units per armour-atlas tile (uniform texel density)
   const pieces = buildPieces(name, cfg, piv);
+  // world-scale UVs + large-triangle subdivision happen on each PIECE before merging, so the
+  // per-vertex bone map below stays aligned with the final geometry.
+  for (const piece of pieces) {
+    scalePieceUVs(piece);
+    subdivideLargeTris(piece.geo, 0.5);
+  }
   // split into two primitives so the runtime can tint hard armour vs soft cloth differently:
   //   <name>_plate = metal + accent pieces, <name>_cloth = cloth pieces
   const groups = {plate: new Geo(), cloth: new Geo()};
@@ -636,20 +786,88 @@ async function processBody(name, cfg) {
     g.merge(piece.geo);
     for (let i = start; i < g.p.length / 3; i++) bonesOf[piece.band === 'cloth' ? 'cloth' : 'plate'].push(piece.bone);
   }
+  // ---- world-scale UVs: scale each piece's own parametrisation by its real size so the texel
+  // density is uniform, without per-face triplanar axis jumps.
+  function scalePieceUVs(piece) {
+    const p = piece.geo.p;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (let i = 0; i < p.length; i += 3) {
+      minX = Math.min(minX, p[i]); maxX = Math.max(maxX, p[i]);
+      minY = Math.min(minY, p[i + 1]); maxY = Math.max(maxY, p[i + 1]);
+      minZ = Math.min(minZ, p[i + 2]); maxZ = Math.max(maxZ, p[i + 2]);
+    }
+    const sx = maxX - minX, sy = maxY - minY, sz = maxZ - minZ;
+    const uv = piece.geo.uv;
+    let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+    for (let i = 0; i < uv.length; i += 2) {
+      uMin = Math.min(uMin, uv[i]); uMax = Math.max(uMax, uv[i]);
+      vMin = Math.min(vMin, uv[i + 1]); vMax = Math.max(vMax, uv[i + 1]);
+    }
+    const constUV = (uMax - uMin) < 1e-5 && (vMax - vMin) < 1e-5;
+    if (constUV) {
+      // boxes / spikes with degenerate UVs: planar world-scale mapping on the two smaller axes
+      for (let i = 0; i < uv.length; i += 2) {
+        const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2];
+        uv[i] = ((x / TILE_UNITS) % 1 + 1) % 1;
+        uv[i + 1] = (((y + z * 0.5) / TILE_UNITS) % 1 + 1) % 1;
+      }
+      return;
+    }
+    // revolved pieces (helm/cuirass/bracer/belt): u is the angle, v the height
+    const radius = Math.max(sx, sz) * 0.5;
+    const ku = (2 * Math.PI * radius) / TILE_UNITS;
+    const kv = sy / TILE_UNITS;
+    const uSpan = Math.max(1e-6, uMax - uMin), vSpan = Math.max(1e-6, vMax - vMin);
+    // sheets already integrate their real width/height into uv, so normalise to their span then scale
+    for (let i = 0; i < uv.length; i += 2) {
+      uv[i] = ((uv[i] - uMin) / uSpan) * ku;
+      uv[i + 1] = ((uv[i + 1] - vMin) / vSpan) * kv;
+    }
+  };
+  // split oversized triangles so no plate face reads as a single big quad at close range
+  // (bind units: 1 unit ~ 0.109 m, so 0.5 unit^2 ~ 0.006 m^2)
+  function subdivideLargeTris(g, maxArea) {
+    const idx = g.idx;
+    const out = [];
+    const mid = (i0, i1) => {
+      const ax = g.p[i0 * 3], ay = g.p[i0 * 3 + 1], az = g.p[i0 * 3 + 2];
+      const bx = g.p[i1 * 3], by = g.p[i1 * 3 + 1], bz = g.p[i1 * 3 + 2];
+      const nx0 = g.n[i0 * 3], ny0 = g.n[i0 * 3 + 1], nz0 = g.n[i0 * 3 + 2];
+      const nx1 = g.n[i1 * 3], ny1 = g.n[i1 * 3 + 1], nz1 = g.n[i1 * 3 + 2];
+      const n = norm([(nx0 + nx1) * 0.5, (ny0 + ny1) * 0.5, (nz0 + nz1) * 0.5]);
+      return g.vert([(ax + bx) * 0.5, (ay + by) * 0.5, (az + bz) * 0.5], n,
+        (g.uv[i0 * 2] + g.uv[i1 * 2]) * 0.5, (g.uv[i0 * 2 + 1] + g.uv[i1 * 2 + 1]) * 0.5);
+    };
+    for (let t = 0; t < idx.length; t += 3) {
+      const i0 = idx[t], i1 = idx[t + 1], i2 = idx[t + 2];
+      const ax = g.p, uv = g.uv;
+      const e1 = [ax[i1 * 3] - ax[i0 * 3], ax[i1 * 3 + 1] - ax[i0 * 3 + 1], ax[i1 * 3 + 2] - ax[i0 * 3 + 2]];
+      const e2 = [ax[i2 * 3] - ax[i0 * 3], ax[i2 * 3 + 1] - ax[i0 * 3 + 1], ax[i2 * 3 + 2] - ax[i0 * 3 + 2]];
+      const cx = e1[1] * e2[2] - e1[2] * e2[1];
+      const cy = e1[2] * e2[0] - e1[0] * e2[2];
+      const cz = e1[0] * e2[1] - e1[1] * e2[0];
+      const area = 0.5 * Math.hypot(cx, cy, cz);
+      if (area <= maxArea) { out.push(i0, i1, i2); continue; }
+      const m01 = mid(i0, i1), m12 = mid(i1, i2), m20 = mid(i2, i0);
+      out.push(i0, m01, m20, m01, i1, m12, m20, m12, i2, m01, m12, m20);
+      void uv;
+    }
+    g.idx = out;
+  };
   const jointIndex = (suffix) => {
     const k = [...bind.keys()].find((k) => k.endsWith(suffix));
     if (!k) throw new Error(`${name}: missing joint ${suffix}`);
     return skin.listJoints().findIndex((j) => (j.getName() || '') === k);
   };
   const buffer = root.listBuffers()[0];
-  const {albedoJpeg, normalJpeg, ormJpeg} = await makeAtlas(cfg.palette);
+  const {albedoJpeg, normalJpeg, ormJpeg} = await makeAtlas(cfg.palette, opts.albedoDim || 1024);
   const tex = doc.createTexture(name + '_armour_alb').setImage(new Uint8Array(albedoJpeg)).setMimeType('image/jpeg');
   const nrmTex = doc.createTexture(name + '_armour_nrm').setImage(new Uint8Array(normalJpeg)).setMimeType('image/jpeg');
   const ormTex = doc.createTexture(name + '_armour_orm').setImage(new Uint8Array(ormJpeg)).setMimeType('image/jpeg');
   let addedTris = 0;
   for (const [kind, g] of Object.entries(groups)) {
     if (!g.tris) continue;
-    // UV band remap: metal v<0.42, cloth 0.42..0.80, accent 0.80..1.0 (per piece, merge order)
+    // UV band remap: metal v<0.42, cloth 0.42..0.80, accent 0.80..1.0 (triplanar UVs from above)
     let idx = 0;
     for (const piece of pieces) {
       const inGroup = (kind === 'cloth') === (piece.band === 'cloth');
@@ -661,8 +879,11 @@ async function processBody(name, cfg) {
       for (let i = 0; i < n; i++) {
         const k = (idx + i) * 2;
         const lu = g.uv[k], lv = g.uv[k + 1];
-        g.uv[k] = 0.04 + lu * 0.92;
-        g.uv[k + 1] = v0 + (1 - lv) * vh * 0.96 + vh * 0.02;
+        // world-scale UVs repeat (tile) inside the band; wrap u and v with fract so no band crossing
+        const uu = lu - Math.floor(lu);
+        const vv = lv - Math.floor(lv);
+        g.uv[k] = uu;
+        g.uv[k + 1] = v0 + vh * 0.03 + vv * vh * 0.94;
       }
       idx += n;
     }
@@ -710,7 +931,17 @@ async function processBody(name, cfg) {
 const rows = [];
 for (const name of Object.keys(ARMOUR)) {
   if (only && !only.includes(name)) continue;
-  rows.push(await processBody(name, ARMOUR[name]));
+  // try the 1024 px armour atlas first; fall back to 512 only for bodies that would break the
+  // 900 KB per-file budget (cycle-5 rule: 1024 only where it fits)
+  let result = await processBody(name, ARMOUR[name], {albedoDim: 1024});
+  if (result.gz > BUDGET_BYTES) {
+    console.log(`${name}: 1024 atlas -> ${(result.gz / 1024).toFixed(1)} KB over budget, rebuilding at 512`);
+    result = await processBody(name, ARMOUR[name], {albedoDim: 512});
+    result.albedoDim = 512;
+  } else {
+    result.albedoDim = 1024;
+  }
+  rows.push(result);
 }
 fs.writeFileSync(path.join(STAGE, 'manifest-armour.json'), JSON.stringify(rows, null, 1));
 console.log('\nstaged:', rows.map((r) => `${r.name} ${(r.gz / 1024).toFixed(0)}KB ${r.totalTris}t`).join(', '));

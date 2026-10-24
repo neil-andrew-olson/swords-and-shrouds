@@ -210,9 +210,24 @@ function uvSampleMean(geometry:THREE.BufferGeometry,texture:THREE.Texture):numbe
   const mean=count?sum/count:Infinity;perGeometry.set(texture,mean);return mean;
  }catch{return Infinity;}
 }
-// Armour-vs-cloth classification for cycle-4 character armour prims (materials keep their own
+// Armour-vs-cloth classification for cycle-4/5 character armour prims (materials keep their own
 // embedded baseColor/normal/ORM maps; only tint/rim/PBR factors differ per class).
 const ARMOUR_MATERIAL=/helm|helmet|cuirass|plate|pauldron|armour|armor|chain|mail|bracer|gauntlet|visor|greave|sabaton|gorget|shield|metal|iron|steel/i;
+// Cycle-5 cloth prims get a cheap, scene-independent vertex wind (styling follows landscape.ts's
+// foliage sway: time-driven sines, gust scale). Cloth only — never plate/skin — and the whole
+// shader term is removed at low quality so there is no per-vertex cost there.
+const CLOTH_MATERIAL=/cloth|tabard|cloak|hood|robe|skirt|cape|cowl|mantle|sash|banner/i;
+let clothWindEnabled=true;
+const clothMaterials=new Set<THREE.MeshStandardMaterial>();
+const clothWindClock={value:0};
+const WIND_CACHE_KEY='ss-cloth-wind';
+/** Called by the scene when the quality tier changes; low removes the wind shader entirely. */
+export function setCharacterWindQuality(tier:'low'|'medium'|'high'){
+ const enabled=tier!=='low';if(enabled===clothWindEnabled)return;clothWindEnabled=enabled;
+ for(const material of clothMaterials)material.needsUpdate=true;
+}
+/** Test/debug visibility into the cloth-wind state (no allocation beyond the small object). */
+export function clothWindState(){return {enabled:clothWindEnabled,materials:clothMaterials.size,time:clothWindClock.value};}
 function repairCharacterMaterials(root:THREE.Object3D){
  root.traverse(object=>{
   if(!(object instanceof THREE.SkinnedMesh))return;
@@ -220,7 +235,7 @@ function repairCharacterMaterials(root:THREE.Object3D){
   for(const material of list){
    if(!material||!material.isMeshStandardMaterial||material.userData.ssReadable)continue;
    material.userData.ssReadable=true;
-   const armour=ARMOUR_MATERIAL.test(material.name||'');
+   const armour=ARMOUR_MATERIAL.test(material.name||''),cloth=!armour&&CLOTH_MATERIAL.test(material.name||'');
    // Sane night-PBR response; armour keeps a touch more env response, cloth stays matte.
    material.metalness=Math.min(material.metalness??0,.35);
    material.roughness=Math.max(material.roughness??1,armour?.6:.65);
@@ -253,10 +268,34 @@ function repairCharacterMaterials(root:THREE.Object3D){
    // Cool dusk Fresnel rim: cloth keeps the stronger silhouette rim, armour a slightly lower one
    // (its env/specular already separates it); both are additive and scene-independent.
    const rimColour=armour?'vec3(.30,.40,.55)':'vec3(.28,.36,.46)',rimWeight=armour?.2:.25;
+   // Cloth wind is normalised against the prim's own bind-space bounds (character geometry is
+   // authored in ~centimetre units with a node scale, so a fixed metre offset would be invisible).
+   if(cloth){
+    object.geometry.computeBoundingBox();const bounds=object.geometry.boundingBox!;
+    const height=Math.max(.001,bounds.max.y-bounds.min.y);
+    material.userData.windMinY=bounds.min.y;material.userData.windHeight=height;material.userData.windAmp=height*.03;
+   }
    material.onBeforeCompile=shader=>{
     shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>',`float ssRim=pow(1.0-clamp(dot(normalize(normal),normalize(vViewPosition)),0.0,1.0),2.5);\noutgoingLight+=${rimColour}*(ssRim*${rimWeight});\n#include <opaque_fragment>`);
+    if(cloth){
+     // Bind-space sway before skinning: hem (norm 0) moves ~3 % of the piece, waist/head stays put.
+     shader.uniforms.uWindTime=clothWindClock;
+     shader.uniforms.uWindMinY={value:material.userData.windMinY as number};
+     shader.uniforms.uWindInvHeight={value:1/Math.max(.001,material.userData.windHeight as number)};
+     shader.uniforms.uWindAmp={value:material.userData.windAmp as number};
+     shader.vertexShader='uniform float uWindTime;\nuniform float uWindMinY;\nuniform float uWindInvHeight;\nuniform float uWindAmp;\n'+shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>
+float ssNorm=clamp((position.y-uWindMinY)*uWindInvHeight,0.0,1.0);
+float ssSway=pow(1.0-ssNorm,1.4)*uWindAmp;
+float ssPhase=uWindTime*2.2+ssNorm*4.0+(position.x+position.z)*0.05;
+transformed.x+=sin(ssPhase)*ssSway;
+transformed.z+=cos(ssPhase*0.85)*ssSway*0.65;`);
+    }
    };
-   material.customProgramCacheKey=()=>RIM_CACHE_KEY+(armour?'a':'c')+(material.map?'m':'n');
+   material.customProgramCacheKey=()=>RIM_CACHE_KEY+(armour?'a':'c')+(material.map?'m':'n')+(cloth?(clothWindEnabled?'W':'w'):'');
+   if(cloth){
+    clothMaterials.add(material);material.userData.cloth=true;
+    material.onBeforeRender=()=>{clothWindClock.value=performance.now()*.001;};
+   }
    material.needsUpdate=true;
   }
  });
@@ -346,5 +385,5 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
   ground(actor.hp<=0);pivot.updateMatrixWorld(true);
   if(actor.hp>0&&next!=='block_idle')poseSupportHand();
   for(const {bone,grip} of attachments){const sc=bone.getWorldScale(new THREE.Vector3());grip.scale.set(1/Math.max(.00001,sc.x),1/Math.max(.00001,sc.y),1/Math.max(.00001,sc.z));}
- },dispose:()=>{mixer.stopAllAction();mixer.uncacheRoot(model);for(const geometry of proceduralGeometries)geometry.dispose();model.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])m.dispose();});}};
+ },dispose:()=>{mixer.stopAllAction();mixer.uncacheRoot(model);for(const geometry of proceduralGeometries)geometry.dispose();model.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material]){clothMaterials.delete(m as THREE.MeshStandardMaterial);m.dispose();}});}};
 }
