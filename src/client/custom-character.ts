@@ -300,6 +300,38 @@ transformed.z+=cos(ssPhase*0.85)*ssSway*0.65;`);
   }
  });
 }
+// ---------------------------------------------------------------------------------------------
+// Cycle-8 combat hit feedback v2 (client-only). Weapon-scaled emissive flash + short stagger, driven
+// from the posed rig itself: material originals are stashed per material and restored on expiry or
+// dispose, so pooled/removed actors cannot leak state. Reduced motion suppresses both effects, and
+// only the pivot is offset so grounding/animation are untouched. No per-frame allocations.
+export type HitFeedbackOptions={weight?:number;durationMs?:number;stagger?:number;flashColor?:number;reduced?:boolean};
+export type HitFeedbackState={hits:number;flashActive:boolean;flashRemainingMs:number;flashDurationMs:number;flashWeight:number;staggerActive:boolean;staggerRemainingMs:number;staggerMagnitude:number;reduced:boolean;lastFlashColor:number;actorId:string};
+export type HitFeedbackRig={hit(options?:HitFeedbackOptions):void;hitState():HitFeedbackState};
+let combatHitReduced=false;
+let combatHitCount=0;
+let lastHitFeedback:HitFeedbackState={hits:0,flashActive:false,flashRemainingMs:0,flashDurationMs:0,flashWeight:0,staggerActive:false,staggerRemainingMs:0,staggerMagnitude:0,reduced:false,lastFlashColor:0,actorId:''};
+const hitFeedbackRigs=new Map<string,HitFeedbackRig>();
+/** Global reduced-motion switch (scene calls this from its prefers-reduced-motion tracking). */
+export function setHitFeedbackReducedMotion(reduced:boolean){combatHitReduced=reduced;}
+/** Live rig ids for QA hooks (enemy actor ids appear as `a<N>`). */
+export function enemyHitRigIds():string[]{return [...hitFeedbackRigs.keys()];}
+/** Readable state for QA hooks: aggregates the latest triggered hit across all live rigs. */
+export function enemyHitFxState(){return {...lastHitFeedback,hits:combatHitCount};}
+/** Deterministic QA/debug trigger: hits a live rig by actor id (or the most recently created rig). */
+export function triggerEnemyHit(actorId?:string,options?:HitFeedbackOptions):boolean{
+ const rig=actorId?hitFeedbackRigs.get(actorId):[...hitFeedbackRigs.values()].pop();
+ if(!rig)return false;rig.hit(options);return true;
+}
+function installCombatHitHooks(){
+ if(typeof window==='undefined')return;
+ const hooks=window as unknown as Record<string,unknown>;
+ if(hooks.__ssEnemyHitFx)return;
+ hooks.__ssEnemyHitFx=()=>enemyHitFxState();
+ hooks.__ssTriggerEnemyHit=(actorId?:string,options?:HitFeedbackOptions)=>triggerEnemyHit(actorId,options);
+ hooks.__ssHitRigIds=()=>enemyHitRigIds();
+ hooks.__ssSetHitFeedbackReducedMotion=(value?:boolean|null)=>{setHitFeedbackReducedMotion(!!value);};
+}
 export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,unarmed=false){
  const model=clone(source.scene);model.updateMatrixWorld(true);
  const bounds=meshBounds(model),scale=1.85/bounds.getSize(new THREE.Vector3()).y;
@@ -367,13 +399,36 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
  repairCharacterMaterials(model);
  const eliteAddOn=buildEliteUndeadAddOn(model,a);
  if(eliteAddOn)proceduralGeometries.push(eliteAddOn.geometry);
+ // Combat hit feedback v2 state (lazy material capture: unhit rigs pay nothing).
+ let hitMaterials:THREE.MeshStandardMaterial[]|null=null;
+ const isEquipmentMesh=(object:THREE.Object3D)=>{let parent:THREE.Object3D|null=object;while(parent){if(parent.name&&parent.name.startsWith('equipment-'))return true;parent=parent.parent;}return false;};
+ const captureHitMaterials=()=>{if(hitMaterials)return hitMaterials;const list:THREE.MeshStandardMaterial[]=[];model.traverse(o=>{if(!(o instanceof THREE.Mesh)||isEquipmentMesh(o))return;for(const material of Array.isArray(o.material)?o.material:[o.material])if(material instanceof THREE.MeshStandardMaterial&&!list.includes(material))list.push(material);});hitMaterials=list;return list;};
+ const restoreHitMaterials=()=>{if(!hitMaterials)return;for(const material of hitMaterials){const original=material.userData.ssHitEmissive as number|undefined;if(original===undefined)continue;material.emissive.setHex(original);material.emissiveIntensity=(material.userData.ssHitEmissiveIntensity as number|undefined)??1;delete material.userData.ssHitEmissive;delete material.userData.ssHitEmissiveIntensity;}};
+ let hitFlashRemaining=0,hitFlashDuration=0,hitFlashWeight=0,hitFlashColorHex=0,hitStaggerRemaining=0,hitStaggerDuration=0,hitStaggerMagnitude=0,hitClock=0,hitCount=0,hitReduced=false;
+ const hit=(options:HitFeedbackOptions={})=>{
+  const weight=Math.max(.5,Math.min(2,options.weight??1));
+  const reduced=options.reduced??combatHitReduced;hitReduced=reduced;
+  hitCount++;combatHitCount++;hitClock=0;
+  if(reduced){restoreHitMaterials();hitFlashRemaining=0;hitStaggerRemaining=0;hitFlashDuration=0;hitStaggerMagnitude=0;lastHitFeedback={hits:combatHitCount,flashActive:false,flashRemainingMs:0,flashDurationMs:0,flashWeight:weight,staggerActive:false,staggerRemainingMs:0,staggerMagnitude:0,reduced:true,lastFlashColor:0,actorId:a.id};return;}
+  const duration=Math.max(40,Math.min(200,options.durationMs??(80+weight*35)));
+  hitFlashColorHex=options.flashColor??(a.kind==='zombie'||a.kind==='corrupted'?0x5a1f22:0x2a3440);
+  for(const material of captureHitMaterials()){
+   if(material.userData.ssHitEmissive===undefined){material.userData.ssHitEmissive=material.emissive.getHex();material.userData.ssHitEmissiveIntensity=material.emissiveIntensity;}
+   material.emissive.setHex(hitFlashColorHex);material.emissiveIntensity=Math.min(2,1.1+weight*.35);
+  }
+  hitFlashRemaining=duration;hitFlashDuration=duration;hitFlashWeight=weight;
+  hitStaggerDuration=Math.max(60,Math.min(240,120+weight*45));
+  hitStaggerRemaining=hitStaggerDuration;hitStaggerMagnitude=options.stagger??(.055+weight*.045);
+  lastHitFeedback={hits:combatHitCount,flashActive:true,flashRemainingMs:hitFlashRemaining,flashDurationMs:hitFlashDuration,flashWeight:weight,staggerActive:true,staggerRemainingMs:hitStaggerRemaining,staggerMagnitude:hitStaggerMagnitude,reduced:false,lastFlashColor:hitFlashColorHex,actorId:a.id};
+ };
+ const hitState=():HitFeedbackState=>({hits:hitCount,flashActive:hitFlashRemaining>0,flashRemainingMs:Math.max(0,hitFlashRemaining),flashDurationMs:hitFlashDuration,flashWeight:hitFlashWeight,staggerActive:hitStaggerRemaining>0,staggerRemainingMs:Math.max(0,hitStaggerRemaining),staggerMagnitude:hitStaggerMagnitude,reduced:hitReduced,lastFlashColor:hitFlashColorHex,actorId:a.id});
  const mixer=new THREE.AnimationMixer(model),actions=new Map<string,THREE.AnimationAction>();
  for(const clip of source.animations){
   const c=clip.clone();
   const action=mixer.clipAction(c);if(/attack|slash|death|impact/.test(c.name)){action.setLoop(THREE.LoopOnce,1);action.clampWhenFinished=true;}actions.set(c.name,action);
  }
  let state='',serial=a.attackSerial??0,attackTime=0;
- return {model:pivot,fragments:[] as THREE.Mesh[],update:(actor:Actor,moving:boolean,dt:number)=>{
+ const rig:HitFeedbackRig&{model:THREE.Group;fragments:THREE.Mesh[];update:(actor:Actor,moving:boolean,dt:number)=>void;dispose:()=>void}={model:pivot,fragments:[] as THREE.Mesh[],hit,hitState,update:(actor:Actor,moving:boolean,dt:number)=>{
   if((actor.attackSerial??0)!==serial){serial=actor.attackSerial??0;attackTime=weaponStats(actor.weapon).cooldown*.85;}
   attackTime=Math.max(0,attackTime-dt);
   const next=actor.hp<=0?'death_forward':attackTime>0?(serial%2?'attack_1':'attack_2'):actor.block?'block_idle':moving?'run':'idle';
@@ -385,5 +440,12 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
   ground(actor.hp<=0);pivot.updateMatrixWorld(true);
   if(actor.hp>0&&next!=='block_idle')poseSupportHand();
   for(const {bone,grip} of attachments){const sc=bone.getWorldScale(new THREE.Vector3());grip.scale.set(1/Math.max(.00001,sc.x),1/Math.max(.00001,sc.y),1/Math.max(.00001,sc.z));}
- },dispose:()=>{mixer.stopAllAction();mixer.uncacheRoot(model);for(const geometry of proceduralGeometries)geometry.dispose();model.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material]){clothMaterials.delete(m as THREE.MeshStandardMaterial);m.dispose();}});}};
+  // Combat feedback decay; the stagger offsets live on the pivot so grounding/animation are intact.
+  hitClock+=dt;
+  if(hitFlashRemaining>0){hitFlashRemaining-=dt*1000;if(hitFlashRemaining<=0){hitFlashRemaining=0;restoreHitMaterials();}}
+  if(hitStaggerRemaining>0){hitStaggerRemaining-=dt*1000;const k=Math.max(0,hitStaggerRemaining/hitStaggerDuration);pivot.position.x=Math.sin(hitClock*46)*hitStaggerMagnitude*k;pivot.position.z=Math.cos(hitClock*39)*hitStaggerMagnitude*.55*k;pivot.rotation.z=Math.sin(hitClock*52)*hitStaggerMagnitude*.4*k;}
+  else if(pivot.position.x!==0||pivot.position.z!==0||pivot.rotation.z!==0){pivot.position.x=0;pivot.position.z=0;pivot.rotation.z=0;}
+  lastHitFeedback.flashActive=hitFlashRemaining>0;lastHitFeedback.flashRemainingMs=Math.max(0,hitFlashRemaining);lastHitFeedback.staggerActive=hitStaggerRemaining>0;lastHitFeedback.staggerRemainingMs=Math.max(0,hitStaggerRemaining);
+ },dispose:()=>{restoreHitMaterials();hitFeedbackRigs.delete(a.id);mixer.stopAllAction();mixer.uncacheRoot(model);for(const geometry of proceduralGeometries)geometry.dispose();model.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material]){clothMaterials.delete(m as THREE.MeshStandardMaterial);m.dispose();}});}};
+ hitFeedbackRigs.set(a.id,rig);installCombatHitHooks();return rig;
 }

@@ -227,15 +227,20 @@ export const NEST_GRAVES: readonly DressingPlacement[] = [
   {x: 10, z: -671.5, yaw: -2.2},
   {x: 11, z: -675.5, yaw: -2.8},
   {x: 8, z: -669.5, yaw: -1.8},
-  {x: 12, z: -660.5, yaw: -2.4}
+  {x: 12, z: -660.5, yaw: -2.4},
+  {x: 4, z: -654.5, yaw: -2.9}
 ];
 
 export const NEST_BARRELS: readonly DressingPlacement[] = [
   {x: -6.3, z: -672.8, yaw: 0.8},
-  {x: 7.6, z: -672.5, yaw: -0.8}
+  {x: 7.6, z: -672.5, yaw: -0.8},
+  {x: -9, z: -673, yaw: 1.1}
 ];
 
-export const NEST_CARTS: readonly DressingPlacement[] = [{x: 0, z: -657, yaw: 2.5}];
+export const NEST_CARTS: readonly DressingPlacement[] = [
+  {x: 0, z: -657, yaw: 2.5},
+  {x: 15, z: -668, yaw: 2.1}
+];
 
 /** Candle glows on the nest floor (reuse the procedural flame cones; appended to the flames layer). */
 export const NEST_CANDLES: readonly {x: number; z: number; y: number; scale: number}[] = [

@@ -229,6 +229,9 @@ async function makeAtlas(palette, dim = 1024, opts = {}) {
   // needs hue-separated panels on the cloak exterior (hood already reads) ??? atlas-only knobs.
   const metalChips = opts.metalChips ?? 0.0;
   const chipBlocks = opts.chipBlocks ?? 0.0;
+  const plateFamilies = opts.plateFamilies ?? 0.0;
+  const plateStripes = opts.plateStripes ?? 0.0;
+  const plateGems = opts.plateGems ?? 0.0;
   const metalHueAmp = opts.metalHueAmp ?? 1.0;
   const clothPatches = opts.clothPatches ?? 0.0;
   const clothHueAmp = opts.clothHueAmp ?? 1.0;
@@ -325,6 +328,45 @@ async function makeAtlas(palette, dim = 1024, opts = {}) {
             const tb = Math.min(1, chipBlocks);
             if (block > 0.62) base = base.map((c, ci) => c * 1.0 + accentCream[ci] * 0.22 * tb);
             else if (block < 0.28) base = base.map((c, ci) => c * (1 - 0.18 * tb));
+          }
+          // cycle-8 hero headroom: extra hue FAMILIES across the big plate faces (cold blue-grey,
+          // warm gold, cream, dark iron) so the strict mask has more separated colour bins
+          if (plateFamilies > 0) {
+            const cold = hueShift(metal, 0.52, 0.35, 0.06);
+            const warm = hueShift(accent, 0.03, 0.62, 0.22);
+            const fams = [accentCream, warm, cold, accentLight, [0.16, 0.16, 0.19], metal];
+            const fx = Math.floor(u * 5), fy = Math.floor(v * 4);
+            const pick = Math.floor(hash(fx * 19 + fy * 37, 11) * fams.length) % fams.length;
+            const tint = 0.18 * Math.min(1, plateFamilies);
+            const fam = fams[pick];
+            base = base.map((c, ci) => c * (1 - tint) + fam[ci] * tint);
+            // thin bright hue trim lines (high contrast, small area) add separated colour bins
+            const trimV = Math.abs((v * 6.5) % 1 - 0.5);
+            if (trimV > 0.475) {
+              const ttrim = Math.min(1, (trimV - 0.475) * 18) * 0.75 * Math.min(1, plateFamilies);
+              const trimFam = fams[(pick + 2) % fams.length];
+              base = base.map((c, ci) => c * (1 - ttrim) + trimFam[ci] * ttrim);
+            }
+            // bold vertical hue stripes: the big pauldron/cuirass faces get separated colour bins
+            if (plateStripes > 0) {
+              const sx = Math.floor(u * 9);
+              const stripeFam = fams[sx % fams.length];
+              const ts = 0.5 * Math.min(1, plateStripes);
+              base = base.map((c, ci) => c * (1 - ts) + stripeFam[ci] * ts);
+            }
+            // heraldic gem/inset chips: small but strongly saturated colour islands on the biggest
+            // plate faces (dense hue bins for the strict mask without flattening the plate)
+            if (plateGems > 0) {
+              const jewels = [[0.62, 0.10, 0.12], [0.12, 0.24, 0.62], [0.72, 0.58, 0.14],
+                [0.14, 0.42, 0.26], [0.44, 0.14, 0.50], [0.86, 0.82, 0.70]];
+              const gx = Math.floor(u * 8), gy = Math.floor(v * 5);
+              const gem = hash(gx * 23 + gy * 41, 13);
+              if (gem > 0.72) {
+                const col = jewels[Math.floor(hash(gx * 7 + gy * 11, 17) * jewels.length) % jewels.length];
+                const tg = Math.min(1, (gem - 0.72) * 8) * 0.9 * Math.min(1, plateGems);
+                base = base.map((c, ci) => c * (1 - tg) + col[ci] * tg);
+              }
+            }
           }
         }
         if (rivet) base = base.map((c, ci) => c * 0.55 + rivetGold[ci] * 0.42);

@@ -1,4 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS} from '../src/client/controller';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue} from '../src/client/controller';
 test('combat feedback ignores joins, replayed snapshots and reconnect gaps',()=>{const g=createGame();addPlayer(g,'p','P');assert.deepEqual(combatCues(undefined,g,'p'),[]);assert.deepEqual(combatCues(g,g,'p'),[]);const next=structuredClone(g);next.time=2;next.actors.find(a=>a.id==='p')!.hp=1;assert.deepEqual(combatCues(g,next,'p'),[]);});
 test('combat feedback follows confirmed swings and health loss with range and impact limits',()=>{const g=createGame();g.actors=[];const p=addPlayer(g,'p','P');for(let i=0;i<5;i++)spawn(g,'zombie',p.x+1,p.z);spawn(g,'zombie',70,-400);const next=structuredClone(g);next.time=.1;const n=next.actors.find(a=>a.id==='p')!;n.attackSerial=1;n.hp-=10;n.weapon='hammer';for(const a of next.actors)if(a.kind==='zombie')a.hp-=5;const cues=combatCues(g,next,'p');assert.equal(cues.filter(c=>c.kind==='impact').length,3);assert.equal(cues.filter(c=>c.kind==='swing').length,1);assert.equal(cues.find(c=>c.kind==='swing')!.weapon,'hammer');assert.ok(cues.some(c=>c.kind==='hurt'));assert.ok(cues.some(c=>c.kind==='equip'));assert.ok(cues.filter(c=>c.kind==='impact').every(c=>c.material==='flesh'));assert.ok(cues.every(c=>c.volume>0&&c.volume<=1));assert.deepEqual(combatCues(next,{...next,time:.2},'p'),[]);
 const armed=structuredClone(next),replay=structuredClone(armed);replay.time=.3;assert.deepEqual(combatCues(armed,replay,'p'),[]);
@@ -53,4 +53,20 @@ assert.equal(captionAllowed(900,0,'undead','thunder'),false);
 assert.equal(captionAllowed(1200,0,'undead','thunder'),true);
 assert.equal(captionAllowed(1200,0,'thunder','undead'),false);
 assert.equal(captionAllowed(2200,0,'thunder','undead'),true);
-assert.equal(captionAllowed(Number.NaN,0,'thunder','undead'),true);});
+assert.equal(captionAllowed(Number.NaN,0,'thunder','undead'),true);
+// Touch stick mapping: radial deadzone, analog magnitude clamp and persisted look-sensitivity parsing.
+const zero={mx:0,forward:0,magnitude:0};
+assert.deepEqual(touchStickVector(0,0),zero);
+assert.deepEqual(touchStickVector(0,5,TOUCH_STICK_RADIUS,.18),zero);
+const fullRight=touchStickVector(TOUCH_STICK_RADIUS,0,TOUCH_STICK_RADIUS,.18);
+assert.ok(Math.abs(fullRight.mx-1)<1e-9&&Math.abs(fullRight.forward)<1e-9&&Math.abs(fullRight.magnitude-1)<1e-9);
+const halfRight=touchStickVector(TOUCH_STICK_RADIUS*.59,0,TOUCH_STICK_RADIUS,.18);
+assert.ok(Math.abs(halfRight.mx-.5)<1e-9&&Math.abs(halfRight.magnitude-.5)<1e-9);
+const fullUp=touchStickVector(0,-TOUCH_STICK_RADIUS,TOUCH_STICK_RADIUS,.18);
+assert.ok(Math.abs(fullUp.forward-1)<1e-9&&Math.abs(fullUp.mx)<1e-9);
+const diagonal=touchStickVector(TOUCH_STICK_RADIUS,TOUCH_STICK_RADIUS,TOUCH_STICK_RADIUS,.18);
+assert.ok(Math.abs(diagonal.magnitude-1)<1e-9&&Math.abs(diagonal.mx-Math.SQRT1_2)<1e-9&&Math.abs(diagonal.forward+Math.SQRT1_2)<1e-9);
+assert.deepEqual(touchStickVector(Number.NaN,0),zero);assert.deepEqual(touchStickVector(0,0,0),zero);
+assert.ok(Math.abs(touchStickVector(TOUCH_STICK_RADIUS,0,TOUCH_STICK_RADIUS,.5).magnitude-1)<1e-9);
+assert.equal(touchSensitivityValue(1.4),1.4);assert.equal(touchSensitivityValue('0.6'),.6);
+assert.equal(touchSensitivityValue(.2),1);assert.equal(touchSensitivityValue(3),1);assert.equal(touchSensitivityValue('nope'),1);assert.equal(touchSensitivityValue(null),1);});

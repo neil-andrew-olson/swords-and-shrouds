@@ -655,6 +655,43 @@ Staged mirrors validated before each install (76/76 armour v3, 78/78 props), ato
 `tests/armory` 5/5 after both phases. `tests/equipment` is 5/5 for the cycle-5 state; the cycle-6
 rebuild below changes the survivor staff weighting, so that assertion needs the cycle-6 update.
 
+## Batch 2026-10K — zombie-bloated night tone + hero headroom (cycle 8)
+
+Two asset files were touched this cycle; everything else is byte-identical to cycle 7.
+
+### zombie-bloated night tone
+
+The bloated variant read too bright at close range (weapons-armory's 2.8 m mask: body mean 126 vs base
+zombie 83). The fix was **albedo level, not mottle**, applied in three measured steps:
+1. body albedo x0.78, add-on albedo x0.62, plague material roughness 0.85 -> 0.95 (mean 126 -> 112.7);
+2. add-on albedo -> x0.52 (112.7 -> 110.5 — confirming the big-belly mean is lighting-dominated);
+3. explicit `baseColorFactor` 0.85 on BOTH bloated materials plus body albedo x0.72 (final).
+Final contract: **10,620 tris / 2 prims / 30-joint skin / 10 clips / 358.6 KB**, silhouette and clips
+unchanged. Local harness close-up body mean: base 64.3 -> bloated 62.5 (same mask); weapons-armory's
+pose-pinned mask measured **106.94 on the final bytes (base zombie 82.45)**, down from 131 at cycle 7
+via 110.5 (factor-less) — i.e. the last global lever moved it only ~3.5 points because this render's
+mean is lighting-dominated, not albedo-dominated. **Accepted and frozen at base+24**: the silhouette and
+palette read as intentionally plague-pale, and a factor low enough to reach 100 (~0.65) would erode the
+read. Cycle-9 nicety (optional): bias the lighting contribution instead (slightly darker emissive /
+roughness bias), not more albedo shrink. Preview: `temp_sketchlab/armour/c8_bloat5.png`.
+
+### hero strict-mask headroom (closed as "no change")
+
+A headroom candidate (stronger large-scale luminance blocks + hue-family tint + sparse saturated
+heraldic inset chips on the big plate faces) was built and measured: weapons-armory's strict mask came
+in at **492 vs 526** for the cycle-7 bytes — the block/chip lever loses strict colours even though the
+wide local proxy barely moved (1304 -> 1210). Hero was therefore **reverted byte-for-byte** to the
+cycle-7 file (sha verified, 783.4 KB, strict **526**), and the bake-script options were reverted to the
+cycle-7 values; the experimental headroom code (hue families / stripes / inset chips) remains in the
+builder dormant at 0 defaults. Cycle-9 note: hero headroom should be attacked via the **body atlas**
+(the lever that took ranger 379 -> 651), not more plate texture.
+
+### Verification
+
+Staged mirrors 80/80 before every install, atomic installs, live `validate-assets.mjs` **80/80**,
+`tests/assets` 5/5, `tests/equipment` 5/5, `tests/armory` 5/5; payload 76 files / 14.75 MB;
+`hero.glb.gz` byte-identical to the cycle-7 accepted file; no stray `.tmp`.
+
 ## Batch 2026-10J — enemy variants + strict-mask palette (cycle 7)
 
 ### Phase A — undead variants (installed, additional assets)

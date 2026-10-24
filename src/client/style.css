@@ -111,3 +111,88 @@ body.pad-connected #device{color:#e9d6a8}
 #captions[hidden]{display:none!important}
 @media(max-width:700px){#captions{bottom:104px;font-size:11px;padding:6px 10px;max-width:92vw}}
 @media(prefers-reduced-motion:reduce){#captions{transition:none}}
+
+/* =============================================================================================
+   Cycle 8 — mobile / touch HUD
+   Safe-area aware layout for portrait phones (<=520 px wide) and landscape/short screens
+   (<=520 px tall). body.touch-device is set by main.ts from the world-scene device profile (or
+   matchMedia coarse / maxTouchPoints fallback) so the touch layout also applies under CDP touch
+   emulation. Keyboard-only hints are hidden on touch; controller hints (#padHints) still show.
+   ============================================================================================= */
+html,body{overscroll-behavior:none}
+#world{touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+#touch,#stick,#lookpad,.touch-actions,.touch-actions button{touch-action:none;user-select:none;-webkit-user-select:none}
+body.touch-device #device{display:none}
+body.touch-device.pad-connected #device{display:block}
+body.touch-device #perf{display:none}
+
+/* Guide/Settings: always usable (scrollable) on small screens, with finger-sized rows. */
+@media(pointer:coarse){
+ dialog{max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 12px);width:min(94vw,760px);padding:16px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+ dialog h2{font-size:26px}
+ .guide-grid{grid-template-columns:1fr;gap:12px}
+ .settings{gap:10px;font-size:12px}
+ .settings label{min-height:34px}
+ .settings input[type=range]{height:30px}
+ #hud header{padding-top:calc(10px + env(safe-area-inset-top));padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right))}
+ .brand-small{font-size:20px}.brand-small small{display:none}
+ .hud-top{gap:5px}.hud-top button{font-size:9px;padding:7px 9px}
+ #compass{top:calc(4px + env(safe-area-inset-top));height:24px;width:min(420px,64vw)}
+ #objectives{top:calc(56px + env(safe-area-inset-top));left:calc(8px + env(safe-area-inset-left))}
+ #resources{top:calc(56px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right))}
+ #vitals{left:calc(8px + env(safe-area-inset-left));bottom:calc(12px + env(safe-area-inset-bottom))}
+ #troops{bottom:calc(4px + env(safe-area-inset-bottom))}
+ #prompt{bottom:calc(190px + env(safe-area-inset-bottom))}
+ #padHints{bottom:calc(150px + env(safe-area-inset-bottom))}
+ #captions{bottom:calc(196px + env(safe-area-inset-bottom))}
+ body.touch-device #touch{display:block}
+}
+
+/* Portrait phones (390x844 class). */
+@media(pointer:coarse) and (max-width:520px){
+ body.touch-device #objectives{width:150px;padding:7px 8px;font-size:9px;line-height:1.5}
+ body.touch-device #objectives .eyebrow{font-size:7px;margin-bottom:3px}
+ body.touch-device #resources{font-size:9px;padding:6px 8px;line-height:1.45}
+ body.touch-device #minimap{display:none}
+ body.touch-device #compass{display:none}
+ body.touch-device #bossBar{top:auto;bottom:calc(362px + env(safe-area-inset-bottom));width:min(320px,86vw)}
+ body.touch-device #siege{top:auto;bottom:calc(380px + env(safe-area-inset-bottom));font-size:10px;padding:7px 12px;max-width:92vw}
+ body.touch-device #vitals{width:150px;padding:7px 9px;font-size:10px;bottom:calc(132px + env(safe-area-inset-bottom))}
+ body.touch-device #vitals .healthtrack{margin:4px 0}
+ body.touch-device #stick{left:calc(14px + env(safe-area-inset-left));bottom:calc(18px + env(safe-area-inset-bottom));width:96px;height:96px}
+ body.touch-device #lookpad{top:16%;right:0;width:46%;height:38%;font-size:8px;padding-top:30%}
+ body.touch-device .touch-actions{right:calc(12px + env(safe-area-inset-right));bottom:calc(18px + env(safe-area-inset-bottom));flex-direction:column;gap:8px}
+ body.touch-device .touch-actions button{width:58px;height:58px;font-size:10px}
+ body.touch-device #troops{left:calc(118px + env(safe-area-inset-left));right:auto;transform:none;bottom:calc(6px + env(safe-area-inset-bottom));max-width:200px;flex-wrap:wrap;justify-content:flex-start;gap:4px}
+ body.touch-device #troops button{padding:7px 8px;font-size:9px}
+ body.touch-device #prompt{bottom:calc(300px + env(safe-area-inset-bottom));font-size:11px;max-width:90vw;padding:7px 10px}
+ body.touch-device #padHints{bottom:calc(380px + env(safe-area-inset-bottom));font-size:9px;padding:5px 8px}
+ body.touch-device #captions{bottom:calc(356px + env(safe-area-inset-bottom));font-size:11px;max-width:90vw}
+ body.touch-device #toast{top:calc(240px + env(safe-area-inset-top))}
+}
+
+/* Landscape phones / short screens (844x390 class). */
+@media(pointer:coarse) and (max-height:520px) and (min-width:521px){
+ body.touch-device #hud header{padding-top:calc(6px + env(safe-area-inset-top));padding-bottom:6px}
+ body.touch-device .hud-top button{font-size:9px;padding:6px 8px}
+ body.touch-device #objectives{width:164px;padding:7px 8px;font-size:9px;line-height:1.45;top:calc(46px + env(safe-area-inset-top))}
+ body.touch-device #objectives #regions,body.touch-device #objectives #castleList{display:none}
+ body.touch-device #resources{font-size:9px;padding:6px 8px;line-height:1.45;top:calc(46px + env(safe-area-inset-top))}
+ body.touch-device #minimap{display:none}
+ body.touch-device #vitals{top:calc(46px + env(safe-area-inset-top));bottom:auto;left:calc(180px + env(safe-area-inset-left));right:auto;width:150px;padding:7px 9px;font-size:10px}
+ body.touch-device #vitals .healthtrack{margin:4px 0}
+ body.touch-device #stick{left:calc(16px + env(safe-area-inset-left));bottom:calc(16px + env(safe-area-inset-bottom));width:88px;height:88px}
+ body.touch-device #lookpad{top:24%;right:0;width:42%;height:48%;font-size:8px;padding-top:22%}
+ body.touch-device .touch-actions{right:calc(14px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));flex-direction:row;gap:8px}
+ body.touch-device .touch-actions button{width:54px;height:54px;font-size:9px}
+ body.touch-device #troops{left:50%;right:auto;transform:translateX(-50%);bottom:calc(4px + env(safe-area-inset-bottom));max-width:54vw;flex-wrap:nowrap;gap:3px}
+ body.touch-device #troops button{padding:6px 7px;font-size:8px}
+ body.touch-device #prompt{bottom:calc(80px + env(safe-area-inset-bottom));font-size:10px;max-width:56vw;padding:6px 10px}
+ body.touch-device #padHints{bottom:calc(96px + env(safe-area-inset-bottom));font-size:9px;padding:4px 7px}
+ body.touch-device #captions{bottom:calc(130px + env(safe-area-inset-bottom));font-size:11px;max-width:70vw}
+ body.touch-device #siege{top:calc(46px + env(safe-area-inset-top));font-size:9px;padding:6px 10px;max-width:48vw}
+ body.touch-device #bossBar{top:calc(24px + env(safe-area-inset-top));width:min(300px,50vw)}
+ body.touch-device #compass{width:min(280px,44vw)}
+ body.touch-device #toast{top:calc(120px + env(safe-area-inset-top))}
+}
+

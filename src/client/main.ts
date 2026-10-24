@@ -5,7 +5,7 @@ import {Ambience} from './ambience';
 import {WEAPON_IDS,WEAPONS,weaponStats} from '../shared/weapons';
 import {WorldView} from './scene';
 import {weaponCombatProfile} from './equipment';
-import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue} from './controller';
+import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue,touchStickVector,touchSensitivityValue} from './controller';
 import {dist,clamp,BOUNDS,REGIONS} from '../shared/world';
 import type {Game,Actor} from '../shared/types';
 type PerfSnapshot={fps?:number;frameMs?:number;calls?:number;triangles?:number;points?:number;geometries?:number;textures?:number;programs?:number;quality?:string;tier?:string};
@@ -24,6 +24,21 @@ let deadzonePreset:DeadzonePreset=storedDeadzone&&Object.hasOwn(DEADZONE_PRESETS
 let deadzoneAmount=deadzoneValue(deadzonePreset);
 let padSensitivity=Number(localStorage.getItem('ss-pad-sensitivity'))||1;
 let captionsEnabled=localStorage.getItem('ss-captions')==='1';
+let touchLookSensitivity=touchSensitivityValue(localStorage.getItem('ss-touch-sensitivity'));
+const coarseMedia=typeof matchMedia==='function'?matchMedia('(pointer:coarse)'):undefined;
+type DeviceProfileHook={__ssDeviceProfile?:()=>{touch?:boolean;coarse?:boolean;smallScreen?:boolean;suggestedQuality?:string;appliedQuality?:string;dpr?:number;maxDpr?:number}};
+function deviceProfile(){const hook=(window as unknown as DeviceProfileHook).__ssDeviceProfile;try{return hook?.();}catch{return undefined;}}
+let touchDevice=false,smallScreen=false;
+function refreshDeviceProfile(){
+ const profile=deviceProfile();
+ touchDevice=!!(profile?.touch??(coarseMedia?.matches||(navigator.maxTouchPoints??0)>0));
+ smallScreen=!!(profile?.smallScreen??(innerWidth<=820));
+ document.body.classList.toggle('touch-device',touchDevice);
+ document.body.classList.toggle('small-screen',smallScreen);
+ applyInputHints();
+}
+const touchPointers=new Set<number>();
+let lastLookDx=0,lastLookDy=0;
 const keys=new Set<string>(),mouse={attack:false,block:false},touch={mx:0,forward:0,attack:false,block:false,interact:false};
 const guide=$<HTMLDialogElement>('guide'),result=$<HTMLDialogElement>('result');
 const me=()=>game?.actors.find(a=>a.id===id);
@@ -77,7 +92,7 @@ function rumble(strength:number,duration=110){
  const strong=clamp(strength,0,1),weak=clamp(strength*.6,0,1);
  try{void actuator.playEffect('dual-rumble',{duration,startDelay:0,strongMagnitude:strong,weakMagnitude:weak}).catch(()=>{});}catch{}
 }
-window.addEventListener('gamepaddisconnected',()=>{rumblePad=null;stopRumble();setPadHints(false);});
+window.addEventListener('gamepaddisconnected',()=>{rumblePad=null;stopRumble();setPadHints(false);applyInputHints();});
 
 // ---- F3 performance overlay (DOM-only, pointer-events:none, persisted in localStorage 'ss-perf') ----
 const perfBox=document.createElement('pre');
@@ -144,6 +159,16 @@ padSensitivityInput.oninput=()=>{
 const padSensitivityLabel=document.createElement('label');
 padSensitivityLabel.append('Controller look ',padSensitivityInput);
 guideSettings?.append(padSensitivityLabel);
+const touchSensitivityInput=document.createElement('input');
+touchSensitivityInput.id='touchSensitivity';touchSensitivityInput.type='range';touchSensitivityInput.min='0.4';touchSensitivityInput.max='2';touchSensitivityInput.step='0.1';
+touchSensitivityInput.value=String(touchLookSensitivity);touchSensitivityInput.setAttribute('aria-label','Touch look sensitivity');
+touchSensitivityInput.oninput=()=>{
+ touchLookSensitivity=touchSensitivityValue(touchSensitivityInput.value);
+ localStorage.setItem('ss-touch-sensitivity',String(touchLookSensitivity));
+};
+const touchSensitivityLabel=document.createElement('label');
+touchSensitivityLabel.append('Touch look ',touchSensitivityInput);
+guideSettings?.append(touchSensitivityLabel);
 const captionsToggle=document.createElement('input');
 captionsToggle.id='captionsToggle';captionsToggle.type='checkbox';captionsToggle.checked=captionsEnabled;
 captionsToggle.onchange=()=>{
@@ -349,10 +374,46 @@ for(const id of WEAPON_IDS){const w=WEAPONS[id],b=document.createElement('button
 document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach(b=>b.onclick=()=>cmd(b.dataset.command!));
 window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement||guide.open||result.open)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='KeyR')cmd('nextWeapon');if(e.code==='KeyI')$('armoryBtn').click();if(e.code==='KeyV')cameraToggle();if(e.code==='KeyH')cmd('heal');if(e.code==='KeyQ')cmd('sweep');if(e.code==='Digit1')cmd('follow');if(e.code==='Digit2')cmd('hold');if(e.code==='Digit3')cmd('attack');if(e.code==='KeyG')openGuide();if(e.code==='KeyB'){$('manageCastle').click();}});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden){release();stopRumble();}updateAudioPause();});
 canvas.addEventListener('click',()=>{if(game&&!guide.open&&!result.open&&matchMedia('(pointer:fine)').matches)canvas.requestPointerLock?.();});canvas.addEventListener('contextmenu',e=>e.preventDefault());canvas.addEventListener('mousedown',e=>{if(document.pointerLockElement===canvas){if(e.button===0){mouse.attack=true;}if(e.button===2)mouse.block=true;}});window.addEventListener('mouseup',e=>{if(e.button===0)mouse.attack=false;if(e.button===2)mouse.block=false;});document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas)release();});document.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas){yaw+=e.movementX*.0025*sensitivity;pitch=clamp(pitch-e.movementY*.0025*sensitivity*(invert?-1:1),-1.05,1.05);}});
-const stick=$('stick');let stickId=-1;function stickMove(e:PointerEvent){const rect=stick.getBoundingClientRect();let x=(e.clientX-rect.left-rect.width/2)/35,z=(e.clientY-rect.top-rect.height/2)/35;const len=Math.max(1,Math.hypot(x,z));touch.mx=x/len;touch.forward=-z/len;(stick.firstElementChild as HTMLElement).style.transform=`translate(${touch.mx*25}px,${-touch.forward*25}px)`;}
+const stick=$('stick');let stickId=-1;function stickMove(e:PointerEvent){const rect=stick.getBoundingClientRect();const vector=touchStickVector(e.clientX-(rect.left+rect.width/2),e.clientY-(rect.top+rect.height/2),35,deadzoneAmount);touch.mx=vector.mx;touch.forward=vector.forward;const knob=stick.firstElementChild as HTMLElement;if(knob)knob.style.transform=`translate(${(vector.mx*25).toFixed(1)}px,${(-vector.forward*25).toFixed(1)}px)`;}
 stick.onpointerdown=e=>{stickId=e.pointerId;stick.setPointerCapture(stickId);stickMove(e);};stick.onpointermove=e=>{if(e.pointerId===stickId)stickMove(e);};const stopStick=()=>{stickId=-1;touch.mx=touch.forward=0;(stick.firstElementChild as HTMLElement).style.transform='';};stick.onpointerup=stopStick;stick.onpointercancel=stopStick;
-let lookId=-1,lookX=0,lookY=0;const look=$('lookpad');look.onpointerdown=e=>{lookId=e.pointerId;lookX=e.clientX;lookY=e.clientY;look.setPointerCapture(lookId);};look.onpointermove=e=>{if(e.pointerId!==lookId)return;yaw+=(e.clientX-lookX)*.006*sensitivity;pitch=clamp(pitch-(e.clientY-lookY)*.006*sensitivity*(invert?-1:1),-1.05,1.05);lookX=e.clientX;lookY=e.clientY;};look.onpointerup=look.onpointercancel=()=>{lookId=-1;};
+let lookId=-1,lookX=0,lookY=0;const look=$('lookpad');look.onpointerdown=e=>{lookId=e.pointerId;lookX=e.clientX;lookY=e.clientY;look.setPointerCapture(lookId);};look.onpointermove=e=>{if(e.pointerId!==lookId)return;lastLookDx=e.clientX-lookX;lastLookDy=e.clientY-lookY;yaw+=lastLookDx*.006*touchLookSensitivity;pitch=clamp(pitch-lastLookDy*.006*touchLookSensitivity*(invert?-1:1),-1.05,1.05);lookX=e.clientX;lookY=e.clientY;};look.onpointerup=look.onpointercancel=()=>{lookId=-1;lastLookDx=0;lastLookDy=0;};
 document.querySelectorAll<HTMLButtonElement>('[data-hold]').forEach(b=>{const action=b.dataset.hold as 'attack'|'block'|'interact';b.onpointerdown=e=>{b.setPointerCapture(e.pointerId);touch[action]=true;};b.onpointerup=b.onpointercancel=()=>{touch[action]=false;};});
+// Per-control pointer capture keeps move + look + held actions usable simultaneously. Track active
+// touch pointers for the QA hook, block browser gestures on the play surface, and adapt hint copy to
+// the input device (keyboard hints disappear on touch; pad hints stay via #padHints).
+const touchRoot=$('touch');
+touchRoot.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse')touchPointers.add(e.pointerId);});
+const releaseTouchPointer=(e:PointerEvent)=>{touchPointers.delete(e.pointerId);};
+touchRoot.addEventListener('pointerup',releaseTouchPointer);touchRoot.addEventListener('pointercancel',releaseTouchPointer);touchRoot.addEventListener('pointerleave',releaseTouchPointer);
+document.addEventListener('gesturestart',e=>e.preventDefault());
+document.addEventListener('dblclick',e=>{if(document.body.classList.contains('touch-device'))e.preventDefault();});
+const touchHintLabels:[string,string,string][]=[['follow','1 Follow','Follow'],['hold','2 Hold','Hold'],['attack','3 Attack','Attack'],['heal','H Heal','Heal']];
+function applyInputHints(){
+ const usingPad=padWasConnected;
+ $('cameraBtn').textContent=`${first?'First':'Third'} person${usingPad?' · Y':touchDevice?'':' · V'}`;
+ $('armoryBtn').textContent=touchDevice?'Armory':'Armory · I';
+ $('guideBtn').textContent=touchDevice?'Guide':'Guide / Menu';
+ for(const [action,keyboard,touchLabel] of touchHintLabels){
+  const button=document.querySelector<HTMLButtonElement>(`[data-command="${action}"]`);
+  if(button)button.textContent=touchDevice?touchLabel:keyboard;
+ }
+}
+(window as unknown as {__ssTouch?:()=>unknown}).__ssTouch=()=>({
+ active:touchPointers.size>0,
+ device:{touch:touchDevice,coarse:!!coarseMedia?.matches,smallScreen},
+ stick:{x:+touch.mx.toFixed(3),y:+touch.forward.toFixed(3)},
+ look:{dx:+lastLookDx.toFixed(1),dy:+lastLookDy.toFixed(1)},
+ held:{attack:touch.attack,block:touch.block,interact:touch.interact},
+ pointers:{count:touchPointers.size,stick:stickId,look:lookId},
+ multiTouch:touchPointers.size>=2,
+ touchLookSensitivity,
+ deadzone:deadzonePreset,
+ deadzoneValue:deadzoneAmount,
+ deviceProfile:deviceProfile()??null
+});
+refreshDeviceProfile();
+window.addEventListener('resize',()=>refreshDeviceProfile());
+window.addEventListener('orientationchange',()=>refreshDeviceProfile());
 function menuGamepad(p:Gamepad){const d=readPad(p,padPrev,deadzoneAmount);menuPrev=d.previous;const root=guide.open?guide:result.open?result:$('landing');const buttons=[...root.querySelectorAll<HTMLButtonElement>('button')].filter(b=>!b.hidden&&!b.disabled&&b.offsetParent!==null);if(!buttons.length)return;const up=(p.buttons[12]?.pressed&&!padPrev[12]),down=(p.buttons[13]?.pressed&&!padPrev[13]);if(up)menuIndex=(menuIndex+buttons.length-1)%buttons.length;if(down)menuIndex=(menuIndex+1)%buttons.length;menuIndex%=buttons.length;if(up||down)buttons[menuIndex].focus();if(p.buttons[0]?.pressed&&!padPrev[0])buttons[menuIndex].click();if(d.menu&&guide.open)guide.close();}
 function updateCompass(p:Actor){
  const track=$('compassTrack');if(!track||!game)return;
@@ -391,14 +452,14 @@ function updateCompass(p:Actor){
 }
 
 function updateHud(p:Actor){
- const weapon=weaponStats(p.weapon);$('equippedWeapon').textContent=`${weapon.name} · ${p.cd>0?'Recovering '+p.cd.toFixed(1)+'s':(p.stamina??100)<weapon.stamina?'Low stamina':p.block?(weapon.shield?'Shield raised':'Parrying'):'Ready'} · R / LB`;
+ const weapon=weaponStats(p.weapon);$('equippedWeapon').textContent=`${weapon.name} · ${p.cd>0?'Recovering '+p.cd.toFixed(1)+'s':(p.stamina??100)<weapon.stamina?'Low stamina':p.block?(weapon.shield?'Shield raised':'Parrying'):'Ready'}${padName?' · LB':touchDevice?'':' · R / LB'}`;
  for(const id of WEAPON_IDS){const b=$<HTMLButtonElement>('equip-'+id),w=WEAPONS[id],owned=game!.armory.includes(id);b.disabled=!owned||p.hp<=0||p.cd>0||p.weapon===id;b.classList.toggle('equipped',p.weapon===id);b.setAttribute('aria-pressed',String(p.weapon===id));b.querySelector('small')!.textContent=owned?(p.weapon===id?'EQUIPPED':'Equip'):'Find a blue weapon rack';}
  const nearestRack=game!.weaponDrops.filter(d=>!d.taken&&!game!.armory.includes(d.weapon)).sort((a,b)=>dist(a,p)-dist(b,p))[0];$('armoryHint').textContent=nearestRack?`Nearest new weapon: ${WEAPONS[nearestRack.weapon].name} · ${Math.round(dist(p,nearestRack))} m. Blue rings mark weapon racks. Recovering one unlocks it for everyone, including late joiners.`:`All ${WEAPON_IDS.length} weapons recovered. Everyone can equip their own choice.`;
 $('playerName').textContent=p.name;$('hud').classList.toggle('low-health',p.hp>0&&p.hp/p.maxHp<=.3);updateCompass(p);
- $('health').style.width=`${p.hp/p.maxHp*100}%`;$('healthText').textContent=p.hp>0?`${Math.ceil(p.hp)} / ${p.maxHp} HEALTH`:`${p.downed?'CORRUPTION':'Returning'} in ${Math.max(0,Math.ceil(p.deadUntil-game!.time))}s`;$('device').textContent=padName?'XBOX / GAMEPAD CONNECTED':'WASD · MOUSE · V VIEW · G GUIDE';
+ $('health').style.width=`${p.hp/p.maxHp*100}%`;$('healthText').textContent=p.hp>0?`${Math.ceil(p.hp)} / ${p.maxHp} HEALTH`:`${p.downed?'CORRUPTION':'Returning'} in ${Math.max(0,Math.ceil(p.deadUntil-game!.time))}s`;$('device').textContent=padName?'XBOX / GAMEPAD CONNECTED':touchDevice?'':'WASD · MOUSE · V VIEW · G GUIDE';
  $('castleList').replaceChildren(...game!.castles.filter(c=>c.region===REGIONS.reduce((a,b)=>Math.abs(p.z-(a.offset-80))<Math.abs(p.z-(b.offset-80))?a:b).id).map(c=>{const row=document.createElement('div');row.className=c.friendly?'owned':'enemy';const a=document.createElement('span');a.textContent=(c.friendly?'◆ ':'◇ ')+c.name.replace('The ','');const b=document.createElement('span');b.textContent=c.friendly?['KEEP','BASTION','CITADEL'][c.level]:c.capture>0?`${Math.round(c.capture/5*100)}%`:'LOST';row.append(a,b);return row;}));$('rescueCount').textContent=`Survivors rescued  ${game!.camps.filter(c=>c.rescued).length} / ${game!.camps.length}`;$('nestStatus').textContent=game!.castles.every(c=>c.friendly)&&game!.camps.every(c=>c.rescued)?`Plague nest exposed · ${game!.nest.hp} HP`:'Plague nest · protected';const r=game!.resources;$('resources').textContent=`WOOD ${r.wood}   IRON ${r.iron}\nHEAL ${r.medicine}   RECRUITS ${r.recruits}`;$('resources').style.whiteSpace='pre';
  $('regions').textContent=game!.regions.map(r=>`${r.held?'◆':'◇'} ${r.name} ${game!.castles.filter(c=>c.region===r.id&&c.friendly).length}/3${r.held?' · supply income':''}`).join(' | ');
- $('stamina').style.width=`${p.stamina??100}%`;$('staminaText').textContent=`${Math.ceil(p.stamina??100)} STAMINA · ${(p.armor??'light').toUpperCase()} ARMOR`;$('sweepBtn').textContent=(p.abilityCd??0)>0?`Sweep · ${Math.ceil(p.abilityCd!)}s`:'Q / B · Sweep';$<HTMLButtonElement>('sweepBtn').disabled=p.hp<=0||(p.stamina??100)<40||(p.abilityCd??0)>0;
+ $('stamina').style.width=`${p.stamina??100}%`;$('staminaText').textContent=`${Math.ceil(p.stamina??100)} STAMINA · ${(p.armor??'light').toUpperCase()} ARMOR`;$('sweepBtn').textContent=touchDevice?((p.abilityCd??0)>0?`Sweep · ${Math.ceil(p.abilityCd!)}s`:'Sweep'):((p.abilityCd??0)>0?`Sweep · ${Math.ceil(p.abilityCd!)}s`:'Q / B · Sweep');$<HTMLButtonElement>('sweepBtn').disabled=p.hp<=0||(p.stamina??100)<40||(p.abilityCd??0)>0;
  const siege=game!.siege;$('siege').hidden=!game!.everCaptured;if(!siege)$('siege').textContent=`RECOVERY · ${Math.max(0,Math.ceil(game!.nextSiege-game!.time))}s until next warning · loot, heal and fortify`;if(siege)$('siege').textContent=`${siege.active?'SIEGE UNDERWAY':'SIEGE IN '+Math.max(0,Math.ceil(siege.starts-game!.time))+'s'} · ${game!.castles.find(c=>c.id===siege.castle)?.name}`;
  const base=game!.castles.find(c=>c.friendly&&dist(p,c)<15);$('baseActions').hidden=!base;document.querySelectorAll<HTMLButtonElement>('[data-base]').forEach(b=>b.disabled=!base);let prompt='';if(base)prompt=`${base.name} · Gate ${Math.ceil(base.gate)}/${180+base.level*120} · Barricade ${base.barrier}/${120+base.level*60} · B / Guide to build`;
  const travelReady=!!base&&dist(p,base)<8;const travelSignature=game!.castles.filter(c=>c.friendly).map(c=>c.id).join(',')+travelReady+!!game!.siege;if($('travelMenu').dataset.signature!==travelSignature){$('travelMenu').dataset.signature=travelSignature;$('travelMenu').replaceChildren(...game!.castles.filter(c=>c.friendly).map(c=>{const b=document.createElement('button');b.textContent=`Travel: ${c.name}`;b.disabled=!travelReady||!!game!.siege;b.onclick=()=>{cmd('travel:'+c.id);guide.close();};return b;}));}
@@ -429,11 +490,11 @@ function frame(now:number){const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame
  if(padConnected!==padWasConnected){
   padWasConnected=padConnected;
   if(padConnected){
-   rumblePad=pad as RumblePad;setPadHints(true);
+   rumblePad=pad as RumblePad;setPadHints(true);applyInputHints();
    const label=(pad?.id||'Gamepad').replace(/\(.*?\)/g,' ').replace(/\s+/g,' ').trim().slice(0,32)||'Gamepad';
    toast(`Controller connected: ${label}. RT Attack · LT Block · B Sweep · X Heal · A Interact.`);
   }else{
-   rumblePad=null;stopRumble();setPadHints(false);
+   rumblePad=null;stopRumble();setPadHints(false);applyInputHints();
    toast('Controller disconnected. Keyboard and mouse controls active.');
   }
  }else if(padConnected)rumblePad=pad as RumblePad;

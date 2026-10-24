@@ -23,71 +23,71 @@ workspace-relative paths and/or use the `present` tool.
 broad `taskkill /IM node.exe`. One dist builder at a time; QA owns authoritative captures. If a
 teammate edits after the Lead's gate, the hash changes and QA must be given the definitive artifact.
 
-## Latest completed cycle — 2026-10J cycle 7: enemy variety, palette cleared, content captures, a11y
+## Latest completed cycle — 2026-10K cycle 8: mobile/touch, device quality, preview/hit feedback
 
-Contract: `docs/BATCH-2026-10J-SPEC.md`; results: `docs/BATCH-2026-10J-RESULTS.md`; QA evidence in
-`docs/QA-REPORT.md`. Final bundle `index-BF93HyxO.js` (889,821 B), deterministic across two builds.
+Contract: `docs/BATCH-2026-10K-SPEC.md`; results: `docs/BATCH-2026-10K-RESULTS.md`; QA evidence in
+`docs/QA-REPORT.md`. Final bundle `index-2pShR6WA.js` (898,219 B), deterministic across two builds.
 
-### Enemy variety — two new undead variants
+### Mobile / touch experience
 
-- `zombie-bloated`: zombie 30-joint rig + 10 clips, 2 prims (10,000 + 620 rigid add-on), plague-bloated
-  silhouette, 10,620 tris / 361 KB.
-- `skeleton-armoured`: skeleton 51-joint rig + 9 clips, 2 prims (6,821 + 268 rigid helm/pauldrons/
-  shield), 7,089 tris / 286 KB.
-- `undeadVariant(a)` = `UNDEAD_ASSETS[idNumeric % 4]` (~25 % each variant per region, ~50 % bases);
-  players/soldiers/corrupted unchanged. `characterAssetFallback` + `assets.ts` fallback degrade to
-  base zombie/skeleton if a variant is missing; variants preload after playable.
-- QA: `__ssEnemyVariants()` availability, in-world variant captures, distinct silhouettes
-  (bloated 31.9/70.5 %, armoured 64.0/96.8 %), animations/grounding verified.
+- Responsive touch HUD (`body.touch-device`/`small-screen`, safe-area insets): portrait 390×844 +
+  landscape 844×390 layouts, no overlapping panels, thumb-reachable controls, keyboard hints hidden
+  on touch, scrollable finger-sized Settings.
+- Touch input: radial-deadzone analog stick (`touchStickVector()`), shared deadzone preset, persisted
+  touch look sensitivity (0.4–2.0), per-control pointer capture for simultaneous move+look+attack,
+  gesture/scroll/zoom suppression; desktop pointer-lock untouched.
+- **Device-aware quality** `__ssDeviceProfile()`: touch/coarse/small-screen/low-memory detection →
+  auto low/medium/high (SwiftShader low), DPR clamps 1.25/1.5/2; saved `ss-quality` never overridden.
+- QA mobile emulation 22/22: HUD active/no overlaps, pinch scale stays 1, 3-pointer multi-touch
+  (player moved 4.1 m, yaw changed), profile/mobile perf 130 calls / 1.31 M tris, desktop unchanged.
 
-### Strict-mask armour palette — debt cleared (7/7 ≥500)
+### Enemy preview + hit feedback v2
 
-templar 561 · hero 526 · berserker 721 · ranger 651 · ally 694 · survivor 1,082 · fallen 937.
-Fixes: ranger cloak base lightened out of 5-bit crush, hero luminance-separated plate chips/trim,
-fallen brighter/larger patina-rust chips, plus a hero polish pass. Crop metric 7/7 (638–1033).
+- `__ssPreviewEnemy(appearance, distance?)` frames all four undead appearances (base + variants) in
+  an open spot, returns `{ok,appearance,distance,ready,actorId}`, registers with the rig registry for
+  `__ssTriggerEnemyHit()`, `null` restores. QA captured all four at 2.8 m and 10 m.
+- Every damaging hit: weapon-scaled 80–140 ms emissive material flash (originals stashed/restored,
+  no pooled leaks), pivot-only stagger (grounding safe), weapon-tinted impact spark; works on all
+  variants; reduced motion suppresses. QA verified flash 111–130 ms, stagger 160–183 ms, suppression.
 
-### Content captures + plague dressing
+### Tone + content polish
 
-`scene.ts` passes `ruinsUpdate` a debug-only synthetic actor at the QA camera while `__ssQAView` is
-active, so `content-altar`/`content-furnace-*` and a new `content-plague` pose render player-distance-
-culled dressing; normal play culling unchanged. `__ssPerf().contentFocus` reports QA focus.
-Plague nest (0,−664) dressed with existing assets only: 3 wall fragments, 2 braziers + flames,
-4 candles, 8 graves, 6 stakes, 2 barrel clusters, corpse cart — 0 new draws/layers/lights, ≈86 k tris
-only when visible (nest far beyond spawn far plane).
-
-### Accessibility + controller settings
-
-- Captions (CC): persisted off-by-default toggle, subtle HUD line for thunder, nearby undead, siege
-  start/end, low health, castle captured; 2.2 s rate limit + priority interrupts; Sound-independent
-  by design. Hooks `__ssCaptions()`, `__ssCaptionDemo(cue)`.
-- Controller: deadzone presets (tight .10 / normal .18 / wide .28) + dedicated look sensitivity
-  (0.4–2.0) persisted and applied through `readPad` (default path unchanged); hints/rumble guards
-  intact. Hooks `__ssControllerSettings()`, extended `__ssPad()`.
+- Zombie-bloated night tone 131 → 106.9 body mean (base 82.5) via staged albedo/roughness/factor
+  reduction; accepted as intentional plague-pale (+24 vs base). Cycle-9 lever: lighting bias, not
+  albedo. Hero headroom attempt regressed (492 vs 526) → reverted byte-identical; strict-mask gate
+  stays **7/7 ≥500** (561/526/721/651/694/1082/937).
+- Plague-nest ground: 44 feather-mask corruption decals (single instanced draw when visible, pulsed,
+  160 m culling) + 3 enrichment props (29 props + 6 flames total, 0 new layers/draws).
 
 ### Verification (final artifact)
 
-- `npm test` **58/58**; `tsc` 0; deterministic build reproduced `index-BF93HyxO.js` twice;
+- `npm test` **58/58**; `tsc` 0; deterministic build reproduced `index-2pShR6WA.js` twice;
   `validate-assets` **80/80**.
-- Fresh-build smoke **38/38** + hash proof, 0 errors/404s, 10 cards, WS 1/0; night 53.7 forced-clear.
-- Perf **213 calls / 1,735,988 tris** (gates <290/<2.15 M); FP 165/1.62 M; low 164/1.42 M; payload
-  **17.02 MiB**; HUD click→HUD 157 ms / state 1.28 s / join 3.35 s.
-- Characters **58/58**, perf **60/60**, co-op **18/18**, live baseline **26/26**.
+- Fresh-build smoke **26/26** + hash proof, 0 errors/404s, 10 cards; characters 67/67, perf 70/70,
+  mobile 22/22, co-op **18/18**, live baseline **26/26**.
+- Perf **211 calls / 1,735,004 tris** (gates <290/<2.15 M); FP 165/1.62 M; low 162/1.42 M; payload
+  **17.06 MiB**; HUD click→HUD 3.27 s / state 6.29 s / join 3.61 s; night 51.2.
 
 ### Deployed state
 
-Live bundle is the hosting build of this commit sequence (`feat: AAA cycle 7 …` → hosting pin commit →
+Live bundle is the hosting build of this commit sequence (`feat: AAA cycle 8 …` → hosting pin commit →
 Cloudflare deploy → QA final live pass). Local play: `$env:PORT=3000; node --import tsx
 src/server/index.ts` from the game repo → http://localhost:3000/.
 
-### Cycle-8 (next) — from the audit
+### Cycle-9 (next) — from the audit
 
-1. Zombie-bloated night tone (lever: additive belly albedo level); enemy QA framing/spawn hook.
-2. Physical controller rumble / real-hardware gamepad test; surface-audio ear check.
-3. Real-GPU/perceptual playtests and mobile support.
-4. Content depth: campaign/siege objectives polish, balance, more enemy types/props from warehouse.
+1. Physical-device mobile + real-GPU + perceptual playtests (headless emulation is not hardware);
+   hardware controller rumble test.
+2. Hit-flash frame-sync capture (dedicated freeze/hook for QA visual proof).
+3. Surface-audio ear check; zombie-bloated lighting-bias tone pass; hero body-atlas headroom.
+4. Content/campaign depth: siege objectives polish, balance, more enemy types/props from warehouse;
+   mobile real-device QA.
 
 ## Previous cycles
 
+- **2026-10J cycle 7** (`docs/BATCH-2026-10J-RESULTS.md`): enemy variants (bloated/armoured),
+  strict-mask palette cleared 7/7, QA content-capture culling, plague dressing, a11y captions,
+  controller deadzone/sensitivity.
 - **2026-10I cycle 6** (`docs/BATCH-2026-10I-RESULTS.md`): Wandering Survivor sixth appearance,
   controller rumble/hints, reduced-motion vignette fix, cloth-wind isolation, altar candle glows.
 - **2026-10H cycle 5** (`docs/BATCH-2026-10H-RESULTS.md`): armour art v3 + survivor identity, cloth

@@ -1,6 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import * as THREE from 'three';import {equipmentModel} from '../src/client/equipment';
 test('weapon fit handles sideways, flat and upright exports without oversized geometry',()=>{for(const dimensions of [[.01,100,.01],[100,.01,.01],[.01,.01,100]]){const source=new THREE.Group();const mesh=new THREE.Mesh(new THREE.BoxGeometry(...dimensions as [number,number,number]),new THREE.MeshStandardMaterial());mesh.position.set(4,8,-6);source.add(mesh);const fit=equipmentModel(source,.9);fit.updateMatrixWorld(true);const size=new THREE.Box3().setFromObject(fit).getSize(new THREE.Vector3());assert.ok(Math.abs(Math.max(size.x,size.y,size.z)-.9)<1e-5);assert.ok(size.y>.89);}});
-import {readFileSync} from 'node:fs';import {gunzipSync} from 'node:zlib';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {customCharacter,undeadEliteTier,setCharacterWindQuality,clothWindState} from '../src/client/custom-character';import type {Actor} from '../src/shared/types';
+import {readFileSync} from 'node:fs';import {gunzipSync} from 'node:zlib';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {customCharacter,undeadEliteTier,setCharacterWindQuality,clothWindState,triggerEnemyHit,setHitFeedbackReducedMotion} from '../src/client/custom-character';import type {Actor} from '../src/shared/types';
 async function geometryAsset(name:string){const b=gunzipSync(readFileSync(`public/assets/custom/${name}.glb.gz`));const len=b.readUInt32LE(12),j=JSON.parse(b.toString('utf8',20,20+len));delete j.images;delete j.textures;delete j.samplers;
  // Keep material names/indices (armour-prim classification) but drop texture references so no image decode is needed.
  j.materials=(j.materials??[{}]).map((m:any)=>({name:m.name||'mat',doubleSided:!!m.doubleSided,pbrMetallicRoughness:{metallicFactor:m.pbrMetallicRoughness?.metallicFactor??1,roughnessFactor:m.pbrMetallicRoughness?.roughnessFactor??1}}));
@@ -186,9 +186,47 @@ test('all nine animated bodies stay grounded through idle, movement, block and a
   variantActor.hp=0;for(let i=0;i<40;i++){variantRig.update(variantActor,false,1/30);const deadBounds=meshBounds(variantRig.model);assert.ok(Number.isFinite(deadBounds.min.y)&&Number.isFinite(deadBounds.max.y),variant+' finite death bounds');}
   baseRig.dispose();variantRig.dispose();
  }
+ // Cycle-8 combat hit feedback v2: weapon-scaled flash/stagger, clean restore, reduced-motion path.
+ const lightHit=hitFeedbackProfile('rapier'),heavyHit=hitFeedbackProfile('flamberge');
+ assert.ok(heavyHit.flashMs>lightHit.flashMs,'heavy hit flashes longer');
+ assert.ok(heavyHit.stagger>lightHit.stagger,'heavy hit staggers more');
+ assert.ok(lightHit.flashMs>=80&&lightHit.flashMs<=140,'light flash inside 80-140 ms');
+ assert.ok(heavyHit.flashMs>=80&&heavyHit.flashMs<=140,'heavy flash inside 80-140 ms');
+ const hitActor=(id:string)=>({id,kind:'zombie',hp:52,maxHp:52,weapon:'sword',attackSerial:0} as Actor);
+ const flashHex=hitFlashColor(true);
+ for(const asset of ['zombie','zombie-bloated','skeleton-armoured']){
+  const actor=hitActor('hit-'+asset);
+  const rig=customCharacter(await geometryAsset(asset),actor,new Map());
+  assert.equal(rig.hitState().flashActive,false,asset+' starts unflashed');
+  rig.hit({weight:heavyHit.weight,durationMs:heavyHit.flashMs,stagger:heavyHit.stagger,flashColor:flashHex});
+  const hitState=rig.hitState();
+  assert.ok(hitState.flashActive,asset+' flash active');
+  assert.ok(hitState.flashRemainingMs>=80&&hitState.flashRemainingMs<=140,asset+' flash ttl '+hitState.flashRemainingMs);
+  assert.ok(hitState.staggerActive,asset+' stagger active');
+  assert.equal(hitState.actorId,'hit-'+asset,asset+' reports actor id');
+  let pulsed=0,stashed=0;
+  rig.model.traverse(o=>{if(!(o instanceof THREE.Mesh))return;for(const material of (Array.isArray(o.material)?o.material:[o.material]) as THREE.MeshStandardMaterial[])if(material instanceof THREE.MeshStandardMaterial&&material.emissive){if(material.emissive.getHex()===flashHex)pulsed++;if(material.userData.ssHitEmissive!==undefined)stashed++;}});
+  assert.ok(pulsed>0&&stashed>0,asset+' materials pulsed with originals stashed');
+  rig.update(actor,false,1/60);assert.ok(Math.abs(meshBounds(rig.model).min.y)<.07,asset+' grounded during stagger');
+  assert.equal(triggerEnemyHit(actor.id,{weight:lightHit.weight,durationMs:lightHit.flashMs}),true,asset+' QA trigger resolves the live rig');
+  for(let i=0;i<40;i++)rig.update(actor,false,1/60);
+  const settled=rig.hitState();assert.equal(settled.flashActive,false,asset+' flash expired');assert.equal(settled.staggerActive,false,asset+' stagger expired');
+  let stillFlashed=0,leaked=0;
+  rig.model.traverse(o=>{if(!(o instanceof THREE.Mesh))return;for(const material of (Array.isArray(o.material)?o.material:[o.material]) as THREE.MeshStandardMaterial[])if(material instanceof THREE.MeshStandardMaterial&&material.emissive){if(material.emissive.getHex()===flashHex)stillFlashed++;if(material.userData.ssHitEmissive!==undefined)leaked++;}});
+  assert.equal(stillFlashed,0,asset+' emissive restored');
+  assert.equal(leaked,0,asset+' no material stash leak');
+  rig.hit({weight:1.6,reduced:true});
+  const reduced=rig.hitState();assert.equal(reduced.flashActive,false,asset+' reduced flash suppressed');assert.equal(reduced.staggerActive,false,asset+' reduced stagger suppressed');assert.equal(reduced.reduced,true,asset+' reduced state reported');
+  rig.dispose();
+  assert.equal(triggerEnemyHit(actor.id),false,asset+' disposed rig unregistered');
+ }
+ setHitFeedbackReducedMotion(true);
+ const globalReducedRig=customCharacter(await geometryAsset('zombie'),hitActor('hit-global'),new Map());
+ globalReducedRig.hit({});assert.equal(globalReducedRig.hitState().flashActive,false,'global reduced-motion suppresses flash');
+ setHitFeedbackReducedMotion(false);globalReducedRig.dispose();
 });
 
-import {WEAPON_GRIPS} from '../src/client/equipment';
+import {WEAPON_GRIPS,hitFeedbackProfile,hitFlashColor} from '../src/client/equipment';
 test('measured weapon grips place the handle at the socket with the blade above it',async()=>{
  for(const id of WEAPON_IDS){const source=await geometryAsset(id);const fit=equipmentModel(source.scene,WEAPONS[id].length,false,id);fit.updateMatrixWorld(true);const wrapper=fit.children[0];const grip=new THREE.Vector3(...WEAPON_GRIPS[id].grip as [number,number,number]).applyMatrix4(wrapper.matrixWorld);assert.ok(grip.length()<1e-6,id+' grip');const direction=new THREE.Vector3(...WEAPON_GRIPS[id].blade as [number,number,number]).transformDirection(wrapper.matrixWorld);assert.ok(direction.y>.999,id+' blade');const bounds=new THREE.Box3().setFromObject(fit,true);assert.ok(bounds.max.y>Math.abs(bounds.min.y),id+' blade extends beyond grip');if(id==='rapier'||id==='halberd'||id==='dane_axe'||id==='flamberge'||id==='mace'){assert.ok(bounds.getSize(new THREE.Vector3()).length()<2.2,id+' fitted diagonal');source.scene.updateMatrixWorld(true);const raw=new THREE.Box3().setFromObject(source.scene,true),height=raw.getSize(new THREE.Vector3()).y;assert.ok(raw.min.y<-.1*height,id+' handle below grip');assert.ok(raw.max.y>.5*height,id+' blade above grip');}}
 });

@@ -203,7 +203,7 @@ function regionRadius(pos, joints, weights, jointIndex) {
 }
 
 /* ---------------------------------------------------------------- variant textures */
-async function makeTexture(kind) {
+async function makeTexture(kind, levelScale = 1.0) {
   const W = 256;
   const buf = Buffer.alloc(W * W * 3);
   const hash = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
@@ -235,6 +235,9 @@ async function makeTexture(kind) {
         buf[i + 2] = Math.max(0, Math.min(255, Math.round(b * 255)));
       }
     }
+  }
+  if (levelScale !== 1.0) {
+    for (let i = 0; i < buf.length; i++) buf[i] = Math.max(0, Math.min(255, Math.round(buf[i] * levelScale)));
   }
   return sharp(buf, {raw: {width: W, height: W, channels: 3}}).jpeg({quality: 84, mozjpeg: true}).toBuffer();
 }
@@ -364,11 +367,29 @@ async function buildVariant(name, baseName, textureKind, builder, opts) {
     return skin.listJoints().findIndex((j) => (j.getName() || '') === k);
   };
 
-  const texJpeg = await makeTexture(textureKind);
+  // cycle-8 night tone: lower the whole variant's albedo level (body + add-on), not the mottle
+  if (opts.baseColorFactor && opts.baseColorFactor !== 1.0) {
+    const bodyMat = bodyPrim.getMaterial();
+    if (bodyMat) bodyMat.setBaseColorFactor([opts.baseColorFactor, opts.baseColorFactor, opts.baseColorFactor, 1]);
+  }
+  if (opts.bodyAlbedoScale && opts.bodyAlbedoScale !== 1.0) {
+    const bodyMat = bodyPrim.getMaterial();
+    const bodyTex = bodyMat && bodyMat.getBaseColorTexture();
+    if (bodyTex && bodyTex.getImage()) {
+      const scaled = await sharp(Buffer.from(bodyTex.getImage()))
+        .linear(opts.bodyAlbedoScale, 0)
+        .jpeg({quality: 88, mozjpeg: true})
+        .toBuffer();
+      bodyTex.setImage(new Uint8Array(scaled)).setMimeType('image/jpeg');
+      console.log(`${name}: body albedo x${opts.bodyAlbedoScale}`);
+    }
+  }
+  const texJpeg = await makeTexture(textureKind, opts.addonAlbedoScale ?? 1.0);
   const buffer = root.listBuffers()[0];
   const mat = doc.createMaterial(name + '_mat')
     .setBaseColorTexture(doc.createTexture(name + '_tex').setImage(new Uint8Array(texJpeg)).setMimeType('image/jpeg'))
-    .setRoughnessFactor(textureKind === 'plague' ? 0.85 : 0.7)
+    .setRoughnessFactor(textureKind === 'plague' ? 0.95 : 0.7)
+    .setBaseColorFactor([opts.baseColorFactor ?? 1, opts.baseColorFactor ?? 1, opts.baseColorFactor ?? 1, 1])
     .setMetallicFactor(textureKind === 'plague' ? 0.0 : 0.45)
     .setDoubleSided(true);
   const vCount = merged.p.length / 3;
@@ -409,7 +430,7 @@ async function main() {
   const rows = [];
   if (!only || only.includes('zombie')) {
     rows.push(await buildVariant('zombie-bloated', 'zombie', 'plague', buildZombieBloated,
-      {triBudget: 11000, byteBudget: 400 * 1024}));
+      {triBudget: 11000, byteBudget: 400 * 1024, bodyAlbedoScale: 0.72, addonAlbedoScale: 0.52, baseColorFactor: 0.85}));
   }
   if (!only || only.includes('skeleton')) {
     rows.push(await buildVariant('skeleton-armoured', 'skeleton-soldier', 'iron', buildSkeletonArmoured,

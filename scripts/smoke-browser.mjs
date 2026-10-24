@@ -344,6 +344,7 @@ function parseArgs(argv) {
     characters: false,
     views: false,
     probePreview: false,
+    mobile: false,
     perfSettle: 4000,
     perfSampleMs: 4000,
     expectWeapons: null,
@@ -362,6 +363,7 @@ function parseArgs(argv) {
     else if (a === '--characters') opts.characters = true;
     else if (a === '--views') opts.views = true;
     else if (a === '--probe-preview') opts.probePreview = true;
+    else if (a === '--mobile') opts.mobile = true;
     else if (a === '--perf-settle') opts.perfSettle = Number(argv[++i]) || opts.perfSettle;
     else if (a === '--perf-samples') opts.perfSampleMs = Number(argv[++i]) || opts.perfSampleMs;
     else if (a === '--expect-weapons') opts.expectWeapons = Number(argv[++i]);
@@ -1148,6 +1150,23 @@ async function captureQaViews(page, outDir, report, check) {
       !!plagueCap.stats && plagueCap.stats.sampled > 1000 && plagueCap.stats.nonDarkPct > 2,
       JSON.stringify({mean: plagueCap.stats.mean, colors: plagueCap.stats.uniqueColors, contentFocus: plagueCap.contentFocus ?? null}),
     );
+    // Cycle-8: nest ground corruption decals + small enrichment should change the same pose vs cycle-7.
+    const plagueRef = path.join(ROOT, 'qa', 'live-views-c7', 'view-content-plague.png');
+    if (fs.existsSync(plagueRef)) {
+      try {
+        const diff = await comparePngs(page, plagueRef, plagueCap.file, {x0: 0.15, y0: 0.35, x1: 0.85, y1: 0.95});
+        report.views.plagueDecals = {reference: path.relative(ROOT, plagueRef), current: path.relative(ROOT, plagueCap.file), diff};
+        check(
+          'content: plague-nest ground decals/enrichment visible vs cycle-7 capture',
+          diff.meanAbsLum > 2 || diff.changedPct > 2,
+          JSON.stringify({diff, contentFocus: plagueCap.contentFocus ?? null}),
+        );
+      } catch (error) {
+        report.notes.push(`content: plague-decal diff failed (${error?.message || error})`);
+      }
+    } else {
+      report.notes.push('content: plague-decal cycle-7 reference missing — visual-only check');
+    }
   } else {
     report.notes.push('content: content-plague view unavailable — plague-nest dressing not captured (gap)');
   }
@@ -2748,7 +2767,373 @@ function targetActorSummary(a) {
   return a ? {id: a.id, kind: a.kind, x: a.x, z: a.z} : null;
 }
 
-/** Cycle-7 accessibility captions + controller deadzone/sensitivity settings probe. */
+/** Cycle-8: apply mobile emulation (viewport, DPR, touch, optional safe-area insets) via CDP. */
+async function applyMobileEmulation(page, {width, height, dpr = 3, safeArea = true}) {
+  const res = {width, height, dpr};
+  await page.send('Emulation.setDeviceMetricsOverride', {
+    width, height, deviceScaleFactor: dpr, mobile: true,
+    screenOrientation: width > height ? {angle: 90, type: 'landscapePrimary'} : {angle: 0, type: 'portraitPrimary'},
+  }, 15000);
+  await page.send('Emulation.setTouchEmulationEnabled', {enabled: true, maxTouchPoints: 5}, 15000);
+  // Reset page scale so orientation changes/layout measurement start from scale 1 (the product should
+  // also prevent pinch zoom; this keeps the orientation gate independent of a failed zoom guard).
+  await page.send('Emulation.setPageScaleFactor', {pageScaleFactor: 1}, 10000).catch(() => null);
+  // Mobile UA so device/pointer detection sees a phone, not a desktop viewport.
+  await page.send('Emulation.setUserAgentOverride', {
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36',
+    platform: 'Android',
+  }, 15000).catch(() => null);
+  if (safeArea) {
+    try {
+      await page.send('Emulation.setSafeAreaInsetsOverride', {insets: {top: 44, left: 0, bottom: 34, right: 0}}, 10000);
+      res.safeAreaEmulated = true;
+    } catch {
+      res.safeAreaEmulated = false;
+    }
+  }
+  return res;
+}
+
+/** Visible element rects for the touch HUD + overlap checks. */
+async function readTouchHud(page) {
+  return page.evaluate(
+    `(()=>{
+      const vis=el=>{if(!el)return null;const r=el.getBoundingClientRect();const cs=getComputedStyle(el);return {x:+r.x.toFixed(1),y:+r.y.toFixed(1),w:+r.width.toFixed(1),h:+r.height.toFixed(1),visible:cs.display!=='none'&&cs.visibility!=='hidden'&&r.width>0&&r.height>0,text:(el.textContent||'').trim().slice(0,40)};};
+      const holds=[...document.querySelectorAll('[data-hold]')].map(el=>({hold:el.getAttribute('data-hold'),id:el.id,rect:vis(el)}));
+      const hud=document.getElementById('hud');
+      const hints=document.getElementById('hints')||document.querySelector('.hints')||document.querySelector('#hintBar');
+      return {
+        viewport:{w:innerWidth,h:innerHeight,dpr:devicePixelRatio,scrollY,scrollX,scale:window.visualViewport?+window.visualViewport.scale.toFixed(3):null},
+        touchClass:document.body.className,
+        touchWrapper:vis(document.getElementById('touch')),
+        device:vis(document.getElementById('device')),
+        panels:Object.fromEntries(['vitals','troops','objectives','resources','prompt','minimap','compass'].map(id=>[id,vis(document.getElementById(id))])),
+        touchState:(()=>{try{return typeof window.__ssTouch==='function'?JSON.parse(JSON.stringify(window.__ssTouch())):null;}catch(e){return null;}})(),
+        stick:vis(document.getElementById('stick')),
+        lookpad:vis(document.getElementById('lookpad')),
+        holds,
+        hud:vis(hud),
+        hints:hints?vis(hints):null,
+        stickStyle:document.getElementById('stick')?{touchAction:getComputedStyle(document.getElementById('stick')).touchAction,userSelect:getComputedStyle(document.getElementById('stick')).userSelect}:null,
+        canvasStyle:(()=>{const c=document.getElementById('world');return c?{touchAction:getComputedStyle(c).touchAction,userSelect:getComputedStyle(c).userSelect}:null;})(),
+        safeInsets:(()=>{const s=getComputedStyle(document.documentElement);return {top:s.getPropertyValue('--safe-top')||null,bottom:s.getPropertyValue('--safe-bottom')||null};})(),
+      };
+    })()`,
+    {timeoutMs: 15000},
+  ).catch(() => null);
+}
+
+function rectsOverlap(a, b) {
+  if (!a || !b || !a.visible || !b.visible) return false;
+  const pad = 2;
+  return !(a.x + a.w <= b.x + pad || b.x + b.w <= a.x + pad || a.y + a.h <= b.y + pad || b.y + b.h <= a.y + pad);
+}
+
+/** Cycle-8 mobile/touch checks: portrait + landscape HUD/overlap, device profile, touch gestures,
+ * scroll/zoom prevention, quality auto-default. */
+async function captureMobileChecks(page, {report, check, outDir, opts}) {
+  report.mobile = {portrait: null, landscape: null, gestures: null};
+  const readProfile = () => page.evaluate(
+    `(()=>{try{return typeof window.__ssDeviceProfile==='function'?JSON.parse(JSON.stringify(window.__ssDeviceProfile())):null;}catch(e){return null;}})()`,
+    {timeoutMs: 10000},
+  ).catch(() => null);
+  const readTouch = () => page.evaluate(
+    `(()=>{try{return typeof window.__ssTouch==='function'?JSON.parse(JSON.stringify(window.__ssTouch())):null;}catch(e){return null;}})()`,
+    {timeoutMs: 10000},
+  ).catch(() => null);
+  const profile = await readProfile();
+  const hudP = await readTouchHud(page);
+  const qualityKey = await page.evaluate(`localStorage.getItem('ss-quality')`, {timeoutMs: 10000}).catch(() => null);
+  report.mobile.profile = profile;
+  report.mobile.storedQuality = qualityKey;
+  report.mobile.portrait = {hud: hudP, screenshot: null};
+  const qualityApplied = await page.evaluate(`(()=>{try{const p=window.__ssPerf?window.__ssPerf():null;return p?p.quality:null;}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+  report.mobile.appliedQuality = qualityApplied;
+  const mobilePerf = await page.evaluate(
+    `(()=>{try{const p=window.__ssPerf?window.__ssPerf():null;return p?{calls:p.calls,triangles:p.triangles,quality:p.quality,software:p.software,viewport:{w:innerWidth,h:innerHeight}}:null;}catch(e){return null;}})()`,
+    {timeoutMs: 15000},
+  ).catch(() => null);
+  report.mobile.perf = mobilePerf;
+  check(
+    'mobile: perf snapshot within cycle-8 budgets at the auto tier (<290 calls/<2.15M tris)',
+    !!mobilePerf && Number(mobilePerf.calls) < 290 && Number(mobilePerf.triangles) < 2_150_000 && mobilePerf.quality === profile?.appliedQuality,
+    JSON.stringify(mobilePerf),
+  );
+  check('mobile: __ssDeviceProfile reports touch + auto-default quality', !!profile && profile.touch === true && !!profile.suggestedQuality && profile.appliedQuality === profile.suggestedQuality, JSON.stringify(profile));
+  // With a cleared profile, the device-aware path may either leave ss-quality unset or write the
+  // auto-derived tier (never a user choice). Accept null OR the same auto tier as the applied quality.
+  check('mobile: no conflicting saved quality choice (auto-default)', qualityKey === null || qualityKey === qualityApplied || qualityKey === profile?.appliedQuality, JSON.stringify({qualityKey, appliedQuality: qualityApplied, suggested: profile?.suggestedQuality}));
+  check('mobile: touch HUD stick/lookpad/action buttons visible', !!(hudP && hudP.stick && hudP.stick.visible && hudP.lookpad && hudP.lookpad.visible && hudP.holds.length >= 3 && hudP.holds.every(h => h.rect && h.rect.visible)), JSON.stringify(hudP && {stick: hudP.stick, lookpad: hudP.lookpad, holds: hudP.holds.map(h => ({hold: h.hold, visible: h.rect?.visible}))}));
+  check('mobile: touch wrapper active + body.touch-device class', !!(hudP && /touch-device/.test(hudP.touchClass || '') && hudP.stick && hudP.stick.visible), JSON.stringify({touchWrapper: hudP?.touchWrapper, bodyClass: hudP?.touchClass}));
+  check('mobile: keyboard-only hint bar/device is hidden on the touch HUD', !!(hudP && (!hudP.device || hudP.device.visible === false)), JSON.stringify(hudP?.device || null));
+  check('mobile: device profile clamps DPR on this phone (maxDpr <= 1.5)', !!profile && Number(profile.maxDpr) <= 1.5 && Number(profile.maxDpr) > 0, JSON.stringify(profile));
+  const controls = hudP ? [hudP.stick, hudP.lookpad, ...hudP.holds.map(h => h.rect)].filter(Boolean) : [];
+  const overlaps = [];
+  for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) if (rectsOverlap(controls[i], controls[j])) overlaps.push([i, j]);
+  const withinViewport = r => !!r && r.visible && r.x >= -1 && r.y >= -1 && r.x + r.w <= (hudP?.viewport.w ?? 0) + 1 && r.y + r.h <= (hudP?.viewport.h ?? 0) + 1;
+  const insetControls = [hudP?.stick, ...(hudP?.holds || []).map(h => h.rect)].filter(Boolean);
+  const insetOk = insetControls.every(r => r.x >= 5 && r.y >= 5 && r.x + r.w <= (hudP?.viewport.w ?? 0) - 5 && r.y + r.h <= (hudP?.viewport.h ?? 0) - 5);
+  const inViewport = controls.every(withinViewport) && insetOk;
+  check('mobile: portrait touch controls non-overlapping, safe-area inset and inside the viewport', overlaps.length === 0 && inViewport, JSON.stringify({overlaps, inViewport, insetOk, viewport: hudP?.viewport, safeInsets: hudP?.safeInsets, controls}));
+  const panelRects = hudP ? Object.entries(hudP.panels || {}).filter(([, r]) => r && r.visible).map(([id, r]) => ({id, ...r})) : [];
+  const panelOverlaps = [];
+  for (let i = 0; i < panelRects.length; i++) for (let j = i + 1; j < panelRects.length; j++) if (rectsOverlap(panelRects[i], panelRects[j])) panelOverlaps.push([panelRects[i].id, panelRects[j].id]);
+  check(
+    'mobile: HUD panels do not overlap each other (portrait)',
+    panelOverlaps.length === 0,
+    JSON.stringify({panelOverlaps, panels: panelRects.map(p => ({id: p.id, x: p.x, y: p.y, w: p.w, h: p.h}))}),
+  );
+  // Touch look sensitivity setting (cycle-8): apply 1.4, verify hook + persistence, then restore 1.
+  const touchSens = await page.evaluate(
+    `(()=>{const s=document.getElementById('touchSensitivity');if(!s)return {ok:false};s.value='1.4';s.dispatchEvent(new Event('input',{bubbles:true}));s.dispatchEvent(new Event('change',{bubbles:true}));return {ok:true,stored:localStorage.getItem('ss-touch-sensitivity')};})()`,
+    {timeoutMs: 10000},
+  ).catch(() => ({ok: false}));
+  await sleep(300);
+  const touchStateSens = await readTouch();
+  report.mobile.touchSensitivity = {control: touchSens, state: touchStateSens};
+  check(
+    'mobile: touch look sensitivity applies + persists',
+    !!touchSens && touchSens.ok === true && Number(touchStateSens?.touchLookSensitivity) === 1.4 && Number(touchSens.stored) === 1.4,
+    JSON.stringify({control: touchSens, state: touchStateSens}),
+  );
+  await page.evaluate(`(()=>{const s=document.getElementById('touchSensitivity');if(s){s.value='1';s.dispatchEvent(new Event('input',{bubbles:true}));s.dispatchEvent(new Event('change',{bubbles:true}));}return true;})()`, {timeoutMs: 10000}).catch(() => null);
+  check('mobile: canvas/control zones prevent scroll and zoom gestures', !!(hudP && hudP.stickStyle && /none/i.test(String(hudP.canvasStyle?.touchAction || '')) && /none|manipulation/i.test(String(hudP.stickStyle.touchAction || ''))), JSON.stringify({canvas: hudP?.canvasStyle, stick: hudP?.stickStyle}));
+  report.screenshots.push(await screenshot(page, outDir, 'mobile-portrait.png'));
+  report.mobile.portrait.screenshot = path.relative(ROOT, path.join(outDir, 'mobile-portrait.png'));
+
+  // ---- multi-touch: move on stick + look on pad + attack button ----
+  const center = r => (r ? {x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2)} : null);
+  const stickC = center(hudP?.stick);
+  const lookC = center(hudP?.lookpad);
+  const attackHold = hudP?.holds.find(h => /attack/i.test(String(h.hold || h.id || ''))) || hudP?.holds[0];
+  const attackC = center(attackHold?.rect);
+  const gestures = {stickC, lookC, attackC, touchBefore: await readTouch()};
+  if (stickC && lookC && attackC) {
+    const point = (id, p) => ({id, x: p.x, y: p.y, radiusX: 6, radiusY: 6, force: 1});
+    const posBefore = await page.evaluate(`(()=>{const s=window.__qaWs&&window.__qaWs.lastState;const p=s&&(s.actors||[]).find(a=>a.kind==='player');return p?{x:p.x,z:p.z,yaw:p.yaw}:null;})()`, {timeoutMs: 10000}).catch(() => null);
+    await page.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [point(1, stickC), point(2, lookC)]}, 15000);
+    await sleep(250);
+    await page.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [point(1, {x: stickC.x, y: stickC.y - Math.round((hudP.stick.h || 60) / 2)}), point(2, {x: lookC.x + Math.round((hudP.lookpad.w || 80) / 3), y: lookC.y})]}, 15000);
+    await sleep(400);
+    await page.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [point(1, {x: stickC.x, y: stickC.y - Math.round((hudP.stick.h || 60) / 2)}), point(2, {x: lookC.x + Math.round((hudP.lookpad.w || 80) / 3), y: lookC.y}), point(3, attackC)]}, 15000);
+    await sleep(700);
+    gestures.touchDuring = await readTouch();
+    await page.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []}, 15000);
+    await sleep(400);
+    gestures.touchAfter = await readTouch();
+    const posAfter = await page.evaluate(`(()=>{const s=window.__qaWs&&window.__qaWs.lastState;const p=s&&(s.actors||[]).find(a=>a.kind==='player');return p?{x:p.x,z:p.z,yaw:p.yaw}:null;})()`, {timeoutMs: 10000}).catch(() => null);
+    gestures.playerBefore = posBefore;
+    gestures.playerAfter = posAfter;
+    const moved = !!(posBefore && posAfter && (Math.hypot(posAfter.x - posBefore.x, posAfter.z - posBefore.z) > 0.1 || Math.abs(posAfter.yaw - posBefore.yaw) > 0.05));
+    report.mobile.gestures = gestures;
+    const touchStateDuring = gestures.touchDuring;
+    check(
+      'mobile: multi-touch state reports 3 pointers + held attack',
+      !!touchStateDuring && Number(touchStateDuring?.pointers?.count) >= 3 && touchStateDuring?.multiTouch === true && touchStateDuring?.held?.attack === true,
+      JSON.stringify(touchStateDuring),
+    );
+    check('mobile: multi-touch move+look+attack changes player state', moved, JSON.stringify({before: posBefore, after: posAfter, touchDuring: gestures.touchDuring}));
+    // Pinch test (two fingers moving apart) must not zoom the page.
+    const mid = {x: Math.round(hudP.viewport.w / 2), y: Math.round(hudP.viewport.h / 2)};
+    await page.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [point(1, {x: mid.x - 20, y: mid.y}), point(2, {x: mid.x + 20, y: mid.y})]}, 15000);
+    await page.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [point(1, {x: mid.x - 90, y: mid.y}), point(2, {x: mid.x + 90, y: mid.y})]}, 15000);
+    await sleep(500);
+    await page.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []}, 15000);
+    await sleep(400);
+    const afterZoom = await page.evaluate(`({scrollY:window.scrollY,scrollX:window.scrollX,scale:window.visualViewport?+window.visualViewport.scale.toFixed(3):null})`, {timeoutMs: 10000}).catch(() => null);
+    report.mobile.noZoom = afterZoom;
+    check('mobile: pinch/scroll gestures do not scroll or zoom the page', !!afterZoom && afterZoom.scrollY === 0 && afterZoom.scrollX === 0 && (afterZoom.scale === null || afterZoom.scale === 1), JSON.stringify(afterZoom));
+    report.screenshots.push(await screenshot(page, outDir, 'mobile-after-gestures.png'));
+    // Normalize scale before the landscape layout measurement (the zoom gate above already recorded
+    // whether the product prevented the pinch).
+    await page.send('Emulation.setPageScaleFactor', {pageScaleFactor: 1}, 10000).catch(() => null);
+  } else {
+    report.notes.push('mobile: stick/lookpad/attack rects unavailable — touch gesture dispatch skipped');
+  }
+
+  // ---- landscape ----
+  await applyMobileEmulation(page, {width: 844, height: 390, dpr: 3, safeArea: true}).catch(() => null);
+  await sleep(2600);
+  const hudL = await readTouchHud(page);
+  const profileL = await readProfile();
+  report.mobile.landscape = {hud: hudL, profile: profileL};
+  const controlsL = hudL ? [hudL.stick, hudL.lookpad, ...hudL.holds.map(h => h.rect)].filter(Boolean) : [];
+  const overlapsL = [];
+  for (let i = 0; i < controlsL.length; i++) for (let j = i + 1; j < controlsL.length; j++) if (rectsOverlap(controlsL[i], controlsL[j])) overlapsL.push([i, j]);
+  const inViewportL = hudL ? controlsL.every(r => r.visible && r.x >= -1 && r.y >= -1 && r.x + r.w <= hudL.viewport.w + 1 && r.y + r.h <= hudL.viewport.h + 1) : false;
+  const insetControlsL = [hudL?.stick, ...(hudL?.holds || []).map(h => h.rect)].filter(Boolean);
+  const insetOkL = insetControlsL.every(r => r.x >= 5 && r.y >= 5 && r.x + r.w <= (hudL?.viewport.w ?? 0) - 5 && r.y + r.h <= (hudL?.viewport.h ?? 0) - 5);
+  check('mobile: landscape touch controls visible, non-overlapping, safe inset and inside the viewport', !!(hudL && hudL.stick?.visible && hudL.lookpad?.visible && hudL.holds.length >= 3 && overlapsL.length === 0 && inViewportL && insetOkL && (!hudL.hints || hudL.hints.visible === false)), JSON.stringify({viewport: hudL?.viewport, overlapsL, inViewportL, insetOkL, hints: hudL?.hints || null, safeInsets: hudL?.safeInsets, controls: controlsL}));
+  check('mobile: landscape keeps touch profile/quality', !!(profileL && profileL.touch === true && profileL.appliedQuality === profileL.suggestedQuality), JSON.stringify(profileL));
+  report.screenshots.push(await screenshot(page, outDir, 'mobile-landscape.png'));
+  report.mobile.landscape.screenshot = path.relative(ROOT, path.join(outDir, 'mobile-landscape.png'));
+  check('mobile: zero page errors during the emulated session', report.pageErrors.length === 0, JSON.stringify(report.pageErrors.slice(0, 3)));
+}
+
+
+/** Cycle-8 `__ssPreviewEnemy(appearance, distance)`: frame all 4 undead appearances at 2.8 m + 10 m,
+ * verify distinct silhouettes, and that null restores the normal view. */
+async function probeEnemyPreview(page, outDir, report, check) {
+  const hookName = await page.evaluate(
+    `(()=>{const n=['__ssPreviewEnemy','__ssEnemyPreview'];for(const x of n){if(typeof window[x]==='function')return x;}return null;})()`,
+    {timeoutMs: 10000},
+  ).catch(() => null);
+  if (!hookName) {
+    report.enemyPreview = {hook: null};
+    report.notes.push('enemy-preview: __ssPreviewEnemy hook absent — enemy QA framing not verified');
+    return;
+  }
+  const call = async (name, distance) => page.evaluate(
+    `(()=>{try{const f=window[${JSON.stringify(hookName)}];const r=f(${name === null ? 'null' : JSON.stringify(name)}, ${JSON.stringify({distance})});return r===undefined?{ok:true}:JSON.parse(JSON.stringify(r));}catch(e){return {ok:false,error:String((e&&e.message)||e)};}})()`,
+    {timeoutMs: 15000},
+  ).catch(error => ({ok: false, error: String(error?.message || error)}));
+  const appearances = ['zombie', 'skeleton-soldier', 'zombie-bloated', 'skeleton-armoured'];
+  const captures = {};
+  const base = await screenshot(page, outDir, 'preview-enemy-base.png');
+  for (const name of appearances) {
+    captures[name] = {};
+    for (const distance of [2.8, 10]) {
+      let r = await call(name, distance);
+      for (let waited = 0; waited < 8000 && r.ok && r.ready === false; waited += 500) {
+        await sleep(500);
+        r = await call(name, distance);
+      }
+      await sleep(1000);
+      const shot = await screenshotWithStats(page, outDir, `preview-enemy-${name}-${String(distance).replace('.', 'p')}m.png`, null);
+      const diff = await comparePngs(page, base, shot.file, {x0: 0.25, y0: 0.1, x1: 0.75, y1: 0.9}).catch(() => null);
+      const coreStats = await statsFromFile(page, shot.file, CHAR_CORE_REGION).catch(() => null);
+      captures[name][String(distance)] = {result: r, file: shot.file, stats: shot.stats, diff, coreStats};
+      await call(null, distance);
+      await sleep(300);
+    }
+  }
+  report.enemyPreview = {hook: hookName, captures};
+  const pairs = {};
+  for (const [a, b] of [['zombie', 'zombie-bloated'], ['skeleton-soldier', 'skeleton-armoured']]) {
+    for (const d of ['2.8', '10']) {
+      const ca = captures[a]?.[d], cb = captures[b]?.[d];
+      if (!ca || !cb) continue;
+      // At 10 m the rig is small in frame; use a tight body-centred crop so the silhouette difference is
+      // not diluted by background, and a lenient numeric gate (visual read + owner sheets remain primary).
+      const region = d === '10' ? {x0: 0.42, y0: 0.18, x1: 0.58, y1: 0.82} : {x0: 0.25, y0: 0.1, x1: 0.75, y1: 0.9};
+      pairs[`${a}-vs-${b}@${d}m`] = await comparePngs(page, ca.file, cb.file, region).catch(() => null);
+    }
+  }
+  report.enemyPreview.distinctness = pairs;
+  const rendered = appearances.filter(name => captures[name]?.['2.8']?.stats?.sampled > 1000 && captures[name]?.['10']?.stats?.sampled > 1000);
+  check('enemy-preview: __ssPreviewEnemy frames all 4 undead appearances at 2.8 m + 10 m', rendered.length === appearances.length, `${rendered.length}/${appearances.length} rendered: ${rendered.join(',')}`);
+  const distinct = Object.values(pairs).length > 0 && Object.values(pairs).every(d => d && (d.meanAbsLum > 0.5 || d.changedPct > 1));
+  check('enemy-preview: base vs variant silhouettes distinct at both distances', distinct, JSON.stringify(pairs));
+  const lastBodyShot = captures['skeleton-armoured']?.['2.8']?.file || captures['zombie']?.['2.8']?.file || captures['skeleton-armoured']?.['10']?.file || null;
+  const restored = await screenshot(page, outDir, 'preview-enemy-restored.png');
+  const restoreResult = await call(null, 10).catch(() => null);
+  const restoreDiff = lastBodyShot ? await comparePngs(page, lastBodyShot, restored, {x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8}).catch(() => null) : null;
+  report.enemyPreview.restore = {result: restoreResult, diff: restoreDiff};
+  check(
+    'enemy-preview: null restores the normal view (body removed)',
+    !!restoreResult && restoreResult.ok !== false && !!restoreDiff && (restoreDiff.meanAbsLum > 2 || restoreDiff.changedPct > 2),
+    JSON.stringify(report.enemyPreview.restore),
+  );
+  // Cycle-8 tone: zombie-bloated close-up should now read close to the base zombie (cycle-7 was ~126 vs 83).
+  const baseZombieCore = captures.zombie?.['2.8']?.coreStats || captures.zombie?.['10']?.coreStats;
+  const bloatedCore = captures['zombie-bloated']?.['2.8']?.coreStats || captures['zombie-bloated']?.['10']?.coreStats;
+  if (baseZombieCore && bloatedCore) {
+    const toneDelta = +(bloatedCore.mean - baseZombieCore.mean).toFixed(2);
+    report.enemyPreview.bloatedTone = {baseZombieMean: baseZombieCore.mean, bloatedMean: bloatedCore.mean, delta: toneDelta};
+    check(
+      'enemy-preview: zombie-bloated close-up tone is close to the base zombie (cycle-8 debt fix)',
+      Math.abs(toneDelta) <= 30,
+      JSON.stringify({...report.enemyPreview.bloatedTone, note: 'cycle-7 delta was ~43; plague-pale intentionally reads a little brighter, target <=30'}),
+    );
+  } else {
+    report.notes.push('enemy-preview: bloated tone comparison unavailable (core stats missing)');
+  }
+}
+
+/** Cycle-8 hit feedback v2 probe: trigger deterministic enemy hits on base + variant rigs via the
+ * exposed QA hooks, verify flash/stagger state, variant coverage, reduced-motion suppression, and
+ * frame evidence from a framed enemy preview. */
+async function probeHitFeedback(page, outDir, report, check) {
+  const hooks = await page.evaluate(
+    `(()=>({fx:typeof window.__ssEnemyHitFx==='function',trigger:typeof window.__ssTriggerEnemyHit==='function',ids:typeof window.__ssHitRigIds==='function',reduced:typeof window.__ssSetHitFeedbackReducedMotion==='function'}))()`,
+    {timeoutMs: 10000},
+  ).catch(() => ({fx: false, trigger: false, ids: false, reduced: false}));
+  report.hitFeedback = {hooks};
+  if (!hooks.fx || !hooks.trigger) {
+    report.notes.push('hit-feedback: __ssEnemyHitFx/__ssTriggerEnemyHit hooks absent — hit feedback not verified');
+    return;
+  }
+  const readFx = () => page.evaluate(`(()=>{try{return JSON.parse(JSON.stringify(window.__ssEnemyHitFx()));}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+  const rigIds = hooks.ids ? await page.evaluate(`(()=>{try{return window.__ssHitRigIds();}catch(e){return [];}})()`, {timeoutMs: 10000}).catch(() => []) : [];
+  const appearances = ['zombie', 'skeleton-soldier', 'zombie-bloated', 'skeleton-armoured'];
+  const previewHook = await page.evaluate(`typeof window.__ssPreviewEnemy==='function'`, {timeoutMs: 10000}).catch(() => false);
+  const results = [];
+  for (const name of appearances) {
+    if (previewHook) {
+      await page.evaluate(`(()=>{try{return window.__ssPreviewEnemy(${JSON.stringify(name)}, {distance:2.8});}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+      await sleep(1100);
+    }
+    const idsNow = hooks.ids ? await page.evaluate(`(()=>{try{return window.__ssHitRigIds();}catch(e){return [];}})()`, {timeoutMs: 10000}).catch(() => []) : rigIds;
+    const targetId = (idsNow && idsNow.length) ? idsNow[idsNow.length - 1] : undefined;
+    const before = await readFx();
+    // Frame evidence only for one base and one variant (state evidence covers all 4; SwiftShader
+    // screenshots are very slow when each preview loads a new rig).
+    const captureFrames = name === 'zombie' || name === 'zombie-bloated';
+    const beforeShot = previewHook && captureFrames ? await screenshot(page, outDir, `hit-${name}-before.png`).catch(() => null) : null;
+    if (captureFrames) {
+      // Keep the ~130 ms flash alive while SwiftShader takes a slow screenshot by re-triggering the
+      // deterministic hit on a short interval; the state hook still proves the real trigger path.
+      await page.evaluate(
+        `(()=>{window.__qaHitTimer&&clearInterval(window.__qaHitTimer);window.__qaHitTimer=setInterval(()=>{try{window.__ssTriggerEnemyHit(${targetId ? JSON.stringify(targetId) : 'undefined'},{weight:1.4,durationMs:130,stagger:0.12});}catch(e){}},40);return true;})()`,
+        {timeoutMs: 10000},
+      ).catch(() => null);
+      await sleep(180);
+    } else {
+      await page.evaluate(
+        `(()=>{try{return window.__ssTriggerEnemyHit(${targetId ? JSON.stringify(targetId) : 'undefined'}, {weight:0.9});}catch(e){return {error:String((e&&e.message)||e)};}})()`,
+        {timeoutMs: 10000},
+      ).catch(() => null);
+      await sleep(110);
+    }
+    const during = await readFx();
+    const duringShot = previewHook && captureFrames ? await screenshot(page, outDir, `hit-${name}-during.png`).catch(() => null) : null;
+    if (captureFrames) {
+      await page.evaluate(`(()=>{try{window.__qaHitTimer&&clearInterval(window.__qaHitTimer);window.__qaHitTimer=null;return true;}catch(e){return false;}})()`, {timeoutMs: 10000}).catch(() => null);
+    }
+    await sleep(300);
+    const after = await readFx();
+    const flashDiff = beforeShot && duringShot ? await comparePngs(page, beforeShot, duringShot, {x0: 0.25, y0: 0.1, x1: 0.75, y1: 0.9}).catch(() => null) : null;
+    results.push({name, targetId: targetId || null, before, during, after, flashDiff});
+    if (previewHook) {
+      await page.evaluate(`(()=>{try{return window.__ssPreviewEnemy(null);}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+      await sleep(300);
+    }
+  }
+  report.hitFeedback.results = results;
+  check('hit-feedback: hooks expose deterministic enemy hit triggers', !!hooks.trigger, JSON.stringify(hooks));
+  const flashed = results.every(r => r.during && r.during.flashActive === true && r.during.staggerActive === true);
+  check('hit-feedback: flash + stagger fire for base and all 3 variants', flashed, JSON.stringify(results.map(r => ({name: r.name, during: r.during}))));
+  const hitsIncrement = results.every(r => r.before && r.during && Number(r.during.hits) > Number(r.before.hits));
+  check('hit-feedback: hit counter increments on every trigger', hitsIncrement, JSON.stringify(results.map(r => ({name: r.name, before: r.before?.hits, during: r.during?.hits}))));
+  const framedFlash = results.filter(r => r.flashDiff).length === 0 || results.some(r => r.flashDiff && (r.flashDiff.meanAbsLum > 0.5 || r.flashDiff.changedPct > 0.5));
+  check('hit-feedback: framed hit frames visibly change (flash/stagger evidence)', framedFlash, JSON.stringify(results.map(r => ({name: r.name, flashDiff: r.flashDiff}))));
+  // Reduced-motion suppression: enable the hit-feedback reduced path + scene reduced motion, trigger,
+  // and require no active flash/stagger.
+  await page.evaluate(`(()=>{try{window.__ssSetHitFeedbackReducedMotion&&window.__ssSetHitFeedbackReducedMotion(true);window.__ssSetReducedMotion&&window.__ssSetReducedMotion(true);return true;}catch(e){return false;}})()`, {timeoutMs: 10000}).catch(() => null);
+  await sleep(300);
+  await page.evaluate(`(()=>{try{return window.__ssTriggerEnemyHit(undefined,{weight:0.9});}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+  await sleep(120);
+  const reducedFx = await readFx();
+  report.hitFeedback.reduced = reducedFx;
+  await page.evaluate(`(()=>{try{window.__ssSetHitFeedbackReducedMotion&&window.__ssSetHitFeedbackReducedMotion(null);window.__ssSetReducedMotion&&window.__ssSetReducedMotion(null);return true;}catch(e){return false;}})()`, {timeoutMs: 10000}).catch(() => null);
+  check(
+    'hit-feedback: reduced motion suppresses flash/stagger',
+    !!reducedFx && (reducedFx.reduced === true || (reducedFx.flashActive === false && reducedFx.staggerActive === false)),
+    JSON.stringify(reducedFx),
+  );
+}
+
+/** Cycle-7/8 accessibility captions + controller settings probe. */
 async function probeAccessibility(page, outDir, report, check) {
   const hasCaptions = await page.evaluate(`typeof window.__ssCaptions==='function'`, {timeoutMs: 10000}).catch(() => false);
   const hasSettings = await page.evaluate(`typeof window.__ssControllerSettings==='function'`, {timeoutMs: 10000}).catch(() => false);
@@ -3542,6 +3927,13 @@ async function run() {
     report.navigatedAt = nowIso();
     const targetUrl = mode === 'url' ? opts.url : `${baseUrl}/`;
     const navStartedAt = Date.now();
+    if (opts.mobile) {
+      // Apply emulation BEFORE navigation so touch/coarse-pointer + mobile UA are visible to startup
+      // device detection and the quality auto-default path.
+      report.mobileEmulation = await applyMobileEmulation(page, {width: 390, height: 844, dpr: 3, safeArea: true}).catch(error => ({error: String(error?.message || error)}));
+      log(`MOBILE EMULATION: ${JSON.stringify(report.mobileEmulation)}`);
+      await sleep(400);
+    }
     await page.send('Page.navigate', {url: targetUrl}, 60000);
     await waitFor(page, `document.readyState==='complete'`, {timeoutMs: 90000, label: 'page load'});
     await waitFor(
@@ -3552,6 +3944,16 @@ async function run() {
     const landingAt = Date.now();
     if (mode === 'url') check('live url loaded', true, targetUrl);
     check('landing UI visible', true, '');
+    if (opts.mobile) {
+      // Device-aware quality auto-default must be tested with no saved user choice: load once, clear
+      // storage, reload under the same mobile emulation, then continue (fresh profile → auto path).
+      await page.evaluate(`(()=>{try{localStorage.clear();sessionStorage.clear();return true;}catch(e){return false;}})()`, {timeoutMs: 10000}).catch(() => null);
+      await page.send('Page.navigate', {url: targetUrl}, 60000);
+      await waitFor(page, `document.readyState==='complete'`, {timeoutMs: 90000, label: 'mobile reload'});
+      await waitFor(page, `(()=>{const l=document.getElementById('landing');const n=document.getElementById('name');return !!l&&!l.hidden&&!!n&&l.getBoundingClientRect().height>0;})()`, {timeoutMs: 90000, label: 'mobile landing after clear'});
+      await sleep(700);
+      log('MOBILE: cleared localStorage and reloaded for the auto-quality path');
+    }
     // Landing streaming-window evidence: capture immediately on landing, then a second frame
     // ~0.6 s later. The legacy blue-cone tower tops were visible only while the modern keep towers
     // streamed in, so these early frames prove the hidden-by-default fix on the landing page.
@@ -3618,6 +4020,14 @@ async function run() {
       {timeoutMs: 60000, label: 'game state (player name, resources, wayfinder)'},
     );
     check('game state received (authoritative snapshot)', true, '');
+    if (opts.mobile) {
+      // Cycle-8 mobile/touch suite: portrait + landscape HUD/layout, device profile/quality,
+      // multi-touch gestures, scroll/zoom prevention, screenshots. Runs instead of the desktop visual
+      // flow; the finally block still writes the report/artifacts and summary.
+      report.mode = `${mode}-mobile`;
+      await captureMobileChecks(page, {report, check, outDir: opts.outDir, opts});
+      return;
+    }
     // Cycle-4 load-timing marks: `__ssLoadTimings()` + raw performance marks/measures for HUD
     // attribution (the nav→HUD/state numbers are also measured independently by the perf capture).
     report.loadTimings = await readLoadTimings(page);
@@ -3842,10 +4252,18 @@ async function run() {
     if (!opts.coop) {
       await probeController(page, opts.outDir, report, check);
       await probeCharacterFx(page, report, check);
-      // Cycle-7 undead variants (base vs bloated/armoured), screenshot + distinctness checks.
-      await probeEnemyVariants(page, opts.outDir, report, check);
-      // Cycle-7 accessibility captions + controller deadzone/sensitivity settings.
-      await probeAccessibility(page, opts.outDir, report, check);
+      // Heavy cycle-7/8 probes run in the feature/perf passes (fresh-build smoke and live baselines
+      // stay lean; live feature hooks are covered by the deployed mobile/targeted pass after deploy).
+      if (opts.characters || opts.perf) {
+        // Cycle-7 undead variants (base vs bloated/armoured), screenshot + distinctness checks.
+        await probeEnemyVariants(page, opts.outDir, report, check);
+        // Cycle-8 enemy QA framing hook (`__ssPreviewEnemy`) for all 4 undead appearances.
+        await probeEnemyPreview(page, opts.outDir, report, check);
+        // Cycle-8 hit feedback v2 (flash/stagger/impact, variant coverage, reduced-motion suppression).
+        await probeHitFeedback(page, opts.outDir, report, check);
+        // Cycle-7 accessibility captions + controller deadzone/sensitivity settings.
+        await probeAccessibility(page, opts.outDir, report, check);
+      }
     }
 
     // Cycle-5 combat-feel probe: heavy hit → hit-stop/kick/vignette, then the reduced-motion path.

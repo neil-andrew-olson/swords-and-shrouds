@@ -23,6 +23,21 @@ export function readPad(p:Pick<Gamepad,'axes'|'buttons'>,previous:boolean[]=[],d
 }
 
 /* ---------------------------------------------------------------------------------------------
+ * Touch controls: pure analog-stick mapping (radial deadzone + analog magnitude) and persisted
+ * touch look-sensitivity parsing, unit-testable without a DOM.
+ * ------------------------------------------------------------------------------------------- */
+export const TOUCH_STICK_RADIUS=35;
+export function touchStickVector(dx:number,dy:number,radius:number=TOUCH_STICK_RADIUS,deadzoneThreshold:number=DEADZONE_PRESETS.normal){
+ if(!Number.isFinite(dx)||!Number.isFinite(dy)||!Number.isFinite(radius)||radius<=0)return {mx:0,forward:0,magnitude:0};
+ const nx=dx/radius,ny=dy/radius,raw=Math.hypot(nx,ny),threshold=Math.max(0,Math.min(.9,deadzoneThreshold));
+ if(raw<=threshold||raw<1e-9)return {mx:0,forward:0,magnitude:0};
+ const magnitude=Math.min(1,(raw-threshold)/(1-threshold));
+ return {mx:(nx/raw)*magnitude,forward:-(ny/raw)*magnitude,magnitude};
+}
+/** Clamp a persisted touch look-sensitivity value (0.4–2.0), falling back to 1. */
+export function touchSensitivityValue(value:unknown){const n=Number(value);return Number.isFinite(n)&&n>=.4&&n<=2?n:1;}
+
+/* ---------------------------------------------------------------------------------------------
  * Accessibility captions (CC): pure text formatter + rate limiter. main.ts owns the HUD element,
  * persistence and gating; these helpers keep the behaviour unit-testable.
  * ------------------------------------------------------------------------------------------- */

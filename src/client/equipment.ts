@@ -64,4 +64,16 @@ export function weaponCombatProfile(id?:WeaponId):WeaponCombatProfile{
 }
 /** Cold steel spark for a successful block (kept brighter/additive than a flesh hit). */
 export function blockSparkColor():[number,number,number]{return [1.5,1.7,2.1];}
+/**
+ * Cycle-8 enemy hit feedback: one deterministic profile per weapon so the rig flash duration /
+ * stagger amplitude / impact spark all scale with the same combat weight. `flashMs` stays inside
+ * the 80–140 ms design band; `spark` is the additive impact colour for the existing particle pool.
+ */
+export type HitFeedbackProfile={weight:number;flashMs:number;flashIntensity:number;stagger:number;spark:[number,number,number]};
+export function hitFeedbackProfile(id?:WeaponId):HitFeedbackProfile{
+ const combat=weaponCombatProfile(id),weight=combat.weight;
+ return {weight,flashMs:Math.round(80+(weight-.8)*(140-80)/(1.6-.8)),flashIntensity:Math.min(2,1.1+weight*.35),stagger:+(.055+weight*.045).toFixed(3),spark:combat.impact};
+}
+/** Emissive pulse colour for a struck enemy (undead flesh vs armoured/other). */
+export function hitFlashColor(undead:boolean):number{return undead?0x5a1f22:0x2a3440;}
 

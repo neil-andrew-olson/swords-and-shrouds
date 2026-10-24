@@ -1933,3 +1933,103 @@ Deployed after the Lead accepted the cycle-7 pass. Live verification runs:
 **Cycle-7 live deployment is verified end-to-end: green.** task-73 complete; cycle-8 candidates:
 zombie-bloated night tone, enemy QA framing/spawn hook, physical rumble/hardware, real-GPU/perceptual/
 mobile, surface-audio ear check, content depth, nest ground-decal polish.
+
+---
+
+## Iteration cycle 2026-10K (AAA loop, cycle 8) — mobile/touch, enemy QA framing, hit feedback, tone (in progress)
+
+Cycle 8 ships browser-native mobile/touch experience, device-aware quality, the enemy QA framing hook,
+combat hit feedback v2 (flash/stagger/impact), zombie-bloated night-tone correction, nest ground
+decals, and mobile/accessibility settings.
+
+### Harness additions (`scripts/smoke-browser.mjs`)
+
+- **Mobile/touch mode (`--mobile`)**: CDP `Emulation.setDeviceMetricsOverride` + `setTouchEmulationEnabled`
+  + mobile UA + optional `setSafeAreaInsetsOverride` are applied **before navigation**, then the page is
+  reloaded after clearing storage for the auto-quality path. Checks: `__ssDeviceProfile()` touch/
+  suggested/applied/dpr/maxDpr, touch HUD (`#touch`/`#stick`/`#lookpad`/`[data-hold]`) visibility,
+  keyboard-hint hiding, HUD-panel overlap, safe-area/inset layout, multi-touch move+look+attack via
+  CDP touch events with `__ssTouch()` pointer/held state, pinch/scroll zoom prevention, portrait
+  390×844 + landscape 844×390 screenshots, and landscape profile/quality retention. Desktop runs are
+  unaffected (mobile checks only run in `--mobile`).
+- **Enemy preview hook:** `probeEnemyPreview` frames `__ssPreviewEnemy()` for zombie/skeleton-soldier/
+  zombie-bloated/skeleton-armoured at 2.8 m + 10 m, checks base-vs-variant distinctness (body-centred
+  crop at 10 m), `null` restore, and the zombie-bloated vs base close-up tone delta (cycle-8 tone fix).
+- **Hit feedback v2:** `probeHitFeedback` uses `__ssEnemyHitFx()` / `__ssTriggerEnemyHit()` /
+  `__ssHitRigIds()` (deterministic; preview rigs included), samples flash/stagger state per base +
+  variant, captures before/during frames, checks hit-counter increments, and verifies reduced-motion
+  suppression via `__ssSetHitFeedbackReducedMotion`.
+- **Tone/content:** plague-nest capture diffed against the cycle-7 reference to prove ground
+  decals/enrichment; altar/furnace QA-focus checks retained; zombie-bloated/hero palette numbers
+  updated from owner counters (strict gate ≥5/7, currently 7/7).
+- **Perf gates:** cycle-8 SPEC **<290 calls / <2.15 M tris**; tiers/payload/views/HUD app path retained;
+  mobile-emulation tier sanity (auto low/medium; DPR clamp).
+
+### Cycle-7 reference values (before cycle-8)
+
+- Perf: 213 calls / 1,735,988 tris / geoms 175 / textures 188 / programs 101; payload 17.02 MiB local
+  (live 17.00 MiB across 88 assets); authoritative bundle `index-BF93HyxO.js` (889,821 B), live
+  `index-sJM8R4Jf.js` (889,971 B).
+- Armour: strict mask 7/7 ≥500 (templar 561, hero 526, berserker 721, ranger 651, ally 694, survivor
+  1082, fallen 937); crop 7/7 638–1033; torso 84.48/76.68/black 5.03; hit feedback/QA preview hooks
+  absent; mobile touch HUD partially laid out but CSS zoom/overlap gates open; zombie-bloated tone
+  ~126 vs base 83 (owner mask).
+
+### Cycle-8 authoritative capture + regression — final build `index-2pShR6WA.js` (898,219 B): PASS
+
+**Artifact:** Lead-confirmed final hash **`index-2pShR6WA.js` (898,219 B)**. Fresh bundled-Node-24 build
+reproduced it **exactly** (fresh-build smoke **26/26 PASS**, `qa/final-c8`; 0 page/console/log errors,
+0 404s, 10 cards, WS 1/0, night TP **54.53** forced-clear). Authoritative runs: `--characters`
+**67/67** (`qa/characters-c8`), `--perf` **70/70** (`qa/perf-c8`), `--mobile` **22/22**
+(`qa/mobile-c8`), `--coop` **18/18** (`qa/coop-c8`), live baseline **26/26**
+(`qa/live-batch11-pre`, deployed cycle-7; only external Cloudflare beacon in logs).
+
+**1) Mobile/touch — PASS (portrait 390×844 + landscape 844×390).** CDP device-metrics + touch
+emulation + mobile UA applied before navigation and reloaded with cleared storage. Portrait and
+landscape both: `#touch` HUD active (`body.touch-device`), stick/lookpad/3 action buttons visible,
+keyboard hint bar hidden, HUD panels non-overlapping, controls inside viewport with safe insets, no
+page scroll/zoom (pinch test scale stays 1, `#world`/controls `touch-action:none`), **3-pointer
+multi-touch** (move+look+attack) with `__ssTouch()` showing `pointers.count=3/multiTouch=true/
+held.attack=true` and player moved 4.1 m + yaw 0.36; touch look sensitivity 1.4 applies/persists
+(`ss-touch-sensitivity`); `__ssDeviceProfile()` `{touch:true,coarse:true,smallScreen:true,
+suggestedQuality:'low',appliedQuality:'low',maxDpr:1.25}` and mobile `__ssPerf()` **130 calls /
+1,309,725 tris** (low tier). Screenshots `mobile-portrait.png` / `mobile-landscape.png`; desktop runs
+unchanged.
+
+**2) Enemy QA framing — PASS.** `__ssPreviewEnemy()` frames **all 4 undead appearances** (zombie,
+skeleton-soldier, zombie-bloated, skeleton-armoured) at **2.8 m + 10 m** (8 captures), base-vs-variant
+silhouettes distinct at both distances (10 m body-centred diffs 1.36–23.87 meanAbsLum / 1.8–75 %
+changed), `null` removes the body (restore diff 25.79/75 %) and returns `{ok,appearance:null}`;
+`__ssEnemyVariants()` availability/mapping still live; in-world id%4 captures retained.
+
+**3) Hit feedback v2 — PASS (state + frame evidence; screenshot-timing caveat).**
+`__ssEnemyHitFx()` on triggered hits for base + all 3 variants: **flashActive true** with
+flashRemaining ~111–130 ms, flashWeight 1.4 (heavy) / 0.9, **staggerActive true** ~160–183 ms,
+hit counter increments every trigger; framed hit frames visibly change (zombie 30.3 mean / 90 %
+changed, bloated 44.1 / 90 %); reduced-motion (`__ssSetHitFeedbackReducedMotion(true)` +
+`__ssSetReducedMotion(true)`) → flashActive false, staggerActive false, reduced true, 0 errors.
+Real gameplay wiring is in scene.ts on every damaging hit (world-scene/weapons confirm); QA’s slow
+SwiftShader hit screenshots can land after the 130 ms pulse (one frame caught the death overlay), so
+the deterministic hook state + weapons-armory’s framed canonical shots (`qa/char-viewer/shots/
+ingame-preview-hit-*`, `c8hit-*`/`c8red-*`) are the visual cross-reference — cycle-9 ask: pause/sync
+the hit frame for a pretty in-game capture.
+
+**4) Tone/nest — PASS.** `__ssPreviewEnemy` close-up tone: base zombie core mean **89.25** vs
+zombie-bloated **97.89** (delta **+8.6**; cycle-7 owner-mask delta ~43; plague-pale read retained,
+accepted owner base+24 masked as intentional). Hero reverted to cycle-7 bytes → strict mask stays
+**7/7 ≥500**. `content-plague` now shows the enriched ritual nest + **corruption feather ground
+decals** (44-instance mesh): capture differs from cycle-7 by **11.99 meanAbsLum / 42.3 % changed**;
+altar/furnace QA-focus captures still render props (`contentFocus` non-null); normal-play 85 m
+player-focus culling unchanged.
+
+**5) Perf / HUD / regression — PASS.** Spawn TP **211 calls** (<290 ✅) / **1,735,004 tris**
+(<2.15 M ✅), geoms 175, textures 188, programs 100; FP 165/1.62 M; low 162/1.42 M; payload
+**17,890,209 B = 17.06 MiB** (+0.06 MB vs cycle-7 local). Night TP **51.21** (≤75; Lead gate 65.32);
+regions 8.64–24.19 colour distance; crown cameras crown; snow 132→440 / fog 0.0189→0.0237 / low-tier 0;
+wind 3.316; HUD click→HUD **3.27 s** / state 6.29 s (both gates) / join **3.61 s** (≤3.8); fresh-build
+**26/26** + exact hash, co-op **18/18**, live baseline **26/26**, 0 page/console/log errors, 0 404s.
+
+**Cycle-8 verdict: PASS on all gates**, with the hit-frame screenshot timing and zombie-bloated
+intentional tone as cycle-9 notes. Cycle-9 candidates: physical-device mobile/real-GPU/perceptual
+passes, hardware controller rumble, hit-flash frame-sync capture, surface-audio ear check, content/
+campaign depth, further enemy variety. After deploy: final live pass + task-80 complete.
