@@ -768,3 +768,35 @@ above.
 `index-DtnItod1.js`), co-op **PASS 18/18** (both snapshots list both players, shared Warhammer
 unlock, 0 errors), live-URL baseline vs deployed batch-3 **PASS 17/17** (10 cards, 0 asset 404s,
 external Cloudflare beacon logged only).
+
+### Final live deployment verification — cycle-1 (game `cce2dcdd`, hosting `0a2b7e76`)
+
+Run after the Lead's Cloudflare deployment (live bundle **`index-us7RDw53.js`**, 801,279 B):
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch4 --expect-weapons 10 `
+    --expect-assets custom/hero.glb.gz,custom/templar.glb.gz,custom/castle_tower_lod.glb.gz,custom/pine_lod.glb.gz
+```
+
+- **Result: PASS 18/18.** Live network log shows `assets/index-us7RDw53.js` + CSS
+  `index-CnBWkizl.css`; `/health` OK; 0 uncaught page errors, 0 console errors, 0 bad responses,
+  0 failed internal requests; 10 weapon cards; all 4 expected assets HTTP 200 (hero, templar,
+  castle_tower_lod, pine_lod). 72 internal requests (67 `/assets/**`); WS `wss://…/ws` opens=1/
+  closes=0; fps 2.2 (SwiftShader).
+- **Live payload:** 12,412,444 B = **12.41 MB** across the 67 requested asset URLs — +1.9 % vs the
+  pre-cycle live 12.18 MB (the re-UV'd character atlases + tree/tower LODs), still **−70.9 % vs the
+  batch-2 live 42.6 MB**. Verified live sizes: hero 451,853 B, templar 450,942 B,
+  castle_tower_lod 123,177 B, pine_lod 90,446 B, CREDITS 4,697 B.
+- **Visual (live `qa/live-batch4/`):** characters now read clearly in the normal third-person view
+  (player + companions bright/coloured instead of black silhouettes — the same over-bright tone as
+  the local capture, flagged for cycle-2); dynamic shadows are visible on the walls/road and under
+  characters; stone architecture + tower LODs; grass/tents/ruins present; **no blue-cone towers**
+  in any landing frame; moon/halo retained; HUD and 10-card armory intact.
+- Only log-level entry: external `static.cloudflareinsights.com` beacon
+  (`ERR_CONNECTION_REFUSED`, third-party, not gated).
+- Co-op, perf, character close-up luminance and regression results above stand on the identical
+  game commit (only the URL/deployment differs).
+
+**Cycle-1 live deployment is verified end-to-end: green.** Accepted cycle-2 debt noted: character
+tone/AO over-brightness (cosmetic), triangles at the 1.5 M cap (+0.02 %).
