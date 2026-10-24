@@ -85,8 +85,16 @@ browser evidence: `docs/QA-REPORT.md`.
   builds the client under `/games/swords-and-shrouds/`).
 - Cloudflare Workers Builds deploys on push; `worker.js` imports the pinned `.game-build` simulation
   source, so the game-source pin controls both client and authoritative gameplay.
-- This checkpoint will be committed and the hosting pin updated to the resulting game commit; the
-  live URL must be verified separately after Cloudflare finishes building.
+- Hosting pin updated to `0ee662b` (the batch code/docs commit) in hosting commit `c98712c`;
+  Cloudflare Workers Builds deployed it successfully.
+- Live verification (2026-10-23 23:20 America/Chicago): `/games/swords-and-shrouds/health` returns
+  `{"ok":true,"backend":"cloudflare-durable-objects"}`; the served HTML references the new bundle
+  `index-K0lu3Xnn.js` and CSS `index-DSURmr1-.css`; the favicon data URI and updated
+  `assets/CREDITS.txt` are live; all 14 new `.glb.gz` assets and the four scanned road/cobblestone
+  textures return HTTP 200 from the live host.
+- Not yet re-verified live: an in-browser campaign run against the Cloudflare Durable Object
+  endpoint after this pin (the local headless run and the static/asset checks are green; the
+  WebSocket server code path is unchanged apart from the shared weapon-drop seed).
 
 ## Continuity procedure
 
