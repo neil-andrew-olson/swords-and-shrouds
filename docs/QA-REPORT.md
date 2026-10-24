@@ -1599,3 +1599,44 @@ shortfall on ranger/hero/fallen (4/7 ≥500 masked; asset-forge targets set), (b
 readability/contrast at the Ashen chapel, (c) reduced-motion vignette not fully zero in one sample,
 (d) low-tier cloth-wind shader saving wired but not visually isolated, (e) surface-audio ear check,
 (f) real-GPU/perceptual/controller/mobile passes. After deploy: final live pass + task-59 complete.
+
+### Final live deployment verification — cycle-5 (game `63a74d05`, hosting `648e5c20`)
+
+Deployed after the Lead accepted the cycle-5 pass. Live verification runs:
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch8-deployed --expect-weapons 10 `
+    --expect-assets custom/templar.glb.gz,custom/hero.glb.gz,custom/berserker.glb.gz,custom/ranger.glb.gz,custom/ally.glb.gz,custom/survivor.glb.gz,custom/fallen.glb.gz,custom/stone_well.glb.gz,custom/blacksmith_stall.glb.gz,custom/stone_altar.glb.gz,custom/forge_furnace.glb.gz
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --views --out qa/live-views-c5
+```
+
+- **Results: PASS 23/23 (deployed pass) + PASS 31/31 (live views/weather/content).** Live serves
+  **`assets/index-Dki3Ti_e.js` (879,643 B)** — the hosting/base-path build of the authoritative
+  `index-CsjSWrV-.js` (879,493 B; +150 B, same hosting delta as cycle-4's 862,087 vs 861,937);
+  `/health` OK; **11/11 expected assets HTTP 200** (7
+  armour-v3 GLBs, stone_well, blacksmith_stall, **stone_altar 220,895 B, forge_furnace 280,799 B**);
+  10 weapon cards; 0 page/console errors, 0 bad responses/404s, 0 failed requests; WS opens=1/closes=0.
+  Only log entry: external Cloudflare-Insights beacon (third-party, not gated). Live verified sizes:
+  templar 800,429 / survivor 784,780 / altar 220,895 / forge_furnace 280,799 / CREDITS 4,697 B.
+- **Live payload:** 17,012,161 B = **16.22 MiB** across 86 assets (curl-verified) — **+1.22 MB** vs
+  cycle-4 live 15,734,966 B (armour-v3 atlases + altar/furnace + audio).
+- **Live night mood:** TP canvas mean **63.35** natural weather in the deployed pass (≤75), and
+  **51.93** in the forced-clear views pass — night scene holds live. Combat feel verified live:
+  hit-stop 60 ms, vignette 0.749, kick 0.071; reduced-motion (`__ssSetReducedMotion(true)`) → hit-stop
+  0, kick 0.011, vignette 0.344 (partial residual again — cycle-6 polish note).
+- **Live weather/content (views pass):** march rain 138/90 → 460/90; moor haze 4 → 14; crown snow
+  **240 → 800**, fog **0.01827 → 0.02327**, low-tier **0 snow**, `region-crown` reports **crown**;
+  region distances 5.23–23.38; wind max diff 1.289. All 7 required + 12 optional views captured live
+  (incl. `content-altar(-close)`, `content-furnace-village/camp`); furnace views clearly show the
+  grounded furnaces with barrel/crate dressing; altar reads as pale stone + ritual wax/books at the
+  chapel base with the dark stone body merging into chapel shadow — matches the "present, low night
+  contrast" classification (cycle-6 readability note; no rebuild).
+- **Live HUD context:** join button enabled **3.33 s** (local authoritative run, gate ≤3.8 s); app-load
+  evidence is the same fast click→HUD path as local (**158 ms / 1.15 s** click→HUD/state); the live
+  views run's nav→HUD includes QA landing overhead as before.
+
+**Cycle-5 live deployment is verified end-to-end: green, with the cycle-6 gaps recorded** (masked
+palette ranger/hero/fallen, altar night readability, reduced-motion vignette residual, low-tier wind
+isolation, surface-audio ear check, real-GPU/perceptual/controller/mobile, content depth). task-59
+complete.
