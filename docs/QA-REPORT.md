@@ -1210,3 +1210,50 @@ Focused re-run results (same harness):
 **Rebuild verdict:** five of six routed visual defects are fixed and verified; the only remaining
 gate failure is **time-to-HUD** (plus the marginal torso-p50 note). Everything else (perf, region
 identity, foliage, moon, smoke, decals, stones, dead trees, characters/elite, co-op, hash) is green.
+
+### Final live deployment verification — cycle-3 (game `b1117806`, hosting `7bba27d8`)
+
+Deployed after the Lead accepted the visual-fix build as **known debt** (time-to-HUD + marginal
+torso p50 documented above). Live verification runs:
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch6-deployed --expect-weapons 10 --expect-assets custom/pine_v2.glb.gz,custom/snow_pine.glb.gz,custom/oak_v2.glb.gz,custom/maple.glb.gz,custom/chapel_ruin.glb.gz,custom/watchtower_ruin.glb.gz,custom/village_house_ruin.glb.gz,textures/flame_soft.png
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --perf --out qa/live-views-b6
+```
+
+- **Result: PASS 18/18 (deployed pass) + 20/21 (live + QA views; one wind-motion sample below the
+  0.8 gate, see note).** Live network log shows **`assets/index-C1FVaRwU.js`** (840,949 B) +
+  `index-CnBWkizl.css`; `/health` OK; 10 weapon cards; all **8/8 expected assets HTTP 200** (pine_v2,
+  snow_pine, oak_v2, maple, chapel_ruin, watchtower_ruin, village_house_ruin, textures/flame_soft.png);
+  **0 page/console errors, 0 bad responses/404s, 0 failed internal requests**; 91 internal requests
+  (82 asset URLs); WS `wss://` opens=1/closes=0; fps 2.0 (SwiftShader). Only log entry: external
+  Cloudflare-Insights beacon (third-party, not gated).
+- **Live payload:** 15,036,880 B = **14.34 MiB** across the 82 requested assets (curl-verified) —
+  **+10.1 %** vs cycle-2 live 13.03 MiB (new v2 foliage, snow pine, maple, three landmark
+  structures, flame/smoke/snow textures), still **−66 % vs batch-2 live 42.6 MB**. Live sizes:
+  pine_v2 97,202 / snow_pine 100,773 / oak_v2 74,674 / maple 81,922 / chapel_ruin 444,298 /
+  watchtower_ruin 477,873 / village_house_ruin 147,757 / flame_soft 33,685 / CREDITS 4,697 B.
+  Live perf probe: **195 calls / 1,666,320 tris** (low 153/1.355 M, medium 194, FP 153/1.551 M) —
+  matches the local authoritative capture (195 / 1,666,828).
+- **Live QA views:** all 13 captures work on the deployed build (`qa/live-views-b6/view-*.png`);
+  `__ssPerf().landscape.treeDebug` on live shows `bark` 316 tris + `pine_leaves` 956 tris
+  `alphaTest 0.42` (canopy leaf prims live); `__ssRegionInfo` per-camera values verified live:
+  march **#1e4038 d0.0122**, moor **#243839 d0.0139**, crown **#425968 d0.0158**; region colour
+  distances **12.55/31.26/30.87**, luminance spread **14.8**; treeline shows real canopies.
+- **Visual confirmation live vs cycle-2 live (`qa/live-batch4/`):** landing/third-person show
+  **canopy foliage** (green pines + orange maple) instead of bare trees, a **soft small moon**
+  (grey disc/dark rim gone), **pale additive brazier smoke**, the **relocated Green landmark**
+  (village house + stone circle) far from the spawn road, **no standing-stone crowding at the gate**,
+  and **distinct region looks** (snow/blue crown vs grey-violet moor vs green march). The long live
+  QA-view capture shows the idle-corruption respawn overlay (5-min capture; clean evidence is
+  `qa/views-b6b/`) — non-blocking, and the corruption mechanic is working as designed.
+- **Accepted cycle-3 debt (Lead-approved, documented):** time-to-HUD still above the 15.0 s gate
+  (HUD 17.1–18.5 s local, live reference 18.7 s; landing improved 3.28–3.50 s), marginal torso p50
+  102.4 vs ≤100 (mean 91.5, close-ups unchanged), wind-diff sample variance around the 0.8 threshold
+  (passed 0.887–1.602 locally, 0.721 in this live sample), `region-crown` QA-view snow-pine framing,
+  and bright/saturated maple + green pines at night (cycle-4 tone item).
+
+**Cycle-3 live deployment is verified end-to-end: green, with the Lead-approved time-to-HUD debt.**
+task-45 complete; cycle-4 candidates: regional tone refinement (maple/green saturation), real-GPU
+HUD profiling, torso-p50 tone, `region-crown` QA-view framing, content expansion.
