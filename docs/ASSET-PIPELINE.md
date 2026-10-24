@@ -380,3 +380,91 @@ default quality ordering, so the atlas dimension is chosen per character by the 
 original atlas image is replaced (not kept) and the material stays metallic 0 / roughness 0.85; the
 new colour is a procedural armour palette rather than the original hand-painted skin, because the
 source UVs made the original atlas unusable and no UV-compatible copy of it exists in the repo.
+
+## Batch 2026-10E — character material v2 + silhouette add-ons
+
+### Phase A — material depth / night tone (7 bodies, installed)
+
+Rebuilt the base-colour atlas and added full PBR map sets on the cycle-1 rigs. Geometry, UV charts,
+skins and clips were **not** touched: for every file the POSITION / NORMAL / TEXCOORD_0 / JOINTS_0 /
+WEIGHTS_0 accessors, the index buffer and every animation-sampler accessor hash identically before
+and after the rewrite (`geometry/anim/skin unchanged = true`).
+
+- Baked with `scripts/bake/bake-character-maps.py` (Blender headless, one material per body: plate
+  seams + rivets via Voronoi distance-to-edge, chainmail micro-relief, cloth weave, leather grain,
+  heraldic bands, vertical grime): albedo (EMIT, 1024 → 512 sRGB, night tone ×0.82 of cycle-1),
+  roughness (EMIT), metallic (EMIT), normal (Cycles NORMAL bake from a procedural bump, relief
+  attenuated ×0.62 in the composer so close-ups read as armour rather than hammered clay), AO
+  (Cycles AO bake, softened ×0.5 bias so indirect light never crushes the body).
+- `scripts/bake/bake-character-maps.mjs` packs them into `baseColorTexture` (512 JPEG), `normalTexture`
+  (512 JPEG) and one packed ORM `metallicRoughnessTexture` + `occlusionTexture` (512 JPEG: R = AO,
+  G = roughness, B = metalness) with `metallicFactor`/`roughnessFactor` = 1, then re-gzips.
+  `GLTFLoader`-compatible, embedded images only, no Draco/KTX2/meshopt.
+- Sizes: hero 596.6 · templar 601.4 · ally 591.0 · berserker 592.7 · ranger 594.4 · survivor 592.9 ·
+  fallen 594.8 KB (all inside the ~700 KB per-file budget; custom set 9.95 → 11.06 MB).
+- Tone: albedo chart mean is 0.84× cycle-1 (cycle-1 in-game third-person torso mean was 102.8, so the
+  expected value is ≈ 86, inside the 65–95 acceptance band); close-ups show plate seams, rivet
+  relief, wear and AO rather than the previous flat white.
+
+### Phase B — distinct silhouettes as rigid-skinned add-ons (installed)
+
+Each body gained ONE additional primitive on the existing skinned mesh; the mesh node, the single
+skin, the 12 clips and the Mixamo hand sockets are untouched (verified; `clips 12`, `sockets true`,
+`body/anim unchanged = true` for every body). Add-on vertices are authored in the mesh's bind space
+around the exact joint pivot recovered from the inverse-bind matrices (the matrices carry the rig's
+uniform scale, so the pivot is solved as a 3×3 system), then weighted 100 % to that joint. Each body
+also gets a small dedicated 128² albedo + normal + ORM map set so the add-on reads as a real armour
+piece instead of flat colour.
+
+| Body | Add-on | Tris added | Total tris | Prims | gzip |
+| --- | --- | --- | --- | --- | --- |
+| hero | steel pauldrons (L/R shoulder) | 424 | 8,873 | 2 | 607.3 KB |
+| templar | steel pauldrons | 424 | 8,873 | 2 | 612.4 KB |
+| ally | steel pauldrons | 424 | 8,873 | 2 | 602.0 KB |
+| berserker | steel pauldrons | 424 | 8,873 | 2 | 603.6 KB |
+| ranger | hood + shoulder cape (Head / Spine2) | 382 | 8,831 | 2 | 605.2 KB |
+| survivor | hood + shoulder cape | 382 | 8,831 | 2 | 604.0 KB |
+| fallen | helmet crest fins + corrupted horns (Head) | 204 | 8,653 | 2 | 602.3 KB |
+
+Script: `scripts/bake/bake-character-addons.mjs` (reads the Phase-A asset as its base, so re-runs are
+idempotent). Everything is inside the ≤16 k tris/body and ≤700 KB/body budgets.
+
+### Verification (both phases)
+
+Staged mirrored set validated before install (65/65), atomic install (copy-to-.tmp + single rename),
+live `scripts/validate-assets.mjs` 65/65, `tests/assets.test.ts` 5/5, `tests/equipment.test.ts` 5/5
+(nine-body grounding with the new maps and the extra primitives), `tests/armory.test.ts` 5/5.
+Screenshots (headless Chrome + `GLTFLoader`, game-like night IBL at env intensity 2.2):
+`temp_sketchlab/atlas2/v2_shot_hero_close.png` (normal/AO detail), `v2_shot_templar_close.png`,
+`v2_shot_fallen_close.png`, `final_hero.png` / `final2_ranger.png` / `final2_fallen.png` (silhouettes).
+
+Known limits: add-ons are rigid single-bone attachments (no blended deformation), so very extreme
+clips may show a small seam at the attachment; the body atlas still uses procedural palettes rather
+than hand-painted skin art; the one extra primitive per body adds one draw call each (7 total).
+
+### `fortress_keep` 5-trimsheet → single-atlas merge (task-33, installed)
+
+The keep was 10,923 tris / **5 prims / 5 materials** (T_Trim 7,402 · T_Wood 1,647 · T_Ground 1,152 ·
+T_Wall 646 · T_roof1 76 tris) with five 1024² trimsheets; instanced 9× that is **45 draw calls**.
+`scripts/bake/bake-keep-atlas.mjs` repacks the five existing UV spaces into one 2048² atlas
+(T_Trim 1024², T_Ground 1024², T_Wall / T_Wood / T_roof1 512² each — the small sheets are
+half-res, invisible at night), blits the five source textures into their tiles, scales every prim's
+UVs into its tile, concatenates the five primitives into **one primitive** with **one material**
+(roughness 0.85 / metallic 0 / double-sided, matching the originals) and then welds + re-quantises
+the merged geometry (`KHR_mesh_quantization`, position 14 / normal 10 / texcoord 12 bits).
+
+| | before | after |
+| --- | --- | --- |
+| prims / materials / textures | 5 / 5 / 5 | **1 / 1 / 1** |
+| tris | 10,923 | 10,923 (unchanged) |
+| draw calls at 9 keeps | 45 | **9** |
+| world bbox | `[-4.981, 0.000, -4.959] … [4.981, 8.000, 4.959]` | identical (same node transform, same POSITION range) |
+| file | 381.2 KB | 462.5 KB (atlas 277.6 KB; +81 KB for the merged atlas vs 5 smaller sheets) |
+
+Visual check: headless three.js before/after renders are pixel-comparable (same stone/wood/roof
+textures, crenellations and door/window detail preserved); see
+`temp_sketchlab/keep_atlas/keep_before.png` / `keep_after2.png`. UV convention note: glTF texture
+origin is the **top-left** of the image and `GLTFLoader` uses `flipY=false`, so the atlas row is
+`v * height` (an earlier `1 - v` mapping is what produced a black keep during development).
+Validation: staged mirror 65/65 (fortress_keep PASS 10,923/14,000 tris) → atomic install → live
+65/65; `tests/assets` 5/5, `tests/equipment` 5/5, `tests/armory` 5/5. Custom payload 11.06 → 11.13 MB.

@@ -67,16 +67,18 @@ function repairCharacterMaterials(root:THREE.Object3D){
    material.userData.ssReadable=true;
    // Sane night-PBR response for the character body (authored values were metal 0 / rough .8).
    material.metalness=Math.min(material.metalness??0,.35);
-   material.roughness=Math.max(material.roughness??1,.5);
+   material.roughness=Math.max(material.roughness??1,.65);
    material.envMapIntensity=Math.max(material.envMapIntensity??1,2);
    // Non-destructive fallback: only when the map is genuinely black over this mesh's UVs while
    // the atlas itself has content. Kept reversible (originals stashed in userData).
    const map=material.map;
+   let bypassedMap=false,sampled=Infinity;
    if(map){
-    const stats=analyseTexture(map),sampled=uvSampleMean(object.geometry,map);
+    const stats=analyseTexture(map);sampled=uvSampleMean(object.geometry,map);
     // Require a large image-vs-UV gap: a correctly mapped (even intentionally dark/palette) atlas
     // samples close to its own mean, while the mismatched batch-3 charts sample the black gutters.
     if(stats&&sampled<34&&sampled<stats.imgMean*.45&&stats.imgMean>24){
+     bypassedMap=true;
      material.userData.ssOriginalMap=map;material.userData.ssOriginalColor=material.color.clone();
      material.userData.ssOriginalMetalness=material.metalness;material.userData.ssOriginalRoughness=material.roughness;
      material.map=null;material.color.copy(stats.color).multiplyScalar(.44);
@@ -84,9 +86,18 @@ function repairCharacterMaterials(root:THREE.Object3D){
      material.emissive.copy(stats.color).multiplyScalar(.075);material.emissiveIntensity=1;
     }
    }
+   // Cycle-2 night tone: aim the body's sampled albedo at a fixed target, so a later, darker
+   // asset bake automatically reduces the scale instead of being darkened twice. 84/255 sRGB
+   // is the final calibrated target (≈ −16 % vs the 100 target) that brings the third-person
+   // torso to ~85 mean / ~95 p50 under the night key; the map (and normal/ao/roughness maps)
+   // are left untouched.
+   if(!bypassedMap){
+    const tintSrgb=Math.min(1,Math.max(.62,84/Math.max(24,sampled)));
+    material.color.multiplyScalar(Math.pow(tintSrgb,2.2));
+   }
    // Cool dusk Fresnel rim, added to outgoing light in the standard material's fragment stage.
    material.onBeforeCompile=shader=>{
-    shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>','float ssRim=pow(1.0-clamp(dot(normalize(normal),normalize(vViewPosition)),0.0,1.0),2.5);\noutgoingLight+=vec3(.30,.40,.52)*(ssRim*.5);\n#include <opaque_fragment>');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>','float ssRim=pow(1.0-clamp(dot(normalize(normal),normalize(vViewPosition)),0.0,1.0),2.5);\noutgoingLight+=vec3(.28,.37,.48)*(ssRim*.28);\n#include <opaque_fragment>');
    };
    material.customProgramCacheKey=()=>RIM_CACHE_KEY+(material.map?'m':'n');
    material.needsUpdate=true;

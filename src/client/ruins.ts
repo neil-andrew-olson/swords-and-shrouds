@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type {GLTF} from 'three/addons/loaders/GLTFLoader.js';
+import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {loadAsset} from './assets';
 import {equipmentModel} from './equipment';
 import {WEAPONS, WEAPON_IDS, type WeaponId} from '../shared/weapons';
@@ -7,23 +8,26 @@ import {CAMPS, CASTLES, REGIONS} from '../shared/world';
 import type {Actor, Game} from '../shared/types';
 
 /**
- * Ruins, survivor-camp props and courtyard weapon displays (ruins-builder).
+ * Ruins, survivor-camp props, courtyard weapon displays and environment dressing (ruins-builder).
  *
- * Batch 2026-10C converted this whole layer to InstancedMeshes:
- *   - 12 ruin set pieces, 27 camp tents, 10 stone walls and 54 castle/camp props are baked into
- *     InstancedMeshes (one per asset per region so the camera far plane still frustum-culls whole
- *     regions), instead of ~100 individually cloned GLTF meshes;
- *   - camp tents/props are culled by rescue state and player distance by *compacting* the visible
- *     instances to the front of the instance buffer and shrinking `count` (transition-only writes,
- *     allocation-free per frame), so hidden tents/props are not submitted for rasterisation either;
- *   - weapon racks keep two instanced shells (plinth + bronze ring, always 2 draws for all 9
- *     castles) and build their weapon content lazily as instanced weapon displays only when a
- *     castle is friendly AND the player is within ~45 m; content is disposed again after it has
- *     been out of range for a while.
+ * Everything uses InstancedMeshes. GLTF assets are instanced straight from the loaded scene: each
+ * mesh becomes one InstancedMesh and the mesh's own world matrix is folded into a constant local
+ * matrix per instance. That matters because cycle-1 assets are KHR_mesh_quantization encoded
+ * (Int16 normalised positions + a dequantisation scale on the node) — cloning the geometry and
+ * baking the matrix into it corrupts normalised integer attributes, so attributes are never touched.
  *
- * Placement data is preserved exactly from batch 2026-10A/10B (coordinates, yaws, target heights,
- * ground-centre origin). Everything remains defensive: asset-forge re-bakes GLBs in parallel, so a
- * missing `custom/<name>` is retried a few times, then skipped without throwing.
+ * Layer groups:
+ *   - 12 ruin set pieces, 27 camp tents, 10 stone walls, 54 castle/camp props (batch 2026-10A/B);
+ *   - camp tents/props cull by rescue state + player distance by compacting visible instances;
+ *   - weapon racks: 2 instanced shells for all 9 castles, weapon content built lazily (friendly and
+ *     within ~45 m) as instanced weapon displays, disposed again when out of range;
+ *   - cycle-2 environment dressing (existing shipped assets only): brazier pairs flanking castle
+ *     gates, banner posts in captured courtyards, stake lines along the Castle 1 -> Castle 2 road,
+ *     barrel/cart clusters beside survivor camps and a grave field around the Fallen Keep. These are
+ *     distance-culled by compaction, so only nearby instances are submitted.
+ *
+ * Placement data for the batch 10A/B set pieces is preserved exactly. update() is allocation-free
+ * (transitions only write instance matrices). Missing assets are retried a few times, then skipped.
  */
 
 export type RuinAsset = 'chapel_ruin' | 'aqueduct_ruin' | 'bridge_ruin' | 'courtyard_ruin';
@@ -171,6 +175,118 @@ export const STONE_WALL_PLACEMENTS: readonly StoneWallPlacement[] = [
   {region: 2, x: 50.05, z: -515.75, rotY: 2.57, length: 5.8}
 ];
 
+// ---------------------------------------------------------------------------------------------
+// Cycle-2 environment dressing placements (existing shipped assets; validated vs shared/world,
+// castle walls/gate corridors, road centrelines, camps and all batch 10A/B props).
+// ---------------------------------------------------------------------------------------------
+
+export interface DressingPlacement {
+  x: number;
+  z: number;
+  /** Yaw applied to the instance. */
+  yaw: number;
+}
+
+/**
+ * Brazier pairs flanking every castle gate (inside the courtyard, either side of the gate corridor,
+ * facing the keep). Lit by the existing pooled torch lights at the gate beacons plus an additive
+ * flame cone layer; NO new dynamic lights. Coordinates are per castle because the citadel's approach
+ * road crowds its courtyard.
+ */
+export const GATE_BRAZIERS: readonly DressingPlacement[] = [
+  // Green March: keep / border / citadel.
+  {x: -5.8, z: 7.0, yaw: 2.2}, {x: 5.8, z: 6.6, yaw: -2.2},
+  {x: 36.2, z: -60.0, yaw: 2.2}, {x: 47.8, z: -60.0, yaw: -2.2},
+  {x: -29.8, z: -128.0, yaw: 2.2}, {x: -16.6, z: -123.2, yaw: -2.2},
+  // Ashen Moor.
+  {x: -5.8, z: -233.0, yaw: 2.2}, {x: 5.8, z: -233.4, yaw: -2.2},
+  {x: 36.2, z: -300.0, yaw: 2.2}, {x: 47.8, z: -300.0, yaw: -2.2},
+  {x: -29.8, z: -368.0, yaw: 2.2}, {x: -16.6, z: -363.2, yaw: -2.2},
+  // Frozen Crown.
+  {x: -5.8, z: -473.0, yaw: 2.2}, {x: 5.8, z: -473.4, yaw: -2.2},
+  {x: 36.2, z: -540.0, yaw: 2.2}, {x: 47.8, z: -540.0, yaw: -2.2},
+  {x: -29.8, z: -608.0, yaw: 2.2}, {x: -16.6, z: -603.2, yaw: -2.2}
+];
+
+/**
+ * Banner posts around the courtyard keep (inside, either side of the central flag). They only
+ * appear once the castle is friendly — captured-courtyard heraldry. The citadel has one post only:
+ * its approach road crosses the courtyard's east side, so the second post has no legal spot.
+ */
+export const GATE_BANNERS: readonly {x: number; z: number; castle: number}[] = [
+  {x: -3.2, z: 1.4, castle: 0}, {x: 3.5, z: 1.4, castle: 0},
+  {x: 38.8, z: -65.6, castle: 1}, {x: 45.5, z: -65.6, castle: 1},
+  {x: -27.2, z: -133.6, castle: 2},
+  {x: -3.2, z: -238.6, castle: 3}, {x: 3.5, z: -238.6, castle: 3},
+  {x: 38.8, z: -305.6, castle: 4}, {x: 45.5, z: -305.6, castle: 4},
+  {x: -27.2, z: -373.6, castle: 5},
+  {x: -3.2, z: -478.6, castle: 6}, {x: 3.5, z: -478.6, castle: 6},
+  {x: 38.8, z: -545.6, castle: 7}, {x: 45.5, z: -545.6, castle: 7},
+  {x: -27.2, z: -613.6, castle: 8}
+];
+
+const ROAD_YAW = Math.atan2(42, -69);
+
+/** Stake bundles flanking the Castle 1 -> 2 road (6 m off the centreline, deliberate roadside props). */
+export const ROADSIDE_STAKES: readonly DressingPlacement[] = [
+  // Green March, both flanks of the diagonal keep -> border road.
+  {x: 16.0, z: 6.1, yaw: ROAD_YAW - Math.PI / 2 + 0.05},
+  {x: 17.67, z: 3.3, yaw: ROAD_YAW - Math.PI / 2 - 0.04},
+  {x: 19.35, z: 0.54, yaw: ROAD_YAW - Math.PI / 2 + 0.06},
+  {x: 21.03, z: -2.22, yaw: ROAD_YAW - Math.PI / 2 - 0.03},
+  {x: 7.53, z: 3.3, yaw: ROAD_YAW - Math.PI / 2 + 0.04},
+  {x: 11.73, z: -3.6, yaw: ROAD_YAW - Math.PI / 2 - 0.05},
+  {x: 13.41, z: -6.36, yaw: ROAD_YAW - Math.PI / 2 + 0.03},
+  {x: 15.09, z: -9.12, yaw: ROAD_YAW - Math.PI / 2 - 0.02},
+  // Ashen Moor (translated repeats).
+  {x: 16.0, z: -233.94, yaw: ROAD_YAW - Math.PI / 2 + 0.05},
+  {x: 17.67, z: -236.7, yaw: ROAD_YAW - Math.PI / 2 - 0.04},
+  {x: 19.35, z: -239.46, yaw: ROAD_YAW - Math.PI / 2 + 0.06},
+  {x: 21.03, z: -242.22, yaw: ROAD_YAW - Math.PI / 2 - 0.03},
+  // Frozen Crown (translated repeats).
+  {x: 7.53, z: -476.7, yaw: ROAD_YAW - Math.PI / 2 + 0.04},
+  {x: 11.73, z: -483.6, yaw: ROAD_YAW - Math.PI / 2 - 0.05},
+  {x: 13.41, z: -486.36, yaw: ROAD_YAW - Math.PI / 2 + 0.03},
+  {x: 15.09, z: -489.12, yaw: ROAD_YAW - Math.PI / 2 - 0.02}
+];
+
+/** Barrel + cart clusters parked at the edge of every survivor camp (rescue-culled with the camp). */
+export const CAMP_BARRELS: readonly DressingPlacement[] = CAMPS.map((camp, index) => ({
+  x: camp.x,
+  z: camp.z - 11.8,
+  yaw: 0.6 + index * 0.7
+}));
+export const CAMP_CARTS: readonly DressingPlacement[] = CAMPS.map((camp, index) => ({
+  x: camp.x + 7.5,
+  z: camp.z - 10.5,
+  yaw: 0.9 + index * 0.55
+}));
+
+/** Small grave field north-west of the Fallen Keep (region 0), outside the walls and off the roads. */
+export const KEEP_GRAVES: readonly DressingPlacement[] = [
+  {x: -14.5, z: 11.0, yaw: 0.2},
+  {x: -17.0, z: 8.5, yaw: 1.1},
+  {x: -15.5, z: 5.5, yaw: 2.4},
+  {x: -19.0, z: 12.5, yaw: 0.7},
+  {x: -20.5, z: 9.0, yaw: 1.8},
+  {x: -18.0, z: 5.5, yaw: 2.9},
+  {x: -12.8, z: 13.5, yaw: 0.4},
+  {x: -21.5, z: 5.0, yaw: 1.5},
+  {x: -24.0, z: 12.0, yaw: 2.2},
+  {x: -16.0, z: 15.0, yaw: 3.0}
+];
+
+/** Counts for the Lead/QA report. */
+export const ENVIRONMENT_DRESSING = {
+  braziers: GATE_BRAZIERS.length,
+  flames: GATE_BRAZIERS.length,
+  banners: GATE_BANNERS.length,
+  stakes: ROADSIDE_STAKES.length,
+  campBarrels: CAMP_BARRELS.length,
+  campCarts: CAMP_CARTS.length,
+  keepGraves: KEEP_GRAVES.length
+} as const;
+
 const RACK_DX = 5.0;
 const RACK_DZ = 4.2;
 /** Weapon display yaw: front face (local +z) turned toward the castle centre. */
@@ -182,13 +298,15 @@ const MAX_LOAD_ATTEMPTS = 3;
 const RACK_CONTENT_RANGE = 45;
 /** Camp props/tents hide beyond this distance (same feel as batch 2026-10B). */
 const CAMP_RANGE = 50;
-/** Courtyard props hide a bit before the camera far plane so far castles disgorge no instances. */
+/** Courtyard furniture hides a bit before the camera far plane. */
 const PROP_RANGE = 75;
+/** Environment dressing is distance-culled; compaction keeps far instances out of the draw. */
+const DRESSING_RANGE = 85;
 /** Destroy the weapon content instanced meshes after this long out of range (seconds). */
 const CONTENT_IDLE_DISPOSE = 20;
 /** At most a couple of friendly castles can ever be within RACK_CONTENT_RANGE. */
 const MAX_VISIBLE_RACKS = 3;
-/** GLTF assets are baked into one instance layer per region so far regions still cull. */
+/** GLTF assets are instanced per region so far regions still frustum-cull. */
 const REGION_COUNT = REGIONS.length;
 
 const CAMP_INDEX = new Map<string, number>(CAMPS.map((camp, index) => [camp.id, index]));
@@ -201,50 +319,48 @@ const _euler = new THREE.Euler();
 const _matrixA = new THREE.Matrix4();
 
 // ---------------------------------------------------------------------------------------------
-// Baked asset geometry: GLTF scene flattened to world space, recentred on XZ and dropped onto y=0.
+// GLTF instancing: geometry is never modified (KHR_mesh_quantization safe); each mesh's world
+// transform becomes a constant local matrix folded into every instance matrix.
 // ---------------------------------------------------------------------------------------------
 
-interface BakedMesh {
+interface PreparedPrimitive {
   geometry: THREE.BufferGeometry;
   material: THREE.Material | THREE.Material[];
+  /** normalize * mesh.matrixWorld: ground-centre the asset and include any dequantisation scale. */
+  localMatrix: THREE.Matrix4;
 }
 
-interface BakedAsset {
-  meshes: BakedMesh[];
+interface PreparedAsset {
+  primitives: PreparedPrimitive[];
   height: number;
   longExtent: number;
   sizeX: number;
   sizeZ: number;
 }
 
-function bakeAsset(gltf: GLTF): BakedAsset | null {
+function prepareAsset(root: THREE.Object3D): PreparedAsset | null {
   try {
-    gltf.scene.updateMatrixWorld(true);
-    const meshes: BakedMesh[] = [];
-    gltf.scene.traverse((object) => {
-      if (!(object instanceof THREE.Mesh) || !object.geometry) return;
-      const geometry = object.geometry.clone();
-      geometry.applyMatrix4(object.matrixWorld);
-      geometry.computeBoundingBox();
-      geometry.computeBoundingSphere();
-      meshes.push({geometry, material: object.material});
-    });
-    if (meshes.length === 0) return null;
-    const bounds = new THREE.Box3();
-    for (let i = 0; i < meshes.length; i++) {
-      const box = meshes[i].geometry.boundingBox;
-      if (box) bounds.union(box);
-    }
+    root.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(root);
     if (!Number.isFinite(bounds.min.x) || !Number.isFinite(bounds.max.y)) return null;
     const size = bounds.getSize(new THREE.Vector3());
     if (!Number.isFinite(size.y) || size.y < 0.001) return null;
     const center = bounds.getCenter(new THREE.Vector3());
-    for (let i = 0; i < meshes.length; i++) {
-      meshes[i].geometry.translate(-center.x, -bounds.min.y, -center.z);
-    }
-    return {meshes, height: size.y, longExtent: Math.max(size.x, size.z, 0.001), sizeX: size.x, sizeZ: size.z};
+    const normalize = new THREE.Matrix4().makeTranslation(-center.x, -bounds.min.y, -center.z);
+    const primitives: PreparedPrimitive[] = [];
+    root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh) || !object.geometry) return;
+      object.geometry.computeBoundingSphere();
+      primitives.push({
+        geometry: object.geometry,
+        material: object.material,
+        localMatrix: new THREE.Matrix4().multiplyMatrices(normalize, object.matrixWorld)
+      });
+    });
+    if (primitives.length === 0) return null;
+    return {primitives, height: size.y, longExtent: Math.max(size.x, size.z, 0.001), sizeX: size.x, sizeZ: size.z};
   } catch (error) {
-    console.warn('[ruins] asset bake failed', error);
+    console.warn('[ruins] asset prepare failed', error);
     return null;
   }
 }
@@ -256,45 +372,55 @@ function bakeAsset(gltf: GLTF): BakedAsset | null {
 interface PlacementSpec {
   x: number;
   z: number;
+  y: number;
   yaw: number;
   scale: number;
   /** -1 = not a camp placement; otherwise index into CAMPS for rescue/distance culling. */
   campIndex: number;
-  /** -1 = not a courtyard placement; otherwise index into CASTLES for distance culling. */
+  /** -1 = not a castle placement; otherwise index into CASTLES for distance/ownership culling. */
   castleIndex: number;
+  /** Player-distance cull in metres (0 = no extra distance cull). */
+  cullRange: number;
+  /** Only visible while the castle in `castleIndex` is friendly (captured-courtyard dressing). */
+  requireFriendly: boolean;
 }
 
 interface InstanceRecord {
-  base: THREE.Matrix4;
+  /** Placement matrix (position / yaw / uniform scale). */
+  placement: THREE.Matrix4;
   campIndex: number;
   castleIndex: number;
+  cullRange: number;
+  requireFriendly: boolean;
 }
 
 interface InstancedLayer {
   meshes: THREE.InstancedMesh[];
+  /** Per-mesh constant local matrix (normalise * mesh world transform). */
+  localMatrices: THREE.Matrix4[];
   records: InstanceRecord[];
-  /** Compaction state used by the rescue/distance culling pass. */
   cullable: boolean;
   visibility: Uint8Array;
   initialized: boolean;
   activeCount: number;
 }
 
-function placementMatrix(x: number, z: number, yaw: number, scale: number): THREE.Matrix4 {
+function placementMatrix(x: number, y: number, z: number, yaw: number, scale: number): THREE.Matrix4 {
   _euler.set(0, yaw, 0);
   _quaternion.setFromEuler(_euler);
-  _position.set(x, 0, z);
+  _position.set(x, y, z);
   _scale.setScalar(scale);
   return new THREE.Matrix4().compose(_position, _quaternion, _scale);
 }
 
-/**
- * One InstancedMesh per baked mesh, with every placement as an instance.
- * Static layers upload all matrices once; cullable layers start empty and are compacted by update().
- */
+function wantsCastShadow(name: string): boolean {
+  // Match scene.ts trimShadowCasters(): architecture + the 12 ruin set pieces + tents + walls cast.
+  return name.startsWith('ruins:') || name.startsWith('walls:') || name.startsWith('tents:');
+}
+
 function createLayer(
   scene: THREE.Scene,
-  baked: BakedAsset,
+  prepared: PreparedAsset,
   specs: readonly PlacementSpec[],
   name: string,
   cullable: boolean
@@ -303,26 +429,75 @@ function createLayer(
   const records: InstanceRecord[] = [];
   for (let i = 0; i < specs.length; i++) {
     const spec = specs[i];
-    records.push({base: placementMatrix(spec.x, spec.z, spec.yaw, spec.scale), campIndex: spec.campIndex, castleIndex: spec.castleIndex});
+    records.push({
+      placement: placementMatrix(spec.x, spec.y, spec.z, spec.yaw, spec.scale),
+      campIndex: spec.campIndex,
+      castleIndex: spec.castleIndex,
+      cullRange: spec.cullRange,
+      requireFriendly: spec.requireFriendly
+    });
   }
   const meshes: THREE.InstancedMesh[] = [];
-  for (let m = 0; m < baked.meshes.length; m++) {
-    const bakedMesh = baked.meshes[m];
-    const instanced = new THREE.InstancedMesh(bakedMesh.geometry, bakedMesh.material, specs.length);
-    instanced.name = name;
+  const localMatrices: THREE.Matrix4[] = [];
+  for (let p = 0; p < prepared.primitives.length; p++) {
+    const primitive = prepared.primitives[p];
+    const instanced = new THREE.InstancedMesh(primitive.geometry, primitive.material, specs.length);
+    instanced.name = `${name}:${p}`;
+    instanced.castShadow = wantsCastShadow(name);
+    instanced.receiveShadow = true;
     if (!cullable) {
-      for (let i = 0; i < records.length; i++) instanced.setMatrixAt(i, records[i].base);
+      for (let i = 0; i < records.length; i++) {
+        _matrixA.multiplyMatrices(records[i].placement, primitive.localMatrix);
+        instanced.setMatrixAt(i, _matrixA);
+      }
       instanced.instanceMatrix.needsUpdate = true;
+      instanced.computeBoundingSphere();
     } else {
       instanced.count = 0;
+      instanced.visible = false;
     }
-    instanced.castShadow = true;
-    instanced.receiveShadow = true;
-    instanced.computeBoundingSphere();
     scene.add(instanced);
     meshes.push(instanced);
+    localMatrices.push(primitive.localMatrix);
   }
-  return {meshes, records, cullable, visibility: new Uint8Array(records.length), initialized: false, activeCount: 0};
+  return {meshes, localMatrices, records, cullable, visibility: new Uint8Array(records.length), initialized: false, activeCount: 0};
+}
+
+/** Procedural banner post (pole + hanging cloth, vertex-coloured, one draw for all castles). */
+function prepareBanner(): PreparedAsset {
+  const paint = (geometry: THREE.BufferGeometry, rgb: [number, number, number]): THREE.BufferGeometry => {
+    const g = geometry.toNonIndexed();
+    g.deleteAttribute('uv');
+    const count = g.attributes.position.count;
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      colors[i * 3] = rgb[0];
+      colors[i * 3 + 1] = rgb[1];
+      colors[i * 3 + 2] = rgb[2];
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    return g;
+  };
+  const pole = new THREE.CylinderGeometry(0.055, 0.08, 3.7, 6, 1, false);
+  pole.translate(0, 1.85, 0);
+  const cloth = new THREE.PlaneGeometry(0.95, 0.72, 1, 1);
+  cloth.translate(0.52, 2.95, 0);
+  const merged = mergeGeometries([paint(pole, [0.42, 0.33, 0.22]), paint(cloth, [0.82, 0.86, 0.8])], false);
+  pole.dispose();
+  cloth.dispose();
+  const geometry = merged ?? new THREE.BufferGeometry();
+  geometry.computeBoundingSphere();
+  const material = new THREE.MeshStandardMaterial({vertexColors: true, color: 0x6f9a80, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide});
+  return {primitives: [{geometry, material, localMatrix: new THREE.Matrix4()}], height: 3.7, longExtent: 1.0, sizeX: 1.0, sizeZ: 1.0};
+}
+
+/** Procedural ember/flame cone for the gate braziers (emissive look, no dynamic light). */
+function prepareFlame(): PreparedAsset {
+  const geometry = new THREE.ConeGeometry(0.3, 0.95, 6, 1, false);
+  geometry.translate(0, 0.475, 0);
+  geometry.computeBoundingSphere();
+  const material = new THREE.MeshBasicMaterial({color: 0xffa04a, transparent: true, opacity: 0.92, blending: THREE.AdditiveBlending, depthWrite: false});
+  return {primitives: [{geometry, material, localMatrix: new THREE.Matrix4()}], height: 0.95, longExtent: 0.6, sizeX: 0.6, sizeZ: 0.6};
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -347,7 +522,7 @@ export function addRuins(scene: THREE.Scene): {
   const rackShells: RackShell[] = [];
   let plinthMesh: THREE.InstancedMesh | null = null;
   let ringMesh: THREE.InstancedMesh | null = null;
-  /** Tents + furniture layers that react to rescue state, castle distance or player distance. */
+  /** Layers whose instance list depends on player/castle state. */
   const cullableLayers: InstancedLayer[] = [];
   const campRescued = new Uint8Array(CAMPS.length);
   const castleFriendly = new Uint8Array(CASTLES.length);
@@ -381,21 +556,25 @@ export function addRuins(scene: THREE.Scene): {
     cullableLayers.push(layer);
   }
 
+  function baseSpec(x: number, z: number, yaw: number, scale: number): PlacementSpec {
+    return {x, z, y: 0, yaw, scale, campIndex: -1, castleIndex: -1, cullRange: 0, requireFriendly: false};
+  }
+
   async function placeSetPieces(): Promise<void> {
     await Promise.all(
       RUIN_ASSETS.map(async (asset) => {
         const gltf = await loadModel(`custom/${asset}`);
         if (!gltf) return;
-        const baked = bakeAsset(gltf);
-        if (!baked) return;
+        const prepared = prepareAsset(gltf.scene);
+        if (!prepared) return;
         // One layer per region so the camera far plane culls the other two regions.
         for (let region = 0; region < REGION_COUNT; region++) {
           const specs: PlacementSpec[] = [];
           for (const placement of RUIN_PLACEMENTS) {
             if (placement.asset !== asset || placement.region !== region) continue;
-            specs.push({x: placement.x, z: placement.z, yaw: placement.rotY, scale: placement.height / baked.height, campIndex: -1, castleIndex: -1});
+            specs.push(baseSpec(placement.x, placement.z, placement.rotY, placement.height / prepared.height));
           }
-          createLayer(scene, baked, specs, `ruins:${asset}:r${region}`, false);
+          createLayer(scene, prepared, specs, `ruins:${asset}:r${region}`, false);
         }
       })
     );
@@ -404,25 +583,25 @@ export function addRuins(scene: THREE.Scene): {
   async function placeStoneWalls(): Promise<void> {
     const gltf = await loadModel('custom/stone_wall');
     if (!gltf) return;
-    const baked = bakeAsset(gltf);
-    if (!baked) return;
-    const longAxisIsZ = baked.sizeZ >= baked.sizeX;
+    const prepared = prepareAsset(gltf.scene);
+    if (!prepared) return;
+    const longAxisIsZ = prepared.sizeZ >= prepared.sizeX;
     for (let region = 0; region < REGION_COUNT; region++) {
       const specs: PlacementSpec[] = [];
       for (const wall of STONE_WALL_PLACEMENTS) {
         if (wall.region !== region) continue;
         const yaw = longAxisIsZ ? wall.rotY : wall.rotY - Math.PI / 2;
-        specs.push({x: wall.x, z: wall.z, yaw, scale: wall.length / baked.longExtent, campIndex: -1, castleIndex: -1});
+        specs.push(baseSpec(wall.x, wall.z, yaw, wall.length / prepared.longExtent));
       }
-      createLayer(scene, baked, specs, `walls:r${region}`, false);
+      createLayer(scene, prepared, specs, `walls:r${region}`, false);
     }
   }
 
   async function placeCampTents(): Promise<void> {
     const gltf = await loadModel('custom/camp_tent');
     if (!gltf) return;
-    const baked = bakeAsset(gltf);
-    if (!baked) return;
+    const prepared = prepareAsset(gltf.scene);
+    if (!prepared) return;
     for (let region = 0; region < REGION_COUNT; region++) {
       const specs: PlacementSpec[] = [];
       for (let campIndex = region * 3; campIndex < region * 3 + 3 && campIndex < CAMPS.length; campIndex++) {
@@ -432,10 +611,12 @@ export function addRuins(scene: THREE.Scene): {
           const tent = layout[tentIndex];
           const yaw = Math.atan2(-tent.dx, -tent.dz) + Math.sin(campIndex * 2.1 + tentIndex * 1.7) * 0.32;
           const height = tent.height * (0.94 + ((campIndex * 5 + tentIndex * 2) % 3) * 0.05);
-          specs.push({x: camp.x + tent.dx, z: camp.z + tent.dz, yaw, scale: height / baked.height, campIndex, castleIndex: -1});
+          const spec = baseSpec(camp.x + tent.dx, camp.z + tent.dz, yaw, height / prepared.height);
+          spec.campIndex = campIndex;
+          specs.push(spec);
         }
       }
-      addCullableLayer(createLayer(scene, baked, specs, `tents:r${region}`, true));
+      addCullableLayer(createLayer(scene, prepared, specs, `tents:r${region}`, true));
     }
   }
 
@@ -444,8 +625,8 @@ export function addRuins(scene: THREE.Scene): {
       PROP_ASSETS.map(async (asset) => {
         const gltf = await loadModel(`custom/${asset}`);
         if (!gltf) return;
-        const baked = bakeAsset(gltf);
-        if (!baked) return;
+        const prepared = prepareAsset(gltf.scene);
+        if (!prepared) return;
         for (let region = 0; region < REGION_COUNT; region++) {
           const specs: PlacementSpec[] = [];
           // Courtyard furniture: three castles per region, culled by castle distance.
@@ -453,7 +634,9 @@ export function addRuins(scene: THREE.Scene): {
             const castle = CASTLES[castleIndex];
             for (const prop of COURTYARD_PROPS) {
               if (prop.asset !== asset) continue;
-              specs.push({x: castle.x + prop.dx, z: castle.z + prop.dz, yaw: prop.rotY, scale: prop.height / baked.height, campIndex: -1, castleIndex});
+              const spec = baseSpec(castle.x + prop.dx, castle.z + prop.dz, prop.rotY, prop.height / prepared.height);
+              spec.castleIndex = castleIndex;
+              specs.push(spec);
             }
           }
           // Survivor-camp furniture: rescue/distance culling.
@@ -461,10 +644,12 @@ export function addRuins(scene: THREE.Scene): {
             const camp = CAMPS[campIndex];
             for (const prop of CAMP_PROPS) {
               if (prop.asset !== asset) continue;
-              specs.push({x: camp.x + prop.dx, z: camp.z + prop.dz, yaw: prop.rotY, scale: prop.height / baked.height, campIndex, castleIndex: -1});
+              const spec = baseSpec(camp.x + prop.dx, camp.z + prop.dz, prop.rotY, prop.height / prepared.height);
+              spec.campIndex = campIndex;
+              specs.push(spec);
             }
           }
-          addCullableLayer(createLayer(scene, baked, specs, `props:${asset}:r${region}`, true));
+          addCullableLayer(createLayer(scene, prepared, specs, `props:${asset}:r${region}`, true));
         }
       })
     );
@@ -485,8 +670,8 @@ export function addRuins(scene: THREE.Scene): {
     ringMesh.name = 'racks:ring';
     for (let i = 0; i < CASTLES.length; i++) {
       const castle = CASTLES[i];
-      const matrix = placementMatrix(castle.x + RACK_DX, castle.z + RACK_DZ, RACK_YAW, 1);
-      const hidden = placementMatrix(castle.x + RACK_DX, castle.z + RACK_DZ, RACK_YAW, 0);
+      const matrix = placementMatrix(castle.x + RACK_DX, 0, castle.z + RACK_DZ, RACK_YAW, 1);
+      const hidden = placementMatrix(castle.x + RACK_DX, 0, castle.z + RACK_DZ, RACK_YAW, 0);
       rackShells.push({matrix, hidden});
       plinthMesh.setMatrixAt(i, hidden);
       ringMesh.setMatrixAt(i, hidden);
@@ -623,7 +808,11 @@ export function addRuins(scene: THREE.Scene): {
     let write = 0;
     for (let i = 0; i < records.length; i++) {
       if (!visibility[i]) continue;
-      for (let m = 0; m < layer.meshes.length; m++) layer.meshes[m].setMatrixAt(write, records[i].base);
+      const placement = records[i].placement;
+      for (let m = 0; m < layer.meshes.length; m++) {
+        _matrixA.multiplyMatrices(placement, layer.localMatrices[m]);
+        layer.meshes[m].setMatrixAt(write, _matrixA);
+      }
       write++;
     }
     layer.activeCount = write;
@@ -632,15 +821,79 @@ export function addRuins(scene: THREE.Scene): {
       mesh.count = write;
       mesh.visible = write > 0;
       mesh.instanceMatrix.needsUpdate = true;
-      // Instance bounds must follow the compacted count or frustum culling would use a stale sphere.
       if (write > 0) mesh.computeBoundingSphere();
     }
   }
 
+  // ---- cycle-2 dressing: existing shipped assets only, one distance-culled layer per asset ----
+  async function placeDressingAsset(
+    assetName: string,
+    placements: readonly DressingPlacement[],
+    targetHeight: number,
+    layerName: string,
+    options: {campIndex?: readonly number[]; castleIndex?: readonly number[]; friendly?: boolean; y?: number; scaleVariance?: boolean} = {}
+  ): Promise<void> {
+    const gltf = await loadModel(`custom/${assetName}`);
+    if (!gltf) return;
+    const prepared = prepareAsset(gltf.scene);
+    if (!prepared) return;
+    const specs: PlacementSpec[] = [];
+    for (let i = 0; i < placements.length; i++) {
+      const p = placements[i];
+      const variance = options.scaleVariance ? 0.9 + ((i * 7) % 5) * 0.05 : 1;
+      const spec = baseSpec(p.x, p.z, p.yaw, (targetHeight / prepared.height) * variance);
+      spec.y = options.y ?? 0;
+      spec.cullRange = DRESSING_RANGE;
+      if (options.campIndex && options.campIndex[i] !== undefined) spec.campIndex = options.campIndex[i];
+      if (options.castleIndex && options.castleIndex[i] !== undefined) spec.castleIndex = options.castleIndex[i];
+      spec.requireFriendly = options.friendly === true;
+      specs.push(spec);
+    }
+    addCullableLayer(createLayer(scene, prepared, specs, layerName, true));
+  }
+
+  function buildBanners(): void {
+    const prepared = prepareBanner();
+    const specs: PlacementSpec[] = [];
+    for (const banner of GATE_BANNERS) {
+      const castle = CASTLES[banner.castle];
+      const spec = baseSpec(banner.x, banner.z, Math.atan2(castle.x - banner.x, castle.z - banner.z), 1);
+      spec.castleIndex = banner.castle;
+      spec.requireFriendly = true;
+      spec.cullRange = DRESSING_RANGE;
+      specs.push(spec);
+    }
+    addCullableLayer(createLayer(scene, prepared, specs, 'dressing:banners', true));
+  }
+
+  function buildFlames(): void {
+    const prepared = prepareFlame();
+    const specs: PlacementSpec[] = [];
+    for (let i = 0; i < GATE_BRAZIERS.length; i++) {
+      const brazier = GATE_BRAZIERS[i];
+      const spec = baseSpec(brazier.x, brazier.z, brazier.yaw, 0.9 + ((i * 3) % 4) * 0.08);
+      spec.y = 0.72;
+      spec.cullRange = DRESSING_RANGE;
+      specs.push(spec);
+    }
+    addCullableLayer(createLayer(scene, prepared, specs, 'dressing:flames', true));
+  }
+
   buildRackShells();
-  void Promise.all([placeSetPieces(), placeStoneWalls(), placeCampTents(), placePropAssets(), loadWeaponSources()]).catch(
-    (error) => console.warn('[ruins] asynchronous placement failed', error)
-  );
+  void Promise.all([
+    placeSetPieces(),
+    placeStoneWalls(),
+    placeCampTents(),
+    placePropAssets(),
+    loadWeaponSources(),
+    placeDressingAsset('brazier', GATE_BRAZIERS, 1.35, 'dressing:braziers', {scaleVariance: true}),
+    placeDressingAsset('stakes', ROADSIDE_STAKES, 1.0, 'dressing:stakes', {scaleVariance: true}),
+    placeDressingAsset('barrels', CAMP_BARRELS, 1.45, 'dressing:barrels', {campIndex: CAMP_BARRELS.map((_, i) => i), scaleVariance: true}),
+    placeDressingAsset('cart', CAMP_CARTS, 1.05, 'dressing:carts', {campIndex: CAMP_CARTS.map((_, i) => i)}),
+    placeDressingAsset('grave', KEEP_GRAVES, 1.13, 'dressing:graves', {scaleVariance: true})
+  ]).catch((error) => console.warn('[ruins] asynchronous placement failed', error));
+  buildBanners();
+  buildFlames();
 
   return {
     update(game: Game | undefined, me: Actor | undefined, time: number): void {
@@ -661,8 +914,17 @@ export function addRuins(scene: THREE.Scene): {
           if (index !== undefined) campRescued[index] = camps[i].rescued ? 1 : 0;
         }
       }
+      // Castle ownership flags (rack shells, banners and content streaming).
+      for (let i = 0; i < castleFriendly.length; i++) castleFriendly[i] = 0;
+      if (game) {
+        const castles = game.castles;
+        for (let i = 0; i < castles.length; i++) {
+          const index = CASTLE_INDEX.get(castles[i].id);
+          if (index !== undefined) castleFriendly[index] = castles[i].friendly ? 1 : 0;
+        }
+      }
 
-      // Rescue/distance culling for tents + camp/courtyard furniture: transition-only compaction.
+      // State-driven instance compaction for tents, furniture and cycle-2 dressing.
       const campRangeSq = CAMP_RANGE * CAMP_RANGE;
       const propRangeSq = PROP_RANGE * PROP_RANGE;
       for (let l = 0; l < cullableLayers.length; l++) {
@@ -672,23 +934,30 @@ export function addRuins(scene: THREE.Scene): {
         let changed = !layer.initialized;
         for (let i = 0; i < records.length; i++) {
           const record = records[i];
-          let visible: boolean;
-          if (record.campIndex >= 0) {
+          let visible = true;
+          if (record.requireFriendly) {
+            visible = record.castleIndex >= 0 && castleFriendly[record.castleIndex] === 1;
+          }
+          const px = record.placement.elements[12];
+          const pz = record.placement.elements[14];
+          if (visible && record.campIndex >= 0) {
             visible = campRescued[record.campIndex] === 0;
             if (visible && hasMe) {
-              const dx = meX - record.base.elements[12];
-              const dz = meZ - record.base.elements[14];
+              const dx = meX - px;
+              const dz = meZ - pz;
               visible = dx * dx + dz * dz <= campRangeSq;
             }
-          } else if (record.castleIndex >= 0) {
-            visible = true;
+          } else if (visible && record.castleIndex >= 0 && record.cullRange === 0) {
             if (hasMe) {
-              const dx = meX - record.base.elements[12];
-              const dz = meZ - record.base.elements[14];
+              const dx = meX - px;
+              const dz = meZ - pz;
               visible = dx * dx + dz * dz <= propRangeSq;
             }
-          } else {
-            visible = true;
+          }
+          if (visible && record.cullRange > 0 && hasMe) {
+            const dx = meX - px;
+            const dz = meZ - pz;
+            visible = dx * dx + dz * dz <= record.cullRange * record.cullRange;
           }
           if (visible !== (visibility[i] === 1)) {
             visibility[i] = visible ? 1 : 0;
@@ -702,14 +971,6 @@ export function addRuins(scene: THREE.Scene): {
       }
 
       // Castle ownership for the instanced rack shells (empty rack still reads as a display).
-      for (let i = 0; i < castleFriendly.length; i++) castleFriendly[i] = 0;
-      if (game) {
-        const castles = game.castles;
-        for (let i = 0; i < castles.length; i++) {
-          const index = CASTLE_INDEX.get(castles[i].id);
-          if (index !== undefined) castleFriendly[index] = castles[i].friendly ? 1 : 0;
-        }
-      }
       let shellMask = 0;
       for (let i = 0; i < castleFriendly.length; i++) if (castleFriendly[i]) shellMask |= 1 << i;
       if (shellMask !== lastShellMask) {

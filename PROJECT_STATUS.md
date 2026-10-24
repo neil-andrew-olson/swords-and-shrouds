@@ -14,68 +14,92 @@ with bundled Node 24, `scripts/validate-assets.mjs` all pass, headless smoke 16/
 co-op 18/18 + live-URL mode, QA inspects screenshots with read_image, Lead commits/pushes/deploys
 and verifies the live bundle.
 
-**Doc-link note:** the DSH GUI cannot open absolute Windows paths (that is why every md link showed
+**Doc-link note:** the DSH GUI cannot open absolute Windows paths (that is why md links showed
 "File not found"). `PROJECT_STATUS.md` and `docs/*.md` are mirrored into the session workspace at
 `C:\Users\neil\Documents\deepseek-harness\default-workspace\swords-and-shrouds\`; always link
 workspace-relative paths and/or use the `present` tool.
 
-## Latest completed cycle — 2026-10D cycle 1: characters fixed, shadows restored, further perf
+**Process discipline:** teammates must kill only their own PIDs (`Stop-Process -Id` / `/PID`), never
+broad `taskkill /IM node.exe` — a broad cleanup killed QA's local server twice in cycle 2.
 
-Contract: `docs/BATCH-2026-10D-SPEC.md`; results: `docs/BATCH-2026-10D-RESULTS.md`.
+## Latest completed cycle — 2026-10E cycle 2: character fidelity, restored ruins, atmosphere
 
-### Characters no longer blacked out (root cause fixed)
+Contract: `docs/BATCH-2026-10E-SPEC.md`; results: `docs/BATCH-2026-10E-RESULTS.md`; QA evidence in
+`docs/QA-REPORT.md`. Final bundle `dist/client/assets/index-BfnriryF.js` (815,540 B), reproduced by
+a fresh build.
 
-The 7 player/companion bodies had **unusable UV0** (93 % zero-area triangles sampling black atlas
-gutters), so no material tweak could help. asset-forge re-UV'd (Smart UV Project) and baked
-palette-matched procedural armour atlases onto the original rigs in Blender/Cycles without touching
-geometry, bones or animation data (UV-sampled luminance 5–8 → 40–172; rig/clips hash-verified).
-weapons-armory added a runtime safety layer in `custom-character.ts`: PBR clamps, a dormant
-UV-black-map fallback and a cheap Fresnel rim. In-game torso luminance mean 54.9 → 102.8, p50
-28.5 → 114.3, black pixels 44.5 % → 15.4 %; player/companions/undead are clearly readable.
-Cosmetic debt: the new atlases read over-bright/flat white at night (cycle-2 ledger).
+### Characters (top priority)
 
-### Performance + visuals
+- Material v2: all 7 bodies re-baked with night tone (albedo 0.84× cycle 1, adaptive tint target 84
+  sRGB), procedural detail (plate seams/rivets, chainmail micro-relief, cloth weave, leather grain,
+  heraldic bands, wear) + embedded 512 normal and 512 packed ORM (AO/rough/metal) maps; geometry,
+  skin, bones and 12 clips hash-identical; 591–621 KB each, preload ≈6.0 MB.
+- Distinct silhouettes: pauldrons (hero/templar/ally/berserker), hood+cape (ranger/survivor),
+  crest+horns (fallen) as one rigid-skinned add-on primitive each in the same single skin;
+  8,653–8,873 tris per body.
+- Runtime: metalness ≤0.35 / roughness ≥0.65 / envMapIntensity ≥2 (scene 2.2), adaptive albedo tint,
+  cool-dusk Fresnel rim 0.28, dormant UV-black fallback. Transient `sampled` scope bug fixed before
+  the final build.
+- QA: torso mean **89.31** / p50 **95.98** / black **14.75 %** / clipping 0 %, close-up detail
+  visible (min 407 unique colours — cycle-3 target 500), 5 appearances + skeleton/zombie.
 
-- Draw calls 301 → **173** (0.195 % of the original 88,544); triangles 1.76 M → **1.50 M**
-  (37.1 % of original) *with the shadow pass restored*.
-- New LOD assets: `pine_lod` (2,267 tris/88 KB), `oak_lod` (2,474/80 KB), `castle_tower_lod`
-  (3,939/120 KB, transform-identical to the 13.8 k tower) — instanced trees use LODs to 54 m, one
-  LOD tower per castle.
-- Static props instanced per asset; keeps instanced per region; roads merged; grass restored to
-  5,600; survivors 2/camp; carts/graves restored. Quality tiers + adaptive stepper retained.
-- Shadows restored with curated casters (architecture, keeps, gatehouses, towers, actors, large
-  ruins cast; foliage/tents/walls/small props receive only), 2048/1024/off by tier, ±34 m moon
-  frustum following the player.
-- New debug hook `window.__ssCharacterPreview(actorId?)` frames an actor close-up for QA (raycast
-  boom against castle colliders); `window.__ssPerf`/`__ssQuality` unchanged.
-- Payload 12.20 → 12.43 MB (character atlases +0.23 MB); initial preload unchanged ~4.7 MB.
+### Critical bug fixed
+
+Cycle-1's asset re-bake quantised ruin/tent/wall/prop assets; the old `ruins.ts` instancing baked
+`mesh.matrixWorld` into normalised Int16 position attributes and corrupted them — 12 ruins, 27
+tents, 10 walls and 54 small props rendered as ~2 m blobs in the deployed cycle-1 build. New
+quantisation-safe instancing folds transforms into instance matrices instead; verified against the
+real shipped GLBs and by QA screenshots (chapel 8.5 m, bridge 5 m, tent 2.21 m, wall 5.6 m).
+
+### World / atmosphere / audio
+
+- Near/far tree band: full-res 0–22 m, LODs 22–54 m, matrices reassigned only on >2 m camera moves;
+  `__ssPerf().landscape` proves both bands.
+- Tent + stone-wall cast shadows restored; casters = architecture, keeps, gatehouses, towers,
+  actors, ruins/tents/walls.
+- Pooled torch smoke, drifting ash, moon-dust motes (allocation-free, reduced/off at low tier).
+- Environment dressing (existing assets, +7 draws): gate brazier pairs + emissive flames (no new
+  lights), friendly-only courtyard banners, Castle 1→2 roadside stakes, camp barrel/cart clusters,
+  Fallen Keep graves.
+- `fortress_keep` 5 prims/5 trimsheets → 1 prim/1 material via baked 2048² atlas: **45 → 9 draws**
+  across nine keeps, tris/bbox unchanged.
+- QA camera hooks `__ssQAView(name)` / `__ssQAPose` (treeline/fire/camp/courtyard/region-*),
+  landscape culling follows the QA camera; treeline pose fixed to a verified grove.
+- Audio: quiet adaptive WebAudio music bed (D-minor pads + drone, nest tension, siege swell, capture
+  relief, combat ducking), fire crackle + ember rumble, rate-limited distant undead moans; lazy
+  build/teardown, Sound/pause gated.
 
 ### Checks actually run (final state)
 
-- `npm test` **58/58**; `tsc` 0 errors; `vite build` success; final bundle `index-DtnItod1.js`
-  (801,289 B) reproduced by a fresh build.
-- `validate-assets.mjs` **65/65** (61 custom GLBs incl. 3 LODs + repaired characters).
-- QA `--characters` **22/22**, perf **23/23** (173 calls, 1,500,333 tris — 0.02 % over the 1.5 M
-  target = at-budget), fresh-build smoke **16/16**, co-op **18/18**, live baseline **17/17**;
-  0 page/console/log errors, 0 asset 404s, 10 weapon cards.
+- `npm test` **58/58**; `tsc` 0; `vite build` success; `validate-assets` **65/65**.
+- QA authoritative: characters **24/24**, perf **26/26** (**169 calls / 1,658,880 tris**; FP 131 /
+  1.55 M; low tier 130 / 1.35 M; gates <210 / <1.85 M), fresh-build smoke **16/16** with hash
+  reproduction, co-op **18/18**, live baseline **17/17**. Payload **13.69 MB**, nav→landing 3.56 s,
+  loading 0/20→13/20, join 3.70 s. 0 page/console/log errors/warnings, 0 404s, 10 cards.
 - **Not verified:** hardware-GPU fps/frame pacing/thermals, perceptual audio, controller, mobile.
 
-### Next cycle (cycle 2) — concrete backlog
+### Cycle-3 (next) — concrete backlog from QA's AAA audit
 
-1. **Character visual quality (top)**: tone down the over-bright flat atlases, add normal/roughness/
-   AO maps and richer armour detail (chainmail, plate segments, surcoat trim, embossing), and
-   evaluate replacing the shared body mesh with distinct higher-fidelity character models from the
-   sketchlab warehouse (plated-knight/medieval-knight-rigged/cursed-knight archives; retarget the
-   authoritative 6 Mixamo clips if models change).
-2. `fortress_keep` 5-trimsheet → 1-atlas merge (45 → ~9 draws across the nine keeps).
-3. Near/far tree band (full-res <20 m, LOD beyond) and restore cast shadows for tents/stone walls
-   once the triangle budget allows.
-4. Richer world: more structures/props/foliage from the warehouse, weather/particles, torch smoke,
-   audio layers (keep verifying perf every step).
-5. Real-GPU playtest pass and low/medium/high visual comparison.
+1. **Regional identity:** the three regions look near-identical — add biome dressing, colour
+   grading/fog variation and distinct landmarks per region.
+2. **Tree foliage:** pale shard clumps and visible LOD band — better foliage cards/alpha, blend
+   near/far in fog; consider denser LOD instances.
+3. **Corruption decals:** magenta patches look flat/unblended on roads — blend into terrain, add
+   gradient/edge feathering.
+4. **Fire/moke:** replace flat emissive cone flames with sprite-based flame + embers; richer smoke.
+5. **Character identity:** add-on silhouettes are subtle at 10 m and close-up colour variety is
+   near the gate — deepen add-on shapes, enrich atlases toward the 500-colour target.
+6. **Time-to-HUD (SwiftShader 16.3 s):** profile main-thread/shader cost, defer or batch asset
+   decoding; verify on a real GPU.
+7. Minor: hard-edged moon halo, bright flat tents, no wind animation.
+- Carried: GLB prop clones ~30 draws, triangle budget tight with shadows, no real-GPU/perceptual
+  playtest, campaign/controller/mobile unverified.
 
 ## Previous cycles
 
+- **2026-10D cycle 1** (`docs/BATCH-2026-10D-RESULTS.md`): fixed blacked-out characters (UV0 rebuild
+  + baked atlases + rim), restored shadows, 301→173 draw calls / 1.76 M→1.50 M tris, tree & tower
+  LODs, doc-link fix.
 - **2026-10C performance & smoothness** (`docs/BATCH-2026-10C-RESULTS.md`): payload 43.5→9.47 MB,
   initial preload 12.2→4.71 MB, draw calls 88,544→301, triangles 4.04 M→1.76 M, quality tiers,
   progressive loading, tree/ruin instancing, prop atlas batching.
@@ -95,13 +119,11 @@ Cosmetic debt: the new atlases read over-bright/flat white at night (cycle-2 led
   (`C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe`; prepend its
   dir to PATH), then `& $node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build`
   in the hosting repo. The system Node 22.11 is below Vite 7's floor.
-- A local play server can be run from the game repo with
-  `$env:PORT=3000; node --import tsx src/server/index.ts` (serves `dist/client` at
-  http://localhost:3000/); because hosting builds may leave `.game-build` in detached HEAD,
-  always `git checkout main` before committing docs.
-- Cycle-1 deployment: game commit pushed to `swords-and-shrouds` main; hosting pin updated and
-  deployed; live verification recorded in the commit messages/session log (new JS bundle, 10 cards,
-  repaired character assets, ~12.4 MB transfer).
+- Local play: `$env:PORT=3000; node --import tsx src/server/index.ts` from the game repo (serves
+  `dist/client` at http://localhost:3000/). Because the hosting build can leave `.game-build` in
+  detached HEAD, always `git checkout main` (and fast-forward `main`) before committing docs.
+- Cycle-2 deployment: game commit → hosting pin bump (`game-source.json`) → hosting build → commit
+  + push → Cloudflare deploy → poll live bundle/assets → QA final live pass.
 
 ## Continuity procedure
 

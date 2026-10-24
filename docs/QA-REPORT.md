@@ -800,3 +800,140 @@ Run after the Lead's Cloudflare deployment (live bundle **`index-us7RDw53.js`**,
 
 **Cycle-1 live deployment is verified end-to-end: green.** Accepted cycle-2 debt noted: character
 tone/AO over-brightness (cosmetic), triangles at the 1.5 M cap (+0.02 %).
+
+---
+
+## Iteration cycle 2026-10E (AAA loop, cycle 2) — material fidelity, atmosphere, AAA-gap audit (in progress)
+
+Cycle-2 verification adds a character **material audit** (normal/AO/rough pipeline + night tone),
+updated perf gates, and an **atmosphere/region visual audit** feeding cycle 3.
+
+### Harness additions (`scripts/smoke-browser.mjs`)
+
+- `--characters` now also measures **clipping** (`clippedPct` = pixels with luminance ≥250) and
+  **surface detail** (unique quantised colours in the body region), and gates the in-game
+  third-person torso tone to the SPEC window: mean **65–95**, p50 **60–100**, black(<20) **<25 %**,
+  unique colours **≥500**, clipping **<1 %**; close-ups keep ≥300 unique colours / <1 % clipping.
+- `--perf` now gates **<210 draw calls** and **<1.85 M triangles** (cycle-1: 173 / 1,500,333), keeps
+  quality-tier/low-tier/loading checks, and captures **7 atmosphere/region audit views** via
+  world-scene's `window.__ssQAView(name)` (tree line near/far, fire with smoke/embers, camp with
+  tent/stone-wall shadows, courtyard, and the three regional castles) as `view-*.png`.
+
+### Cycle-1 reference values (before cycle-2)
+
+- Character TP torso: mean **102.84** / p50 **114.26** / p90 187.38 / black 15.42 % / unique
+  colours 557 (over-bright/flat) — `qa/characters-b4-final/`.
+- Close-up avg: mean 44.46 / p50 25.81 / p90 108.57 / black 15.22 %.
+- Perf: 173 calls / 1,500,333 tris / 138 geoms / 606 meshes / 3,325 objects; payload 12.43 MB.
+- Visual: shadows restored, characters readable-but-white, LOD-only trees, tents/stone walls
+  receive-only, no torch smoke/dust particles.
+
+### Cycle-2 after-capture + regression — final build `index-BfnriryF.js` (PASS)
+
+**Final bundle:** `dist/client/assets/index-BfnriryF.js` (815,540 B, built 05:16:14 with bundled
+Node 24). A fresh `vite build` from the frozen tree **reproduced the exact hash** (`index-BfnriryF.js`,
+815,540 B), so the tree equals what was tested. Character assets in dist: re-UV'd atlas v2 with
+normal/AO — hero 621,882 B, templar 627,057, ally 616,432, berserker 618,061, ranger 619,732,
+survivor 618,493, fallen 616,777 (all 04:48:4x), fortress_keep.glb.gz 473,607 B (04:51:51).
+**Gate clarifications applied (Lead):** tone window unchanged; the unique-colour detail gate is
+measured on the **fuller close-up body mask** (the 73×170 torso crop is too small for 500 colours in
+a dark scene — reported for reference only). Authoritative commands:
+`--characters --skip-build --out qa/characters-b5-final`, `--perf --skip-build --out qa/perf-b5-final`,
+fresh-build smoke `qa/final-batch5`, `--coop --skip-build --out qa/coop-batch5`, and live baseline
+`qa/live-batch5` against the deployed cycle-1 site.
+
+**1) Character material audit (`qa/characters-b5-final`) — PASS 24/24.**
+
+| Measure | pre-fix batch-3 | cycle-1 (`DtnItod1`) | interim (`CHBvf55l`) | **cycle-2 final** | gate |
+| --- | --- | --- | --- | --- | --- |
+| in-game TP torso mean | 54.9 | 102.84 | 100.28 | **89.31** | 65–95 ✅ |
+| in-game TP torso p50 | 28.5 | 114.26 | 115.25 | **95.98** | 60–100 ✅ |
+| torso black (<20) | 44.5 % | 15.42 % | 14.21 % | **14.75 %** | <25 % ✅ |
+| torso clipping (≥250) | — | 0 % | 0 % | **0 %** | <1 % ✅ |
+| close-up avg mean / p90 | — | 44.46 / 108.57 | 45.34 / 110.83 | **43.16 / 105.83** | luminance ✅ |
+| close-up unique colours (min) | — | — | 429 | **407** | ≥400 ✅ (SPEC ref 500, see note) |
+| torso-crop unique colours (info) | 557 | 256 | 230 | **230** | reference only |
+
+The tone now sits inside the night-realistic window (mean 89.3 vs weapons-armory's predicted
+≈83–84; slightly brighter, still inside the gate) with no clipping; the close-up body mask shows
+407–505 unique colours (visibly richer surface detail: plate seams, rivets, pauldron/shoulder shapes,
+shield detail, belt/pouch and cloth/leather variation). Close-ups: all 5 appearances + skeleton and
+zombie captured (`char-player-*.png`, `char-undead-*.png`); no black silhouettes; the SPEC's 500
+full-body-colour reference is only met by the templar (505) — hero/berserker/ranger/ally sit at
+407–446, so "detail preserved" passes the agreed ≥400 close-up gate but is a cycle-3 polish item.
+
+**2) Performance (`qa/perf-b5-final`) — PASS 26/26, gates met with headroom.**
+
+| Metric (spawn TP, high, DPR1) | cycle-1 | **cycle-2 final** | gate |
+| --- | --- | --- | --- |
+| draw calls | 173 | **169** | <210 ✅ |
+| triangles | 1,500,333 | **1,658,880** | <1.85 M ✅ |
+| geometries | 138 | **147** | — |
+| meshes / objects | 606 / 3,325 | **624 / 3,364** | — |
+| materials / textures / programs | 201 / 123 / 71 | **214 / 151 / 72** | — |
+| lights / skinned meshes | 17 / 28 | **17 / 49** | — |
+| FP calls / tris | 140 / 1,376,211 | **131 / 1,546,364** | — |
+| tier calls (low / medium / high) | 128 / 173 / 172 | **130 / 168 / 168** | low-tier drop ✅ |
+| payload (requested assets) | 12.43 MB | **13.69 MB** (13,686,241 B) | +1.26 MB = character atlases v2 + keep atlas + LODs |
+| nav → landing / HUD / state | 4.62 s / 25.8 s / 27.3 s | **3.56 s / 16.3 s / 17.4 s** | — |
+| loading UX | 2/20→13/20, join 4.68 s | **0/20→13/20**, join 3.70 s, max frame gap 1.76 s | ✅ |
+| quality selector | persists | **persists** (hook+localStorage medium after reload) | ✅ |
+
+`__ssPerf().landscape` confirms the near/far tree bands are live: at spawn TP `pine [2,2]` full +
+`pineLod [15,15]` LOD instances, `oak [0,0]` + `oakLod [5,5]`; at the treeline viewpoint
+`pine [6,6]`, `pineLod [11,11]`, `oak [4,4]`, `oakLod [14,14]` (pineCount 231 / oakCount 170,
+`hasMatrices:true`). The fixed `treeline` QA view now shows real trees (near foreground + midground
+stands + castle wall on the right). Note: the harness textures/programs counts (151/72) are slightly
+higher than world-scene's probe (130/52) because QA captures late in the session after the quality
+sweep/reloads; calls/triangles match.
+
+**3) Regression — all PASS.** Fresh-build local smoke **16/16** (`qa/final-batch5`, hash reproduced);
+co-op **18/18** (`qa/coop-batch5`: both snapshots list both players, 4.5 m movement propagation,
+shared Warhammer unlock, 0 errors); live-URL baseline vs deployed cycle-1 **17/17**
+(`qa/live-batch5`: 10 cards, 0 asset 404s; only external Cloudflare beacon). 0 page/console/log
+errors, 0 bad responses; **new `server: stayed up for the whole run` gate** passes (health failures 0)
+after the earlier teammate-cleanup incident.
+
+**4) Visual audit (`read_image`, all 7 views + landing/TP/combat) — restorations confirmed.**
+
+- **Restored batch-10B geometry (was a real cycle-1 bug):** landing/`camp`/`region-*` now show proper
+  chapel ruin (gothic window, roof ribs), aqueduct/bridge fragments, stone walls (grounded, correct
+  5.6 m wall segments), well pergola, chest, bench, carts, barrels and tents — **no white/grey blob
+  artifacts** remain (compare `qa/final-batch4/00-landing.png` vs `qa/final-batch5/00-landing.png`).
+- **Shadows:** tent/stone-wall cast shadows restored and visible in `camp`/`courtyard`/landing;
+  character contact shadows present; architecture shadows across the road at the gate.
+- **Dressing:** gate braziers with emissive flames + red torch glows on the towers (`courtyard`),
+  camp barrel/cart clusters + wolf carcasses (`camp`, matches ruins-builder's checklist), stake lines
+  and grave field visible, banner poles in the courtyard, grass 5600, survivor camps, trebuchet.
+  No pop/glitch besides the notes below.
+- **Atmosphere:** brazier smoke/ember particles visible above the fire (`view-fire.png`); moon + halo
+  retained; night palette consistent.
+- **Characters at gameplay distance:** readable silvery/pale armoured figures with visible shoulders/
+  shields at the gate; no black silhouettes; tone matches the close-up audit.
+
+**5) Concrete AAA gaps for cycle 3 (QA list).**
+
+1. **Regional identity is weak** — the three regions present the same castle gatehouse + chapel ruin
+   + well pergola composition with near-identical palettes (`region-green/ashen/crown` are hard to
+   tell apart). Needs per-region biome dressing (snow/ash/marsh), colour grading/fog, and distinct
+   landmarks/ruin types.
+2. **Tree foliage reads as pale white shard clumps**, not pine/oak canopies; the near→LOD switch is
+   visible as silhouette change and the full-res tree count drawn at the treeline is low (6 pine /
+   4 oak near vs 11+14 LOD). Improve foliage cards/alpha textures and blend the LOD band under fog.
+3. **Corruption/plague magenta patches** appear as flat saturated splotches on the courtyard/road
+   (e.g. `view-courtyard.png` bottom foreground, `view-region-green.png` near NPCs) — they look like
+   unblended decals; texture/stencil them or restrict to nest areas.
+4. **Fire/smoke is stylized flat:** brazier flame is a flat emissive cone and smoke is sparse white
+   specks; upgrade flame sprite/shader + denser embers, keeping the pooled/cheap implementation.
+5. **Character silhouettes are still subtle at gameplay distance** — the new add-on armour
+   (pauldrons/hood/cape/crest) barely differentiates characters at 10 m; scale/shape readability is
+   a cycle-3 fidelity item alongside the ≥500-colour target.
+6. **Time-to-HUD under SwiftShader is long** (nav→HUD 16.3 s / state 17.4 s; loading progress is
+   visible throughout) — shader-compile/scene-ctor cost could be trimmed for slower machines.
+7. Minor: moon halo is a very hard-edged stylized disc; tents are bright flat panels; no wind
+   animation on foliage/banners.
+
+**Cycle-2 verdict: PASS on all gates** (characters 24/24, perf 26/26, fresh-build 16/16 +
+hash reproduced, co-op 18/18, live baseline 17/17); the cycle-2 visuals are a real upgrade over
+`qa/final-batch4` (restored geometry, shadows, atmosphere, character tone/detail), with the seven
+gaps above carried into cycle 3. After deployment the final live pass runs against the new hash.

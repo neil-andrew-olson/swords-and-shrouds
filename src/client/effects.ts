@@ -354,6 +354,8 @@ export class CombatEffects {
   private readonly dustPool: ParticlePool;
   private readonly trails: SwingTrailPool;
   private readonly decals: GroundDecals;
+  private readonly smokePool: ParticlePool;
+  private readonly motePool: ParticlePool;
   /** Per-tier spawn multiplier (low tier spawns fewer particles). */
   private particleScale = 1;
 
@@ -383,6 +385,12 @@ export class CombatEffects {
     this.dustPool = new ParticlePool(scene, dustGeo, dustMat, 72, new THREE.Vector3(1.6, 1.0, 1.6), true);
     this.trails = new SwingTrailPool(scene);
     this.decals = new GroundDecals(scene);
+    const smokeGeo = new THREE.IcosahedronGeometry(0.5, 0);
+    const smokeMat = new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false});
+    this.smokePool = new ParticlePool(scene, smokeGeo, smokeMat, 56, new THREE.Vector3(1.5, 2.1, 1.5), true);
+    const moteGeo = new THREE.IcosahedronGeometry(0.5, 0);
+    const moteMat = new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false});
+    this.motePool = new ParticlePool(scene, moteGeo, moteMat, 120, new THREE.Vector3(1, 1, 1), true);
   }
 
   /** Quality tier hook: <1 reduces particle spawn counts. */
@@ -518,8 +526,65 @@ export class CombatEffects {
     this.dustPool.update(step);
     this.trails.update(step);
     this.decals.update(step);
+    this.smokePool.update(step);
+    this.motePool.update(step);
+    this.smokePool.update(step);
+    this.motePool.update(step);
   }
 
+  /** Slow torch-smoke wisp above a fire (additive pale haze, grows and fades). */
+  smoke(position: THREE.Vector3) {
+    const count = this.particleScale < 0.6 ? 1 : 2;
+    for (let i = 0; i < count; i++) {
+      this.smokePool.emit(
+        position.x + (Math.random() - 0.5) * 0.35,
+        position.y + Math.random() * 0.35,
+        position.z + (Math.random() - 0.5) * 0.35,
+        (Math.random() - 0.5) * 0.22,
+        0.32 + Math.random() * 0.35,
+        (Math.random() - 0.5) * 0.22,
+        1.8 + Math.random() * 1.4,
+        0.24 + Math.random() * 0.1,
+        1.05 + Math.random() * 0.55,
+        0.06, 0.9,
+        0.1, 0.105, 0.12
+      );
+    }
+  }
+  /** Drifting ash fleck off a fire (slow, dim ember that falls). */
+  ash(position: THREE.Vector3) {
+    if (this.particleScale < 0.6) return;
+    this.sparksPool.emit(
+      position.x + (Math.random() - 0.5) * 0.8,
+      position.y + Math.random() * 0.6,
+      position.z + (Math.random() - 0.5) * 0.8,
+      (Math.random() - 0.5) * 0.7,
+      0.2 + Math.random() * 0.5,
+      (Math.random() - 0.5) * 0.7,
+      2.4 + Math.random() * 2.1,
+      0.022, 0.008,
+      -0.22, 0.55,
+      0.8 + Math.random() * 0.25, 0.4 + Math.random() * 0.15, 0.16 + Math.random() * 0.1
+    );
+  }
+  /** Subtle moon-dust motes floating near the camera. */
+  motes(position: THREE.Vector3) {
+    if (this.particleScale < 0.6) return;
+    for (let i = 0; i < 2; i++) {
+      this.motePool.emit(
+        position.x + (Math.random() - 0.5) * 2,
+        position.y + (Math.random() - 0.5) * 1.4,
+        position.z + (Math.random() - 0.5) * 2,
+        (Math.random() - 0.5) * 0.12,
+        0.02 + Math.random() * 0.08,
+        (Math.random() - 0.5) * 0.12,
+        3.6 + Math.random() * 3,
+        0.022, 0.006,
+        0.012, 0.25,
+        0.42, 0.52, 0.72
+      );
+    }
+  }
   /** Live particle count, exposed for the perf HUD / QA reporting. */
   get active() {
     return this.sparksPool.active + this.bloodPool.active + this.dustPool.active;

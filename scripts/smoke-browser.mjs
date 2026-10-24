@@ -59,14 +59,37 @@ const DEFAULT_CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.e
 const BUNDLED_NODE = 'C:\\Users\\neil\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\node\\bin\\node.exe';
 const VIEWPORT = {width: 1600, height: 900};
 const CANVAS_GATE = {minStd: 2, minNonDarkPct: 2, minColors: 32};
-// Character-readability gates (cycle 2026-10D): close-up body luminance must clearly clear the
-// near-black-silhouette baseline measured on the pre-fix batch-3 build.
-const CHAR_GATE = {minMean: 35, minP90: 70, minNormalP50: 35};
+// Character-readability gates (cycle 2026-10D/10E): close-up body luminance must clearly clear the
+// near-black-silhouette baseline, and the cycle-2 in-game torso tone must be night-realistic
+// (not over-bright/white) with preserved surface detail and no clipping.
+const CHAR_GATE = {
+  // Cycle-2 in-game third-person torso tone window (Lead/SPEC): mean 65-95, p50 60-100, black<25%.
+  torsoMeanMin: 65,
+  torsoMeanMax: 95,
+  torsoP50Min: 60,
+  torsoP50Max: 100,
+  torsoBlackMax: 25,
+  clipMaxPct: 1,
+  // Close-ups must still read (cycle-1 thresholds kept) and show surface detail.
+  minMean: 35,
+  minP90: 70,
+  closeupMaxBlackPct: 40,
+  // Detail gate is measured on the fuller close-up body mask, not the tiny torso crop (Lead
+  // 2026-10-24): 256 quantised colours in a 73x170 dark-scene crop is expected; the SPEC's 500
+  // target is reported for reference.
+  closeupUniqueColorsMin: 400,
+  specUniqueColorsTarget: 500,
+};
+// Performance acceptance for cycle 2 (Lead: <210 calls / <1.85M tris).
+const PERF_GATE = {maxCalls: 210, maxTris: 1_850_000};
+// Cycle-2 atmosphere/region audit views requested from world-scene via window.__ssQAView(name).
+const QA_VIEWS = ['treeline', 'fire', 'camp', 'courtyard', 'region-green', 'region-ashen', 'region-crown'];
 // BEFORE baseline measured from qa/final-batch3 (player body + companion crops, batch-3 pre-fix).
 const CHAR_BEFORE_BASELINE = {
   normalPlayerTorso: {mean: 54.9, p50: 28.5, p90: 132.0, blackPct: 44.5},
   normalCompanionBody: {mean: 27.4, p50: 22.8, p90: 30.8, blackPct: 20.4},
-  source: 'qa/final-batch3/01-third-person.png crops (180x400 player region / 230x330 companion region)',
+  cycle1: {normalPlayerTorso: {mean: 102.84, p50: 114.26, p90: 187.38, blackPct: 15.42}, closeupAvg: {mean: 44.46, p50: 25.81, p90: 108.57, blackPct: 15.22}},
+  source: 'qa/final-batch3/01-third-person.png crops; cycle-1 qa/characters-b4-final',
 };
 // Injected before the app boots: records the WebSocket lifecycle AND a summary of the last
 // authoritative snapshot on every page. This is what lets the harness (a) prove a real
@@ -555,6 +578,61 @@ async function createPageTarget(debugPort) {
   throw new Error(`could not create Chrome page target: ${lastError}`);
 }
 
+/** Cycle-2 QA view hook (world-scene): position camera at a named atmosphere/region viewpoint. */
+async function qaView(page, name) {
+  const arg = name === null ? 'null' : JSON.stringify(name);
+  return page.evaluate(
+    `(()=>{const f=window.__ssQAView;if(typeof f!=='function')return {ok:false,reason:'__ssQAView not available'};try{const r=f(${arg});return r===undefined?{ok:true}:JSON.parse(JSON.stringify(r));}catch(e){return {ok:false,error:String((e&&e.message)||e)};}})()`,
+    {timeoutMs: 15000},
+  );
+}
+
+/** Abort a local run early if the spawned server was killed mid-run (health sampler failures). */
+function assertServerAlive(report, stage) {
+  const h = report.health;
+  if (h && (h.failures || 0) > 3) {
+    throw new Error(`${stage}: local server died mid-run (health failures=${h.failures}, samples=${h.samples}); aborting for a clean re-run`);
+  }
+}
+
+/** Capture the atmosphere/region audit views (tree line, fire, camp, courtyard, 3 regions). */
+async function captureQaViews(page, outDir, report, check) {
+  const available = await page.evaluate(`typeof window.__ssQAView==='function'`);
+  report.views = {hook: available, captures: []};
+  if (!available) {
+    report.notes.push('perf: __ssQAView hook absent — atmosphere/region audit screenshots skipped');
+    log('QA VIEWS: __ssQAView hook not present in this build');
+    return;
+  }
+  for (const name of QA_VIEWS) {
+    const result = await qaView(page, name);
+    if (!result || result.ok === false) {
+      report.notes.push(`perf: QA view '${name}' unavailable: ${JSON.stringify(result)}`);
+      continue;
+    }
+    // 1.8 s lets the QA-camera landscape focus and one full SwiftShader frame settle (>=1 frame at
+    // ~1.4 fps software rendering) before capture.
+    await sleep(1800);
+    const shot = await screenshotWithStats(page, outDir, `view-${name}.png`, null);
+    report.views.captures.push({name, result, file: shot.file, stats: shot.stats});
+    if (name === 'treeline') {
+      // Extra debug data: full/LOD instance counts + the treeline vantage, used to prove the
+      // near/far tree bands are live even if the screenshot vantage is awkward.
+      report.views.landscape = await page.evaluate(
+        `(()=>{try{const f=window.__ssPerf;if(typeof f!=='function')return null;const p=f();return p&&p.landscape?JSON.parse(JSON.stringify(p.landscape)):null;}catch(e){return {error:String((e&&e.message)||e)};}})()`,
+        {timeoutMs: 15000},
+      ).catch(() => null);
+    }
+    await qaView(page, null);
+    await sleep(300);
+  }
+  check(
+    'perf: atmosphere/region audit views captured',
+    report.views.captures.length === QA_VIEWS.length,
+    `${report.views.captures.length}/${QA_VIEWS.length} (${report.views.captures.map(c => c.name).join(', ')})`,
+  );
+}
+
 /* ------------------------------------------------------------- CDP client */
 
 class CDP {
@@ -747,7 +825,7 @@ async function analyzePng(page, base64, region = null) {
           const y0=region?Math.max(0,Math.floor(H*region.y0)):0;
           const y1=region?Math.min(H,Math.ceil(H*region.y1)):H;
           const d=ctx.getImageData(0,0,W,H).data;
-          const lums=[];let sum=0,sumSq=0,nonDark=0,black=0,min=255,max=0;
+          const lums=[];let sum=0,sumSq=0,nonDark=0,black=0,clipped=0,min=255,max=0;
           const buckets=new Set();
           for(let y=y0;y<y1;y+=2){
             for(let x=x0;x<x1;x+=2){
@@ -756,6 +834,7 @@ async function analyzePng(page, base64, region = null) {
               lums.push(lum);sum+=lum;sumSq+=lum*lum;
               if(lum>10)nonDark++;
               if(lum<20)black++;
+              if(lum>=250)clipped++;
               if(lum<min)min=lum;if(lum>max)max=lum;
               buckets.add(((r>>3)<<10)|((g>>3)<<5)|(b>>3));
             }
@@ -767,6 +846,7 @@ async function analyzePng(page, base64, region = null) {
             mean:+mean.toFixed(2),p50:+pick(0.5).toFixed(2),p90:+pick(0.9).toFixed(2),
             std:+Math.sqrt(Math.max(0,sumSq/count-mean*mean)).toFixed(2),
             blackPct:+(black/count*100).toFixed(2),
+            clippedPct:+(clipped/count*100).toFixed(2),
             nonDarkPct:+(nonDark/count*100).toFixed(2),
             uniqueColors:buckets.size,min:+min.toFixed(1),max:+max.toFixed(1)});
         }catch(e){reject(new Error('pixels: '+(e&&e.message)));}
@@ -1718,20 +1798,51 @@ async function captureCharacterReadability(page, {opts, report, check}) {
   );
   const playerStats = appearances.map(a => a.stats).filter(Boolean);
   const avg = key => +(playerStats.reduce((sum, s) => sum + s[key], 0) / Math.max(1, playerStats.length)).toFixed(2);
-  const aggregate = {avgMean: avg('mean'), avgP50: avg('p50'), avgP90: avg('p90'), avgBlackPct: avg('blackPct')};
+  const max = key => +Math.max(...playerStats.map(s => s[key])).toFixed(2);
+  const aggregate = {
+    avgMean: avg('mean'),
+    avgP50: avg('p50'),
+    avgP90: avg('p90'),
+    avgBlackPct: avg('blackPct'),
+    avgClippedPct: avg('clippedPct'),
+    maxClippedPct: max('clippedPct'),
+    minUniqueColors: Math.min(...playerStats.map(s => s.uniqueColors)),
+  };
   report.characters.aggregate = aggregate;
-  log(`CHAR CLOSEUPS: ${JSON.stringify(aggregate)} normalTP=${JSON.stringify(normal.stats)} before=${JSON.stringify(CHAR_BEFORE_BASELINE.normalPlayerTorso)}`);
+  log(`CHAR CLOSEUPS: ${JSON.stringify(aggregate)} normalTP=${JSON.stringify(normal.stats)} cycle1=${JSON.stringify(CHAR_BEFORE_BASELINE.cycle1)}`);
   check(
     'char: close-up body luminance above black-silhouette threshold',
     aggregate.avgMean >= CHAR_GATE.minMean && aggregate.avgP90 >= CHAR_GATE.minP90,
     `avgMean=${aggregate.avgMean} (>=${CHAR_GATE.minMean}), avgP90=${aggregate.avgP90} (>=${CHAR_GATE.minP90})`,
   );
   check(
-    'char: normal third-person body lifted vs pre-fix baseline',
-    normal.stats.p50 >= CHAR_GATE.minNormalP50,
-    `p50=${normal.stats.p50} (>=${CHAR_GATE.minNormalP50}); before p50=${CHAR_BEFORE_BASELINE.normalPlayerTorso.p50}, mean ${normal.stats.mean} vs ${CHAR_BEFORE_BASELINE.normalPlayerTorso.mean}, black% ${normal.stats.blackPct} vs ${CHAR_BEFORE_BASELINE.normalPlayerTorso.blackPct}`,
+    'char: close-ups show surface detail (unique colours >= 400 on close-up body mask)',
+    aggregate.minUniqueColors >= CHAR_GATE.closeupUniqueColorsMin,
+    `minUniqueColors=${aggregate.minUniqueColors} (>=${CHAR_GATE.closeupUniqueColorsMin}); SPEC reference target ${CHAR_GATE.specUniqueColorsTarget}, measured on the fuller close-up body mask per the Lead's clarification (narrow torso crop is too small for 500 in a dark scene)`,
   );
-  check('char: close-ups are not mostly black (blackPct < 40%)', aggregate.avgBlackPct < 40, `avgBlackPct=${aggregate.avgBlackPct}`);
+  check(
+    'char: close-ups no white clipping (>250 <= 1% of body)',
+    aggregate.maxClippedPct <= CHAR_GATE.clipMaxPct,
+    `maxClipped=${aggregate.maxClippedPct}% avg=${aggregate.avgClippedPct}% (<=${CHAR_GATE.clipMaxPct}%)`,
+  );
+  check(
+    'char: in-game TP torso tone night-realistic (mean 65-95, p50 60-100, black<25%)',
+    normal.stats.mean >= CHAR_GATE.torsoMeanMin &&
+      normal.stats.mean <= CHAR_GATE.torsoMeanMax &&
+      normal.stats.p50 >= CHAR_GATE.torsoP50Min &&
+      normal.stats.p50 <= CHAR_GATE.torsoP50Max &&
+      normal.stats.blackPct < CHAR_GATE.torsoBlackMax,
+    `mean=${normal.stats.mean} (${CHAR_GATE.torsoMeanMin}-${CHAR_GATE.torsoMeanMax}), p50=${normal.stats.p50} (${CHAR_GATE.torsoP50Min}-${CHAR_GATE.torsoP50Max}), black=${normal.stats.blackPct}% (<${CHAR_GATE.torsoBlackMax}%); cycle-1 was mean 102.84 / p50 114.26 / black 15.42%`,
+  );
+  // Torso-crop unique colours are reported for reference only (too small a region); the detail
+  // gate is the close-up body-mask check above.
+  report.characters.detailGateMask = 'close-up body mask (x36-64%, y8-94%)';
+  report.characters.torsoCropColors = normal.stats.uniqueColors;
+  report.characters.specUniqueColorsTarget = CHAR_GATE.specUniqueColorsTarget;
+  if (normal.stats.uniqueColors < CHAR_GATE.specUniqueColorsTarget) {
+    report.notes.push(`char: narrow torso-crop unique colours ${normal.stats.uniqueColors} < SPEC reference ${CHAR_GATE.specUniqueColorsTarget} — informational only (detail gate uses close-up body mask)`);
+  }
+  check('char: close-ups are not mostly black (blackPct < 40%)', aggregate.avgBlackPct < CHAR_GATE.closeupMaxBlackPct, `avgBlackPct=${aggregate.avgBlackPct}`);
 }
 
 /* ---------------------------------------------------------------- update */
@@ -2112,6 +2223,12 @@ async function run() {
       );
     }
     log(`WS final: instances=${report.websocketFinal?.instances} opens=${report.websocketFinal?.opens} closes=${report.websocketFinal?.closes?.length || 0} states=${report.websocketFinal?.stateCount}${report.websocketFinal?.closes?.length ? ` closures=${JSON.stringify(report.websocketFinal.closes)}` : ''}`);
+    // Cycle-2 atmosphere/region audit screenshots via world-scene's named camera views
+    // (window.__ssQAView(name)); camera is restored with __ssQAView(null) after each capture.
+    if (opts.perf) {
+      assertServerAlive(report, 'pre-views');
+      await captureQaViews(page, opts.outDir, report, check);
+    }
     // Performance mode: deferred quality-persistence + progressive-loading validation. A reload is
     // required to prove the stored tier is applied on startup; done last so it cannot pollute the
     // load timings. QA also injects a pre-app fetch delay (localStorage 'ss-qa-load-delay', read by
@@ -2203,6 +2320,13 @@ async function run() {
       report.failedRequests.length === 0,
       report.failedRequests.length ? JSON.stringify(report.failedRequests.slice(0, 8)) : 'none',
     );
+    if (mode === 'local' && report.health) {
+      check(
+        'server: stayed up for the whole run (health failures 0)',
+        (report.health.failures || 0) === 0,
+        `failures=${report.health.failures} samples=${report.health.samples} p50=${report.health.p50Ms}ms${report.health.failures ? ' — external node kill? re-run required' : ''}`,
+      );
+    }
     for (const [label, stats] of Object.entries(report.canvas)) {
       check(`canvas renders content (${label})`, stats.ok, `std=${stats.std} (>=${CANVAS_GATE.minStd}), nonDark=${stats.nonDarkPct}% (>=${CANVAS_GATE.minNonDarkPct}), colors=${stats.uniqueColors} (>=${CANVAS_GATE.minColors})`);
     }
@@ -2223,6 +2347,18 @@ async function run() {
           'perf: draw calls drop at low quality',
           lowCalls != null && highCalls != null && lowCalls < highCalls && lowCalls <= highCalls * 0.9,
           `low=${lowCalls} high=${highCalls} ratio=${lowCalls != null && highCalls ? +(lowCalls / highCalls).toFixed(3) : 'n/a'}`,
+        );
+        const tpCalls = perfMetric(perf?.thirdPerson?.snapshot, 'calls');
+        const tpTris = perfMetric(perf?.thirdPerson?.snapshot, 'triangles');
+        check(
+          'perf: draw calls < 210 (cycle-2 gate)',
+          tpCalls != null && tpCalls < PERF_GATE.maxCalls,
+          `calls=${tpCalls} (<${PERF_GATE.maxCalls}); cycle-1 was 173`,
+        );
+        check(
+          'perf: triangles < 1.85M (cycle-2 gate)',
+          tpTris != null && tpTris < PERF_GATE.maxTris,
+          `tris=${tpTris} (<${PERF_GATE.maxTris}); cycle-1 was 1,500,333`,
         );
         const selector = perf?.qualitySelector;
         const normQuality = v => (typeof v === 'string' ? v : v?.tier ?? v?.quality ?? v?.current ?? null);
@@ -2358,6 +2494,12 @@ async function run() {
     console.log(`char before: ${JSON.stringify(c.baseline?.normalPlayerTorso)} (${c.baseline?.source})`);
     for (const a of c.appearances || []) console.log(`  char ${a.appearance}: ${JSON.stringify(a.stats)} -> ${path.relative(ROOT, a.file)}`);
     for (const u of c.undead || []) console.log(`  undead ${u.actor.kind}:${u.actor.name}: ${JSON.stringify(u.stats)} -> ${path.relative(ROOT, u.file)}`);
+  }
+  if (report.views) {
+    console.log(`views:     hook=${report.views.hook} captured=${report.views.captures.map(c => c.name).join(',') || '(none)'} landscape=${JSON.stringify(report.views.landscape)}`);
+    for (const c of report.views.captures) {
+      console.log(`  view ${c.name}: ${JSON.stringify({mean: c.stats.mean, p50: c.stats.p50, p90: c.stats.p90, colors: c.stats.uniqueColors})} -> ${path.relative(ROOT, c.file)}`);
+    }
   }
   if (report.perf) {
     const perf = report.perf;

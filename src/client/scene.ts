@@ -67,7 +67,7 @@ const TRAIL_COLORS:Record<SwingStyle,[number,number,number]>={
  sweep:[0.75,1.55,1.15]
 };
 /** Characters catch the night IBL more strongly so distant actors don't go pure black. */
-const ACTOR_ENV_INTENSITY=1.7;
+const ACTOR_ENV_INTENSITY=2.2;
 type QualityTier='low'|'medium'|'high';
 /** Graphics tiers (batch 3): pixel ratio, bloom, shadow map, pooled torch lights, particle scale. */
 const QUALITY_TIERS:Record<QualityTier,{dpr:number;bloom:boolean;shadow:number;lights:number;particles:number}> = {
@@ -165,6 +165,9 @@ export class WorldView{
   /** Debug character-preview camera override (window.__ssCharacterPreview). */
   private previewActorId:string|null=null;
   private lastMeId:string|null=null;
+  /** Named QA camera override (window.__ssQAView) for visual audits. */
+  private qaView:{name:string;x:number;z:number;yaw:number;pitch:number;height:number}|null=null;
+  private landscapeTreeline:{x:number;z:number;lookX:number;lookZ:number}|null=null;
   private lastGame:Game|undefined;
  private readonly fogTarget=new THREE.Color();private readonly fogCurrent=new THREE.Color(0x1c2a2e);
  private readonly tmpV=new THREE.Vector3();private readonly tmpV2=new THREE.Vector3();
@@ -210,7 +213,7 @@ export class WorldView{
   this.nest.position.set(NEST.x,0,NEST.z);this.scene.add(this.nest);for(let i=0;i<8;i++){const angle=i*Math.PI/4;const pillar=box(this.nest,Math.cos(angle)*3,1.2+Math.sin(i)*.5,Math.sin(angle)*3,.8,3,1,0x423b50);pillar.rotation.z=Math.sin(i)*.2;}const crystal=new THREE.Mesh(new THREE.OctahedronGeometry(2),new THREE.MeshStandardMaterial({color:0x9a496f,emissive:0x76284d,emissiveIntensity:.9,flatShading:true}));crystal.position.y=2.3;this.nest.add(crystal);
   // Plague glow joins the pooled lights instead of being a permanent extra point light.
   this.nestTorch=this.torchSources.length;this.torchSources.push({x:NEST.x,y:3,z:NEST.z,color:0xd15b92,intensity:22,distance:16,seed:11.3});
-  const ls=addLandscape(this.scene);this.landscapeUpdate=ls?.update??null;
+  const ls=addLandscape(this.scene);this.landscapeUpdate=ls?.update??null;this.landscapeTreeline=(ls as {treeline?:{x:number;z:number;lookX:number;lookZ:number}}|undefined)?.treeline??null;
   const ruins=addRuins(this.scene);this.ruinsUpdate=ruins?.update??null;
   // Mountains stay outside the navigable map.
   const mountainGeo=new THREE.ConeGeometry(1,1,5),mountainMat=mat(0x263941),mountainDummy=new THREE.Object3D();
@@ -480,6 +483,34 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    }
   }
 
+  /** Named read-only QA camera viewpoints (cycle-2 visual audit); null restores normal play. */
+  qaViewpoint(name:string|null, custom?:{x:number;z:number;yaw:number;pitch:number;height:number}){
+   if(name===null){this.qaView=null;return {ok:true,name:null,pose:null};}
+   const look=(x:number,y:number,z:number,tx:number,ty:number,tz:number)=>{const dx=tx-x,dz=tz-z,dy=ty-y;return {x,z,yaw:Math.atan2(dx,-dz),pitch:Math.atan2(dy,Math.max(.01,Math.hypot(dx,dz))),height:y};};
+   let pose:{x:number;z:number;yaw:number;pitch:number;height:number}|null=null;
+   if(name==='custom'&&custom)pose={...custom};
+   else if(name==='treeline'){
+    // Verified dense grove north-west of the Green March border fortress: 9 full-res trees inside
+    // 22 m and 12 LOD instances out to 54 m in one frame (solved against the deterministic tree
+    // layout and checked by re-rendering this exact pose via __ssQAPose on the cycle-2 dist).
+    pose={x:-62.48,z:-41.69,yaw:0.9509,pitch:-0.0855,height:2.4};
+   }else if(name==='fire'){
+    const camp=CAMPS[0];pose=look(camp.x-5,1.7,camp.z+8,camp.x+2,1.0,camp.z+3);
+   }else if(name==='camp'){
+    const camp=CAMPS[0];pose=look(camp.x+11,2.4,camp.z+15,camp.x,1.1,camp.z+2);
+   }else if(name==='courtyard'){
+    const keep=CASTLES[0];pose=look(keep.x,2.5,keep.z+22,keep.x,1.4,keep.z-1);
+   }else if(name==='region-green'){
+    const c=CASTLES[0];pose=look(c.x+14,3.2,c.z+34,c.x,2,c.z);
+   }else if(name==='region-ashen'){
+    const c=CASTLES.find(x=>x.region==='moor')??CASTLES[3];pose=look(c.x+14,3.2,c.z+34,c.x,2,c.z);
+   }else if(name==='region-crown'){
+    const c=CASTLES.find(x=>x.region==='crown')??CASTLES[6];pose=look(c.x+14,3.2,c.z+34,c.x,2,c.z);
+   }
+   if(!pose)return {ok:false,name:null,pose:null};
+   this.qaView={name,x:pose.x,z:pose.z,yaw:pose.yaw,pitch:pose.pitch,height:pose.height};
+   return {ok:true,name,pose:{x:pose.x,z:pose.z,yaw:pose.yaw,pitch:pose.pitch,height:pose.height}};
+  }
   /** Frame the nearest/selected actor close-up for subsequent renders (debug/QA only). */
   characterPreview(actorId?:string|null){
    if(actorId===null){this.previewActorId=null;return {ok:true,actorId:null,name:null};}
@@ -519,7 +550,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    // AAA cycle 1: curated shadows. Casters: merged architecture (castles/keeps/walls/towers/
    // gatehouses), player/enemy actors, and the 12 ruin set pieces. Foliage, tents, stone walls,
    // grass, flames, particles and small furniture are receive-only to stay inside the triangle budget.
-   const ruinLayer = /ruin/i;
+   const ruinLayer = /(ruin|tent|wall)/i;
    this.scene.traverse(o=>{
     if(o instanceof THREE.SkinnedMesh){
      let root:THREE.Object3D|null=o.parent,isActor=false;
@@ -540,12 +571,14 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    const info=this.renderer.info;let objects=0,meshes=0,lights=0,skinned=0;const materials=new Set<THREE.Material>();
    this.scene.traverse(o=>{objects++;if(o instanceof THREE.Mesh){meshes++;if(o instanceof THREE.SkinnedMesh)skinned++;for(const m of Array.isArray(o.material)?o.material:[o.material])materials.add(m);}else if(o instanceof THREE.Light)lights++;else if(o instanceof THREE.Points||o instanceof THREE.Sprite||o instanceof THREE.Line)meshes++;});
    let sum=0;for(let i=0;i<this.frameCount;i++)sum+=this.frameTimes[i];const frameMs=this.frameCount?sum/this.frameCount:0;
-   return {calls:info.render.calls,triangles:info.render.triangles,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
+   return {calls:info.render.calls,triangles:info.render.triangles,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
+   win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
+   win.__ssQAPose=(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{return view.qaViewpoint(pose?'custom':null,pose??undefined);};
    win.__ssQuality=(tier?:string)=>{if(typeof tier==='string'&&tier)return {tier:view.quality,applied:view.setQuality(tier,true)};return {tier:view.quality};};
    let initial:QualityTier='high';try{const stored=localStorage.getItem('ss-quality');if(stored==='low'||stored==='medium'||stored==='high')initial=stored;}catch{}
    this.setQuality(initial);
@@ -578,7 +611,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
   /** Region fog/light grading, moonlight follow + pooled torch flicker. */
   private atmosphere(me:Actor|undefined,time:number,dt:number){
    const focusX=me?.x??this.camera.position.x,focusZ=me?.z??this.camera.position.z;
-   if(this.landscapeUpdate)this.landscapeUpdate(time,focusX,focusZ);
+   if(this.landscapeUpdate)this.landscapeUpdate(time,this.qaView?this.qaView.x:focusX,this.qaView?this.qaView.z:focusZ);
    const march=smoothstep(-245,-165,focusZ),crown=1-smoothstep(-485,-405,focusZ),moor=Math.max(0,1-march-crown);
    const corruption=1-smoothstep(20,95,dist({x:focusX,z:focusZ},NEST));
    this.fogTarget.setHex(0x162126);
@@ -608,6 +641,20 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
   private updateEffects(dt:number,time:number,me:Actor|undefined){
    this.fx.update(dt);
    const focusX=me?.x??this.camera.position.x,focusZ=me?.z??this.camera.position.z;
+   // Atmosphere: torch smoke wisps + drifting ash close to fires, moon-dust motes around the camera.
+   const localDt=Math.max(0,dt);
+   for(let i=0;i<this.torchSources.length;i++){
+    if(i===this.nestTorch)continue;
+    const src=this.torchSources[i],dx=src.x-focusX,dz=src.z-focusZ;
+    if(dx*dx+dz*dz>400)continue;
+    if(Math.random()<localDt*1.05){this.tmpV.set(src.x+(Math.random()-.5)*.3,src.y+0.85,src.z+(Math.random()-.5)*.3);this.fx.smoke(this.tmpV);}
+    if(Math.random()<localDt*0.4){this.tmpV.set(src.x+(Math.random()-.5)*.6,src.y+0.4,src.z+(Math.random()-.5)*.6);this.fx.ash(this.tmpV);}
+   }
+   if(Math.random()<localDt*2.4){
+    const angle=Math.random()*Math.PI*2,radius=4+Math.random()*10;
+    this.tmpV.set(focusX+Math.cos(angle)*radius,0.6+Math.random()*2.6,focusZ+Math.sin(angle)*radius);
+    this.fx.motes(this.tmpV);
+   }
    let budget=4;
    for(let i=0;i<this.torchSources.length&&budget>0;i++){
     if(i===this.nestTorch)continue;
@@ -756,6 +803,11 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
      this.camera.lookAt(previewMesh.position.x,1.3,previewMesh.position.z);
      this.weapon.visible=false;this.shield.visible=false;
     }
+   }
+   if(this.qaView){
+    this.camera.position.set(this.qaView.x,this.qaView.height,this.qaView.z);
+    this.camera.rotation.set(this.qaView.pitch,-this.qaView.yaw,0,'YXZ');
+    this.weapon.visible=false;this.shield.visible=false;
    }
    if(this.postfx)this.postfx.render();else this.renderer.render(this.scene,this.camera);
   }

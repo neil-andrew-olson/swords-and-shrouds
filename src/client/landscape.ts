@@ -224,11 +224,11 @@ export function addLandscape(scene: THREE.Scene) {
       oakInsts = buildTreeInsts(oakParts, oakCount, false);
       if (pineLodGltf) {
         const lodParts = treeOnly(collectMeshes(pineLodGltf.scene));
-        if (lodParts.length) { pineLodInsts = buildTreeInsts(lodParts, pineCount, true); pineInsts = []; }
+        if (lodParts.length) pineLodInsts = buildTreeInsts(lodParts, pineCount, true);
       }
       if (oakLodGltf) {
         const lodParts = treeOnly(collectMeshes(oakLodGltf.scene));
-        if (lodParts.length) { oakLodInsts = buildTreeInsts(lodParts, oakCount, true); oakInsts = []; }
+        if (lodParts.length) oakLodInsts = buildTreeInsts(lodParts, oakCount, true);
       }
       scene.remove(placeholderGroup);
     })
@@ -324,15 +324,47 @@ export function addLandscape(scene: THREE.Scene) {
     })
     .catch((err) => console.warn('Scatter assets unavailable, keeping procedural grass/rocks', err));
 
+  let lastCullX = Infinity, lastCullZ = Infinity, lastCullTime = -Infinity;
+  // QA treeline vantage: pick the best tree as a near-band camera anchor (maximising full-res
+  // trees within ~22 m), then look toward the local cluster centroid so both the full-res (<20 m)
+  // and LOD (<54 m) bands are in one frame.
+  let bestTree = treePositions[0], bestScore = -1;
+  for (const t of treePositions) {
+    let near = 0, mid = 0;
+    for (const o of treePositions) {
+      const dx = o.x - t.x, dz = o.z - t.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < 484) near++;
+      if (d2 < 2916) mid++;
+    }
+    const score = near * 3 + mid;
+    if (score > bestScore) { bestScore = score; bestTree = t; }
+  }
+  let cx = 0, cz = 0, cn = 0;
+  for (const o of treePositions) {
+    const dx = o.x - bestTree.x, dz = o.z - bestTree.z;
+    if (dx * dx + dz * dz < 2916) { cx += o.x; cz += o.z; cn++; }
+  }
+  if (cn) { cx /= cn; cz /= cn; } else { cx = bestTree.x; cz = bestTree.z; }
+  let ax = bestTree.x - cx, az = bestTree.z - cz;
+  const alen = Math.hypot(ax, az) || 1;
+  ax /= alen; az /= alen;
+  const treelineVantage = {x: bestTree.x + ax * 7, z: bestTree.z + az * 7, lookX: cx, lookZ: cz};
   return {
+    treeline: treelineVantage,
     update: (time: number, focusX = 0, focusZ = 0) => {
       windUniform.value = time;
-      // Near trees = full assets; ring band 70..112 m = baked LOD assets (no pop-through, both
-      // bands are always drawn together so the swap is invisible behind the night fog).
-      const NEAR = 0, FAR = 54;
+      // Reassign instance matrices only when the camera has moved a few metres (or every 2.5 s as a
+      // safety net): frame N costs one matrix copy per visible tree, most frames are free.
+      const moved = (focusX - lastCullX) * (focusX - lastCullX) + (focusZ - lastCullZ) * (focusZ - lastCullZ) > 4;
+      if (!moved && time - lastCullTime < 2.5) return;
+      lastCullX = focusX; lastCullZ = focusZ; lastCullTime = time;
+      // Full-res pines/oaks within 20 m (2 m overlap so there is no visible gap), LOD instances from
+      // 20 m out to the fog-limited 54 m band.
+      const NEAR = 20, OVERLAP = 22, FAR = 54;
       if (pineMatrices) {
         if (pineLodInsts.length) {
-          for (const inst of pineInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, 0, NEAR);
+          for (const inst of pineInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, 0, OVERLAP);
           for (const inst of pineLodInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, NEAR, FAR);
         } else {
           for (const inst of pineInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, 0, 48);
@@ -340,13 +372,14 @@ export function addLandscape(scene: THREE.Scene) {
       }
       if (oakMatrices) {
         if (oakLodInsts.length) {
-          for (const inst of oakInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, 0, NEAR);
+          for (const inst of oakInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, 0, OVERLAP);
           for (const inst of oakLodInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, NEAR, FAR);
         } else {
           for (const inst of oakInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, 0, 48);
         }
       }
-      if (rockInst && rockMatrices) cullIntoBand(rockInst, rockMatrices, rockTotal, focusX, focusZ, 0, 22);
+      if (rockInst && rockMatrices) cullIntoBand(rockInst, rockMatrices, rockTotal, focusX, focusZ, 0, 30);
+      scene.userData.landscapeDebug={pine:pineInsts.map(i=>i.count),pineLod:pineLodInsts.map(i=>i.count),oak:oakInsts.map(i=>i.count),oakLod:oakLodInsts.map(i=>i.count),pineCount,oakCount,hasMatrices:!!pineMatrices,treeline:treelineVantage};
     }
   };
 }
