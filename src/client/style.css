@@ -88,3 +88,11 @@ dialog#guide{width:min(940px,94vw)}
    out over foliage/rocks) and stop them wrapping into each other on narrower desktop widths. */
 footer span{white-space:nowrap}
 footer{text-shadow:0 1px 3px #000c;background:linear-gradient(90deg,transparent 28%,#08101570 60%,#081015b8 100%)}
+
+/* F3 performance overlay: fixed, non-interactive, hidden until toggled. */
+#perf{position:fixed;top:64px;right:12px;z-index:60;margin:0;padding:8px 10px;pointer-events:none;background:#071012cc;border:1px solid #cba56840;border-radius:6px;color:#bfe6d0;font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre;letter-spacing:.3px;text-shadow:0 1px 2px #000;box-shadow:0 6px 18px #0008}
+@media(max-width:700px){#perf{top:58px;right:8px;font-size:10px}}
+
+/* Graphics quality select, appended to the Guide's existing .settings row in main.ts. */
+.settings select{background:#142126;color:#f2ead7;border:1px solid #69726b;padding:7px 8px;font:inherit}
+.settings select:focus-visible{outline:2px solid #d7bb76}

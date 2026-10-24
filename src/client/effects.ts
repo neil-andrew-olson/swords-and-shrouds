@@ -349,6 +349,8 @@ export class CombatEffects {
   private readonly dustPool: ParticlePool;
   private readonly trails: SwingTrailPool;
   private readonly decals: GroundDecals;
+  /** Per-tier spawn multiplier (low tier spawns fewer particles). */
+  private particleScale = 1;
 
   constructor(scene: THREE.Scene) {
     const sparkGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -378,6 +380,11 @@ export class CombatEffects {
     this.decals = new GroundDecals(scene);
   }
 
+  /** Quality tier hook: <1 reduces particle spawn counts. */
+  setQuality(particleScale: number) {
+    this.particleScale = Math.max(0.25, Math.min(1, particleScale));
+  }
+
   /** Third-person swing arc in world space; colour is per combat style. */
   trail(position: THREE.Vector3, yaw: number, reach: number, r: number, g: number, b: number) {
     this.trails.emit(position.x, position.z, yaw, Math.max(0.7, reach * 0.55), r, g, b);
@@ -385,14 +392,14 @@ export class CombatEffects {
 
   /** Long-lived ground splatter under a hit/death (blood red or corruption violet). */
   splatter(position: THREE.Vector3, corruption: boolean, amount = 1) {
-    const count = amount > 1.4 ? 3 : amount > 0.9 ? 2 : 1;
+    const count = Math.round((amount > 1.4 ? 3 : amount > 0.9 ? 2 : 1) * this.particleScale);
     for (let i = 0; i < count; i++) this.decals.emit(position.x, position.z, corruption, amount);
   }
 
   /** Metallic ring-off / blood spray / spectral wisps on every landed hit. */
   sparks(position: THREE.Vector3, kind: SparkKind = 'metal') {
     const {x, y, z} = position;
-    const count = kind === 'undead' ? 15 : 13;
+    const count = Math.max(2, Math.round((kind === 'undead' ? 15 : 13) * this.particleScale));
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 0.9 + Math.random() * (kind === 'metal' ? 4.2 : 3);
@@ -425,7 +432,7 @@ export class CombatEffects {
   /** Splash of gore on damage (corruption = violet ichor for plague creatures). */
   blood(position: THREE.Vector3, corruption: boolean, amount = 1) {
     const {x, y, z} = position;
-    const count = Math.min(20, Math.round(10 * amount));
+    const count = Math.max(2, Math.min(20, Math.round(10 * amount * this.particleScale)));
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 0.6 + Math.random() * 2.6;
@@ -453,7 +460,7 @@ export class CombatEffects {
   /** Ground dust kicked up by running actors or siege impacts. */
   dust(position: THREE.Vector3, intensity: number) {
     const {x, y, z} = position;
-    const count = Math.max(2, Math.min(9, Math.round(3 + intensity * 6)));
+    const count = Math.max(2, Math.min(9, Math.round((3 + intensity * 6) * this.particleScale)));
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const lift = 0.05 + Math.random() * 0.2;

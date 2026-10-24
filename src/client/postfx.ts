@@ -26,6 +26,8 @@ export interface PostFX {
   readonly enabled: boolean;
   /** Current composer pixel ratio (1.0..cap); exposed for QA/perf reporting. */
   readonly pixelRatio: number;
+  /** Quality tier hook: cap the composer pixel ratio and toggle bloom. */
+  setQuality(pixelRatioCap: number, bloomEnabled: boolean): void;
 }
 
 // Matches the renderer's own cap; keeps the composer from ballooning on 4K/retina.
@@ -59,8 +61,8 @@ export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
     composer.addPass(bloom);
     composer.addPass(output);
 
-    const cap = Math.min(renderer.getPixelRatio(), MAX_PIXEL_RATIO);
-    let pixelRatio = cap;
+    let baseCap = Math.min(renderer.getPixelRatio(), MAX_PIXEL_RATIO);
+    let pixelRatio = baseCap;
     let cssWidth = Math.max(1, size.x);
     let cssHeight = Math.max(1, size.y);
 
@@ -96,8 +98,8 @@ export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
             applySize();
             slowAccum = 0;
             sinceChange = 0;
-          } else if (healthyAccum > HEALTHY_WINDOW_MS && pixelRatio < cap && sinceChange > HEALTHY_WINDOW_MS) {
-            pixelRatio = Math.min(cap, pixelRatio + STEP_UP);
+          } else if (healthyAccum > HEALTHY_WINDOW_MS && pixelRatio < baseCap && sinceChange > HEALTHY_WINDOW_MS) {
+            pixelRatio = Math.min(baseCap, pixelRatio + STEP_UP);
             applySize();
             healthyAccum = 0;
             sinceChange = 0;
@@ -105,6 +107,14 @@ export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
         }
         lastFrame = now;
         composer.render();
+      },
+      setQuality: (pixelRatioCap: number, bloomEnabled: boolean) => {
+        baseCap = Math.max(MIN_PIXEL_RATIO, Math.min(renderer.getPixelRatio(), pixelRatioCap));
+        if (pixelRatio > baseCap) { pixelRatio = baseCap; applySize(); }
+        bloom.enabled = bloomEnabled;
+        slowAccum = 0;
+        healthyAccum = 0;
+        lastFrame = 0;
       },
       setSize: (width: number, height: number) => {
         // The scene camera is updated by the caller; just resize the intermediate targets.
@@ -125,6 +135,7 @@ export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
     return {
       enabled: false,
       pixelRatio: 1,
+      setQuality: () => undefined,
       render: () => renderer.render(scene, camera),
       setSize: () => undefined,
       dispose: () => undefined

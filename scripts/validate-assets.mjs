@@ -13,8 +13,12 @@ import zlib from 'node:zlib';
 import {fileURLToPath} from 'node:url';
 
 const GAME = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CUSTOM = path.join(GAME, 'public/assets/custom');
-const TEXTURES = path.join(GAME, 'public/assets/textures');
+// --root <dir> validates a staged mirror (expects <dir>/custom and <dir>/textures) before the
+// atomic install; defaults to the live public/assets tree.
+const rootArgIdx = process.argv.indexOf('--root');
+const ROOT = rootArgIdx >= 0 ? path.resolve(process.argv[rootArgIdx + 1]) : path.join(GAME, 'public/assets');
+const CUSTOM = path.join(ROOT, 'custom');
+const TEXTURES = path.join(ROOT, 'textures');
 
 const BUDGETS = {
   rapier: 3400, halberd: 3400, dane_axe: 1200,
@@ -71,6 +75,9 @@ function worldBounds(json) {
   const roots = new Set(json.nodes.map((_, i) => i));
   for (const n of json.nodes) for (const c of n.children || []) roots.delete(c);
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  // KHR_mesh_quantization stores POSITION as integers; accessor min/max are in those integer
+  // units, so normalised (componentType-scaled) accessors must be decoded before transforming.
+  const TYPE_MAX = {5120: 127, 5121: 255, 5122: 32767, 5123: 65535, 5125: 4294967295};
   const visit = (idx, parent) => {
     const n = json.nodes[idx];
     const W = mul(parent, nodeMatrix(n));
@@ -78,9 +85,17 @@ function worldBounds(json) {
       for (const p of json.meshes[n.mesh].primitives) {
         const acc = json.accessors[p.attributes.POSITION];
         if (!acc || !acc.min) continue;
-        for (const cx of [acc.min[0], acc.max[0]])
-          for (const cy of [acc.min[1], acc.max[1]])
-            for (const cz of [acc.min[2], acc.max[2]]) {
+        let mn = acc.min, mx = acc.max;
+        if (acc.normalized) {
+          const scale = TYPE_MAX[acc.componentType] || 1;
+          const signed = acc.componentType === 5120 || acc.componentType === 5122;
+          const decode = (v) => (signed ? Math.max(v / scale, -1) : v / scale);
+          mn = mn.map(decode);
+          mx = mx.map(decode);
+        }
+        for (const cx of [mn[0], mx[0]])
+          for (const cy of [mn[1], mx[1]])
+            for (const cz of [mn[2], mx[2]]) {
               const w = xform(W, [cx, cy, cz]);
               for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], w[k]); hi[k] = Math.max(hi[k], w[k]); }
             }

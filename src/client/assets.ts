@@ -14,24 +14,38 @@ async function fetchAsset(name:string):Promise<GLTF>{
  const bytes=header[0]===0x1f&&header[1]===0x8b?await new Response(new Blob([payload]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer():payload;
  return loader.parseAsync(bytes,`${import.meta.env.BASE_URL}assets/`);
 }
+/**
+ * Batch-3 progressive loading:
+ *  - `coreReady` resolves once the small join-critical set (weapons + shield + player/allied
+ *    characters) is on disk; main.ts enables Create/Join on this.
+ *  - `customReady` keeps its batch-1/2 semantics: it resolves once the core set is loaded so the
+ *    scene can start streaming world props; heavy enemy character models continue in the
+ *    background and simply appear when their actors first need them.
+ *  - `progress` is a live {loaded,total} counter for the loading UI.
+ */
 export class CharacterAssets {
-  custom = new Map<string,GLTF>();
-  customLoaded = false;
-  loadError:unknown;
-  customReady = Promise.all([
-    ...WEAPON_IDS,'shield','hero','ally','fallen','berserker',
-    'ranger','templar','survivor','skeleton-soldier','zombie'
-  ].map(async name => {
-    this.custom.set(name,await loadAsset('custom/'+name));
-  })).then(() => {
-    this.customLoaded=true;
-  }).catch(error => {
-    this.loadError=error;
-    console.error('Generated character assets failed to load',error);
-  });
-  create(a:Actor) {
-    if(!this.customLoaded) return;
-    const source=this.custom.get(characterAsset(a));
-    if(source) return customCharacter(source,a,this.custom);
-  }
+ custom = new Map<string,GLTF>();
+ customLoaded = false;
+ loadError:unknown;
+ progress={loaded:0,total:0};
+ coreReady:Promise<void>;
+ customReady:Promise<void>;
+ constructor(){
+  const core:string[]=[...WEAPON_IDS,'shield','hero','ally','survivor'];
+  // Heavier/rarer bodies stream in the background after joining.
+  const extras:string[]=['fallen','berserker','ranger','templar','skeleton-soldier','zombie'];
+  this.progress.total=core.length+extras.length;
+  const load=async(name:string)=>{
+   try{this.custom.set(name,await loadAsset('custom/'+name));}
+   catch(error){this.loadError=error;console.warn('Character asset failed',name,error);}
+   finally{this.progress.loaded++;}
+  };
+  this.coreReady=Promise.all(core.map(load)).then(()=>{this.customLoaded=true;});
+  this.customReady=this.coreReady.then(()=>Promise.all(extras.map(load))).then(()=>undefined);
+ }
+ create(a:Actor) {
+  if(!this.customLoaded) return;
+  const source=this.custom.get(characterAsset(a));
+  if(source) return customCharacter(source,a,this.custom);
+ }
 }

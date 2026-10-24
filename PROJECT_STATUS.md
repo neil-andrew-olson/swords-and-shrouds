@@ -4,76 +4,80 @@ Updated: 2026-10-24. Read this file first when continuing in a new chat.
 Do not require the previous conversation or import its full transcript.
 Inspect current code and git history before assuming this checkpoint is still current.
 
-## Latest completed batch — 2026-10B: readability, combat feel, arsenal depth, live/co-op QA
+## Latest completed batch — 2026-10C: performance & smoothness
 
 Implementation on branch `main` (exact SHA in the commit log; hosting pin updated to it).
-Contract: `docs/BATCH-2026-10B-SPEC.md`; results: `docs/BATCH-2026-10B-RESULTS.md`.
+Contract: `docs/BATCH-2026-10C-SPEC.md`; results: `docs/BATCH-2026-10C-RESULTS.md`.
+
+The user asked for the game to run smoother. The batch was measured before/after with new
+instrumentation (`window.__ssPerf()`), not vibes:
+
+| Metric (spawn third-person, high tier) | Before | After |
+| --- | --- | --- |
+| Draw calls | 88,544 | **301 (−99.7 %)** |
+| Triangles | 4,041,177 | **1,760,609 (−56.4 %)** |
+| Meshes / scene objects | 96,671 / 175,324 | **852 / 4,728** |
+| Geometries | 2,605 | **148** |
+| Network transfer to playable | 43.19 MB | **12.20 MB (−71.8 %)** |
+| Custom asset payload | 43.51 MB | **9.47 MB (−78.2 %)** |
+| Initial preload set | 12.20 MB | **4.71 MB (−61.4 %)** |
+| Nav → landing (local) | 5.17 s | **3.73 s** |
+| Low vs high tier draw calls | — | 238 vs 301 (−20.7 %) |
+
+SwiftShader rAF fps (relative proxy only) improved 0.58 → 1.35.
 
 ### Behaviour changed
 
-- **Readability**: the white ground fill-light pool is gone (player fill is now a shadowless
-  camera-facing directional light), exposure/moon/hemisphere were rebalanced with a dusk-blue
-  ambient floor, night-sky IBL/actor `envMapIntensity` were raised so distant actors read, the moon
-  and 340 stars were moved into the default camera framing, road/cobble were tinted to grey stone
-  and the ground detail albedo remapped cooler/darker/lower-contrast. The adaptive-quality composer
-  steps pixel ratio down when frame time exceeds ~28 ms and recovers when healthy.
-- **Combat feel**: per-weapon first-person motion (thrust/cleave/crush/sweep), pooled third-person
-  swing-trail ribbons, hit-stagger lean, brighter HDR impact sparks, and pooled long-lived ground
-  blood/corruption splatter decals. The two-handed support-hand pose was rewritten as an analytic
-  two-bone reach with finger aim and clavicle assist (wrist→shaft distance 0.64 m → 0.11–0.13 m).
-- **Arsenal**: 10 weapons now — `flamberge` (2H wavy greatsword) and `mace` (1H flanged mace) added
-  with measured canonical grips; nine castle racks cover every non-sword weapon exactly once.
-- **Environment**: 27 camp tents (3 per survivor camp) and 10 low ruined stone-wall segments along
-  the Castle 1 → 2 road and the other regions.
-- **Audio**: authoritative-state event stingers (capture/rescue/siege/victory/defeat), weapon-class
-  swing synthesis profiles, and a quiet plague-nest pad bed.
-- **Robustness fix**: the local authoritative server now tolerates two consecutive missed WebSocket
-  pongs (~30 s) instead of terminating on the first miss. QA proved the spurious `1006` reconnects
-  were renderer main-thread stalls (software rendering) delaying pongs past the old 15 s heartbeat;
-  the client reconnect path itself was correct. Cloudflare's Durable Object already used a 45 s
-  message-age timeout and was not changed.
-- **Assets**: four new GLBs (`flamberge`, `mace`, `camp_tent`, `stone_wall`) — see
-  `docs/ASSET-PIPELINE.md` and `public/assets/CREDITS.txt`.
+- **Assets**: every embedded texture slimmed (512/256 maps; oak 8.26 MB→184 KB, gatehouse
+  3.44 MB→47 KB, pine 1.35 MB→317 KB, characters/weapons ≤419 KB); all 58 GLBs flattened/joined/
+  quantised — primitives 2,402→78 (pine 2,070→4 with all 12,533 tris kept), skins/animations/
+  canonical grips verified unchanged. Only added extension is `KHR_mesh_quantization` (native
+  GLTFLoader support). Installed atomically.
+- **Rendering**: removed ~95 k duplicate tree-clone meshes; 540 instanced trees now render all
+  primitives; castle static geometry merged per material; courtyards/roads merged; mountains and
+  fires instanced; shadow casters trimmed; damage labels pooled; torch lights 13→10 at high tier;
+  adaptive pixel ratio kept. Quality tiers low/medium/high (DPR, bloom, shadows, lights, particles)
+  selectable in the Guide settings, persisted, with adaptive tier-down.
+- **Loading/UX**: live `Loading world… N/M` progress; join waits only on the new `coreReady` core
+  set and the rest streams in; F3 perf overlay (fps / calls / triangles / quality); audio contexts
+  suspend while hidden or in dialogs.
+- **Co-op smoothing**: non-local actors render interpolated across the last two authoritative
+  snapshots at ~120 ms delay (local actor unchanged, stale fallback).
+- **Landing fix**: legacy blue-cone fallback tower art is hidden from frame 0 and only revealed if
+  modern `castle_tower`/`fortress_keep` genuinely fail, so the first impression shows stone keeps.
 
 ### Checks actually run (final state)
 
 - `npm test` — **58/58 passing**, exactly 58 `test(...)` blocks (tests extended in place only).
-- `npx tsc --noEmit` — 0 errors.
-- `vite build` — success: `index-KD7Bp8Pr.js` 774.05 kB / 206.88 kB gzip. **Use the bundled Node
-  v24.21.0** (`C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe`);
-  the system Node 22.11 is below Vite 7's engine floor and hard-fails the build.
-- `scripts/validate-assets.mjs` — 62/62 checks; `tests/assets.test.ts` 5/5.
-- Headless local smoke — 16/16 gates, 10 weapon cards, 0 page/console/log errors, 0 bad responses,
-  0 asset 404s (`qa/final-batch2/`).
-- Live-URL mode against the deployed batch-1 site — 17/17, wss connected, 0 asset 404s.
-- 2-player co-op — 18/18: same room, both snapshots list both players, movement propagates, shared
-  weapon pickup syncs to the second player, both HUDs live, 0 page errors (`qa/coop/`).
-- QA harness now supports `--url <url>` (with `--expect-weapons` / `--expect-assets`) and `--coop`
-  (two Chrome profiles), plus full reconnect instrumentation (`scripts/smoke-browser.mjs`).
-- Not verified: real-GPU frame rate (SwiftShader runs 0.6–1.6 fps), swing-trail/stagger/decal
-  visuals, perceptual audio, physical controller, mobile HUD, full campaign playthrough.
+- `npx tsc --noEmit` — 0 errors. `vite build` with bundled Node 24 — success; final bundle
+  `index-BeMuJwuM.js` (793,960 B). **System Node 22.11 is below Vite 7's floor — always build with
+  the bundled Node v24.21.0** (`C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe`,
+  prepend its dir to PATH for hosting builds).
+- `scripts/validate-assets.mjs` — 62/62.
+- Headless Chrome production suite — fresh-build smoke 16/16, perf capture 23/23, co-op 18/18,
+  live-baseline 17/17; 0 page/console/log errors, 0 asset 404s, 10 weapon cards.
+- Not verified: hardware-GPU frame rate/thermals (SwiftShader only), perceptual smoothness of
+  co-op interpolation under real latency, low/medium/high visual comparison on a real GPU.
 
 ### Remaining defects / next concrete tasks
 
-1. Real-GPU visual/perf pass is the top remaining item: verify swing trails, stagger, decals, moon
-   framing and frame rate on hardware GPU (software rendering cannot catch the 0.22 s effects).
-2. First-person road is still fairly light grey; distant NPCs still dark; the tent reads as a flat
-   canopy rather than a pitched tent.
-3. Combat animation depth: dedicated polearm/hammer/cleave clips, hit reactions and custom-undead
-   dismemberment parity remain from earlier batches.
-4. Full campaign balance/formation playtest, controller test, mobile HUD, and live co-op verification
-   on the deployed bundle are outstanding.
-5. Pre-existing `gatehouse.glb.gz` uses `KHR_materials_pbrSpecularGlossiness` (GLTFLoader warning,
-   harmless); the Cloudflare-Insights analytics beacon fails cosmetically in headless Chrome.
+1. **Hardware-GPU verification** is the top item: real fps, frame pacing, thermals, and the
+   low/medium/high tier comparison on actual graphics hardware.
+2. Triangle count at high tier is ~1.76 M; LODs for instanced trees/ruins would reduce further.
+   Trees cull at 64 m (possible pop-in while sprinting); merged castle batches sacrifice per-castle
+   frustum culling (accepted trade).
+3. GLB props still clone individually (~30–40 legacy draws) — a safe merge pass is possible later.
+4. Co-op interpolation needs a live two-player playtest for feel; the state-sync suite is green.
+5. Full campaign balance/controller/mobile-HUD/perceptual-audio playtesting still outstanding from
+   earlier batches; pre-existing `KHR_materials_pbrSpecularGlossiness` loader warning remains on
+   `gatehouse.glb.gz`.
 
-## Previous completed batch — 2026-10: objectives 1–5 battlefield overhaul
+## Previous completed batches
 
-Commits `c5d3d99` (phase 1) and `6576c37` (phase 2): scanned road/cobblestone PBR textures and
-terrain-surfaces pass; post-processing bloom; PMREM environment and pooled torch lighting; regional
-fog/moonlight grading; instanced combat particles; ruins/props/courtyard weapon-rack framework;
-modular fortress keeps/towers for all nine castles; three new weapons (rapier, halberd, dane axe);
-procedural ambience and layered combat audio; docs `docs/BATCH-2026-10-SPEC.md` /
-`docs/BATCH-2026-10-RESULTS.md` / `docs/ASSET-PIPELINE.md`.
+- **2026-10B** readability/combat-feel/arsenal/co-op QA: commit `657cdde` (plus docs); live
+  deployment verified. Results `docs/BATCH-2026-10B-RESULTS.md`.
+- **2026-10** objectives 1–5 battlefield overhaul: commits `c5d3d99`, `6576c37`; results
+  `docs/BATCH-2026-10-RESULTS.md`; asset pipeline `docs/ASSET-PIPELINE.md`.
 
 ## Hosting / deployment
 
@@ -82,16 +86,12 @@ procedural ambience and layered combat audio; docs `docs/BATCH-2026-10-SPEC.md` 
   builds the client under `/games/swords-and-shrouds/`). Cloudflare Workers Builds deploys on push;
   `worker.js` imports the pinned `.game-build` simulation source, so the pin controls both client
   and authoritative gameplay.
-- Build locally with the bundled Node: prepend
-  `C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin` to PATH, then run
+- Build locally with the bundled Node (see above), then run
   `& $node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build` in the hosting repo.
-- Batch 2026-10B deployment: game commit `657cdde` pushed to `swords-and-shrouds` main; hosting
-  commit `a627cbb` pins it; Cloudflare Workers Builds deployed successfully.
-- Live verification (2026-10-24 01:20 America/Chicago): `/games/swords-and-shrouds/health` returns
-  `{"ok":true,"backend":"cloudflare-durable-objects"}`; the live HTML serves the new bundle
-  `index-DZ7lk_yj.js` (774 kB) and `index-DSURmr1-.css`, and the old bundle is gone;
-  `assets/custom/{flamberge,mace,camp_tent,stone_wall}.glb.gz` and `assets/CREDITS.txt` return
-  HTTP 200. 24 seconds from hosting push to new bundle live.
+- Batch 2026-10C deployment: game commit + hosting pin recorded in the commits; live verification
+  after push should confirm `/games/swords-and-shrouds/health`, the new JS bundle hash
+  (`index-BeMuJwuM.js` expected), the slimmed assets (~12.2 MB total transfer) and that
+  `/assets/custom/rapier.glb.gz` etc. are substantially smaller than before.
 
 ## Continuity procedure
 

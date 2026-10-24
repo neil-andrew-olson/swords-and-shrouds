@@ -33,6 +33,7 @@ export class Ambience{
  private prevX=0;
  private prevZ=0;
  private hasPrev=false;
+ private paused=false;
  constructor(private enabled:()=>boolean){}
  /** Called from a user gesture. Creates/begins the graph at most once. */
  unlock(){
@@ -40,8 +41,17 @@ export class Ambience{
   try{
    if(!this.context)this.context=new AudioContext();
    if(!this.started)this.build(this.context);
-   if(this.context.state==='suspended')void this.context.resume().catch(()=>{});
+   if(this.paused){if(this.context.state==='running')void this.context.suspend().catch(()=>{});}
+   else if(this.context.state==='suspended')void this.context.resume().catch(()=>{});
   }catch{}
+ }
+ /** Suspend the ambience beds while the tab is hidden or a dialog pauses the game (CPU win);
+  * resume on return. The Sound checkbox remains authoritative through enabled(). */
+ setPaused(paused:boolean){
+  if(this.paused===paused)return;
+  this.paused=paused;
+  const context=this.context;if(!context)return;
+  try{if(paused)void context.suspend().catch(()=>{});else if(this.enabled())void context.resume().catch(()=>{});}catch{}
  }
  private noiseBuffer(c:AudioContext,seconds:number,pink:boolean):AudioBuffer{
   const length=Math.ceil(c.sampleRate*seconds),buffer=c.createBuffer(1,length,c.sampleRate),data=buffer.getChannelData(0);
@@ -141,7 +151,7 @@ export class Ambience{
  }
  update(dt:number,game:Game|undefined,me:Actor|undefined){
   const c=this.context,master=this.master;
-  if(!c||!master||!this.started)return;
+  if(!c||!master||!this.started||this.paused)return;
   if(dt>.1)dt=.1;if(dt<=0)dt=.001;
   const now=c.currentTime,enabled=this.enabled(),playing=!!game&&game.status==='playing';
   const masterTarget=!enabled?0:!game?.72:playing?1:.28;

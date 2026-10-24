@@ -154,3 +154,115 @@ Additional deviations / notes for batch 2:
 10. **stone_wall scale** — the scanned wall is 9.34 m long × 1.35 m tall natively; it is scaled to
     the requested 6 m length (giving a waist-high ruined wall, 0.86 m), which keeps the scan's
     broken ends intact instead of cropping open cross-sections.
+
+## Batch 2026-10C — payload slimming (performance pass)
+
+The user asked for a smoother game, so all 58 shipped custom GLBs and the scanned terrain
+textures were re-encoded. **Nothing structural was removed**: rendered triangle counts, skins,
+animation clips, node/skeleton names, weapon grip orientation and the glTF contract are unchanged;
+embedded texture budgets, unused vertex attributes, material factor fallbacks and primitive
+merging (unskinned meshes only) changed.
+
+### Tools added
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/bake/audit-assets.mjs` | per-GLB gzip size / tris / prims / image dimensions, flags the client preload set |
+| `scripts/bake/audit-bytes.mjs` | byte breakdown (geometry attributes vs animation vs images) to target real payload drivers |
+| `scripts/bake/optimize-assets.mjs` | the slimming pass: attribute pruning, primitive merge (unskinned), quantisation (pine only), texture re-encode / map→factor replacement, gzip-9 → staged in `temp_sketchlab/optimized` |
+| `scripts/bake/optimize-textures.mjs` | scanned terrain textures → 512 (normals + ground detail), filenames unchanged |
+| `scripts/bake/verify-staged.mjs` | pre-install gate: re-parses every staged GLB, compares rendered triangles / animations / skins against the live file, decodes every image, re-checks canonical weapon grip bboxes |
+| `scripts/bake/install-optimized.mjs` | atomic install: copies every staged file to `<dest>.tmp` first, then a single rename loop swaps all of them (other owners never see a half-installed set) |
+| `scripts/validate-assets.mjs` | gained `--root <dir>` so the staged mirror can be validated before installation |
+
+### Policy
+
+| Asset class | Base colour | Normal | Metallic/roughness | Other edits |
+| --- | --- | --- | --- | --- |
+| 9 characters + 10 weapons + shield (preload set) | 512 JPEG q80–82 | weapons 256 JPEG (dropped on mace/dane_axe/shield), characters had none | replaced by factors (0.85/0.45 metal, 0.25/0.45 shield) | dropped 12 unused UV sets per character (TEXCOORD_1…12), dropped TANGENT/COLOR_0, animations/skins untouched |
+| `oak` | 512 JPEG + leaf atlas 512 PNG with alpha | — | factors | stripped unused specular/ior extension layers, dropped MR/emissive maps |
+| `pine` | 256 JPEG | — | factors | dropped TEXCOORD_1; **flattened the 2,070 leaf-card meshes / 3,713 nodes into 1 node with 4 primitives** (one per material), all 12,533 rendered triangles kept; tiling UVs wrapped into [0,1] and attributes quantised (`KHR_mesh_quantization`, natively supported by `GLTFLoader`; no decoder) |
+| `gatehouse` | 512 JPEG | 256 JPEG | factors (0/0.9) | raw-GLB pre-patch converts the legacy `KHR_materials_pbrSpecularGlossiness` material to plain metal/rough so the shipped file declares no unsupported extension |
+| ruins / keep / tower / props | 512 JPEG | 256 JPEG for ruins/stone, dropped on trees/tent/house | factors | MR/occlusion maps dropped, TANGENT dropped, compatible primitives merged |
+| `fortress_keep` | 5 × 512 JPEG trimsheets | — | factors | as above |
+
+### Draw-call flattening (the biggest scene win)
+
+`flatten()` bakes every static node transform into the vertex data, then a two-pass `join()` merges
+all meshes that share a material (the second pass runs after material factors are normalised, when
+previously-distinct materials become identical and dedup collapses them). Skinned meshes are never
+flattened. Across all 58 assets this took **2,402 primitives → 78** and **~5,900 nodes → 800**;
+`pine` alone went from 2,070 prims / 3,713 nodes to 4 prims / 4 nodes, which is what removes the
+"46 cloned pines × 2,070 meshes ≈ 95 k meshes" burst in the scene.
+
+| Asset | prims (before → after) | nodes (before → after) |
+| --- | --- | --- |
+| `pine` | 2,070 → 4 | 3,713 → 4 |
+| `castle_high_citadel` | 68 → 4 | 68 → 4 |
+| `gate` | 45 → 1 | 46 → 1 |
+| `castle_border_fortress` | 35 → 2 | 35 → 2 |
+| `beacon` | 21 → 3 | 22 → 3 |
+| `firepit` | 17 → 3 | 18 → 3 |
+| `castle_fallen_keep` | 17 → 3 | 17 → 3 |
+| `mill` | 16 → 2 | 17 → 2 |
+| `barrels` | 12 → 1 | 12 → 1 |
+| `fallen_keep` / `cart` / `high_citadel` | 12 / 11 / 11 → 1 | 13 / 11 / 12 → 1 |
+| `border_fortress` | 7 → 1 | 8 → 1 |
+| `brazier` / `grave` | 6 / 5 → 1 | 6 / 5 → 1 |
+| `fortress_keep` | 5 → 5 (five distinct trimsheet materials) | 1 → 1 |
+| `oak` / `rapier` | 2 → 2 (two distinct materials each) | 5 / 4 → 2 / 1 |
+| all other 38 assets | 1 → 1 | unchanged |
+
+The 13 tiny castle modules (`gate`, `beacon`, `firepit`, `mill`, `braves`…) grew a few KB each
+because merging transforms duplicates their shared vertices, but each dropped from 5–68 primitives
+to 1–4, which is the right trade at scene scale (their total growth is ~60 KB for ~230 fewer draw
+calls). `barrels` (12→1 prim) and `cart` (11→1) grew similarly for the same reason.
+
+### Results (gzip-9, live `public/assets`)
+
+* `public/assets/custom`: **43.51 MB → 9.47 MB** (−78 %), 58 files, every file ≤ 381 KB
+  (largest is now `hero`/`templar` at 419/417 KB inside the preload set, then `fortress_keep`
+  381 KB; was `oak` 8.26 MB).
+* client initial preload set (10 weapons + shield + 9 characters): **12.20 MB → 4.71 MB** (−61 %);
+  every character/weapon ≤ 450 KB (largest `hero` 419.2 KB, then `berserker` 418.7).
+* `oak` 8,258.5 → **184.2 KB**, `gatehouse` 3,444.3 → **47.2 KB**, `pine` 1,353.6 → **317.1 KB**,
+  `fortress_keep` 1,570.6 → **381.2 KB**, `camp_tent` 1,401.9 → **186.5 KB**.
+* streamed (post-join) payload: **31.3 MB → 4.76 MB**.
+* scanned textures: **6.36 MB → 1.49 MB** (`road_country_normal.png` 1,720→248 KB,
+  `cobblestone_normal.png` 1,083→256 KB, `texture_ground_mud_grass.png` 1,723→264 KB,
+  `texture_ground_cobblestone.png` 1,345→254 KB at 512², filenames/API unchanged; the two
+  base-colour JPEGs are untouched at 1024²).
+
+### Verification
+
+`node scripts/validate-assets.mjs` → 62/62 checks; staged-set gate (`verify-staged.mjs`) reported
+"STAGED SET OK (geometry/animations/skins/images intact)" — every rendered triangle count,
+animation count, skin count and embedded image matches or decodes; the flatten pass keeps total
+primitives at 78 and nodes at 800. Canonical weapon grip bboxes unchanged
+(rapier/halberd/dane_axe/flamberge/mace: 20 % handle below origin, blade +Y).
+
+Quantised assets are additionally loaded with the real three.js `GLTFLoader` (images stripped the
+same way `tests/equipment.test.ts` does) and their world bounding boxes compared with the
+pre-optimisation values — e.g. `pine` comes back at exactly the original
+`[-122.44,-1.28,-126.59]…[120.00,324.14,120.00]` with 12,533 rendered triangles and 4 drawables
+(was 2,070). `scripts/validate-assets.mjs` also learned to decode normalised quantised POSITION
+accessors, so its printed bounds remain meaningful (its AABB is conservative for rotated nodes —
+use the GLTFLoader measurement when exact bounds matter).
+
+`node --import tsx --test tests/assets.test.ts` 5/5 and `tests/equipment.test.ts` 5/5 pass on the
+installed set.
+
+### Visual trade-offs
+
+* Characters/weapons: 1024→512 base colour (characters) and normal maps at 256 — indistinguishable
+  at gameplay distance/night lighting; the equipment/rack UI still reads correctly.
+* `pine` is the most aggressive (256 px, quantised attributes, flattened to 4 prims); leaf cards
+  are soft up close but the tree silhouette and coverage are unchanged in the night scene.
+* The 13 tiny castle modules and `barrels`/`cart` grew a few KB (vertex duplication from merging
+  transforms) in exchange for 5–68× fewer draw calls each.
+* Ruins/keep keep a 256 px normal map for masonry relief; MR maps were replaced with roughness
+  factors (stone/wood are near-uniform rough at night anyway).
+* `gatehouse` had a legacy spec/gloss source; the conversion keeps its diffuse + normal maps, so
+  the stone look is preserved (verified with a Cycles render).
+* No decoders are required: the only extension added is `KHR_mesh_quantization`, read natively by
+  `GLTFLoader`; Draco/KTX2/meshopt remain forbidden/absent.

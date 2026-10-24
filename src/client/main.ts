@@ -7,6 +7,12 @@ import {WorldView} from './scene';
 import {readPad} from './controller';
 import {dist,clamp,BOUNDS,REGIONS} from '../shared/world';
 import type {Game,Actor} from '../shared/types';
+type PerfSnapshot={fps?:number;frameMs?:number;calls?:number;triangles?:number;points?:number;geometries?:number;textures?:number;programs?:number;quality?:string;tier?:string};
+type PerfHooks={__ssPerf?:()=>PerfSnapshot|undefined;__ssQuality?:(tier:'low'|'medium'|'high')=>void};
+const perfHooks=window as unknown as PerfHooks;
+/** Subset of CharacterAssets used for progressive loading; the new assets.ts fields are optional so
+ * this still works if the loading hook has not landed yet (falls back to customReady). */
+type AssetsLoading={progress?:{loaded:number;total:number};coreReady?:Promise<unknown>;customReady:Promise<unknown>;customLoaded:boolean;loadError?:unknown};
 const $=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;
 const canvas=$<HTMLCanvasElement>('world');let view:WorldView;try{view=new WorldView(canvas);}catch(e){$('connection').textContent='WebGL could not start. Try a browser with hardware acceleration enabled.';throw e;}
 let game:Game|undefined,id='',code='',host='',token='',ws:WebSocket|undefined,seq=0,yaw=0,pitch=-.13,first=localStorage.getItem('ss-camera')==='first',sensitivity=Number(localStorage.getItem('ss-sensitivity'))||1,invert=localStorage.getItem('ss-invert')==='true';
@@ -16,12 +22,62 @@ const keys=new Set<string>(),mouse={attack:false,block:false},touch={mx:0,forwar
 const guide=$<HTMLDialogElement>('guide'),result=$<HTMLDialogElement>('result');
 const me=()=>game?.actors.find(a=>a.id===id);
 const send=(value:unknown)=>{if(ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify(value));};
-let sound:AudioContext|undefined;function tone(freq=180){if(!$<HTMLInputElement>('sound').checked)return;try{sound??=new AudioContext();void sound.resume();const o=sound.createOscillator(),gain=sound.createGain();o.type='triangle';o.frequency.setValueAtTime(freq,sound.currentTime);o.frequency.exponentialRampToValueAtTime(freq*.5,sound.currentTime+.13);gain.gain.setValueAtTime(.04,sound.currentTime);gain.gain.exponentialRampToValueAtTime(.001,sound.currentTime+.15);o.connect(gain);gain.connect(sound.destination);o.start();o.stop(sound.currentTime+.16);}catch{}}
+let sound:AudioContext|undefined;function tone(freq=180){if(audioPaused||!$<HTMLInputElement>('sound').checked)return;try{sound??=new AudioContext();void sound.resume();const o=sound.createOscillator(),gain=sound.createGain();o.type='triangle';o.frequency.setValueAtTime(freq,sound.currentTime);o.frequency.exponentialRampToValueAtTime(freq*.5,sound.currentTime+.13);gain.gain.setValueAtTime(.04,sound.currentTime);gain.gain.exponentialRampToValueAtTime(.001,sound.currentTime+.15);o.connect(gain);gain.connect(sound.destination);o.start();o.stop(sound.currentTime+.16);}catch{}}
 const soundEnabled=()=>$<HTMLInputElement>('sound').checked;
 const combatAudio=new CombatAudio(soundEnabled);const ambience=new Ambience(soundEnabled);
 const unlockAudio=()=>{combatAudio.unlock();ambience.unlock();};
 window.addEventListener('pointerdown',unlockAudio);window.addEventListener('keydown',unlockAudio);
-$('sound').onchange=()=>{if(soundEnabled())unlockAudio();};
+// Audio CPU: suspend synthesis while the tab is hidden or a dialog pauses the game, resume on return.
+// The Sound checkbox stays authoritative (unchecking it also suspends the contexts).
+let audioPaused=false;
+function updateAudioPause(){
+ const paused=!soundEnabled()||document.hidden||guide.open||result.open;
+ if(paused===audioPaused)return;
+ audioPaused=paused;
+ combatAudio.setPaused(paused);ambience.setPaused(paused);
+ const context=sound;
+ if(context){try{if(paused)void context.suspend().catch(()=>{});else void context.resume().catch(()=>{});}catch{}}
+}
+$('sound').onchange=()=>{if(soundEnabled())unlockAudio();updateAudioPause();};
+
+// ---- F3 performance overlay (DOM-only, pointer-events:none, persisted in localStorage 'ss-perf') ----
+const perfBox=document.createElement('pre');
+perfBox.id='perf';perfBox.hidden=localStorage.getItem('ss-perf')!=='1';perfBox.setAttribute('aria-hidden','true');
+document.body.append(perfBox);
+let lastPerfPaint=0;
+function togglePerf(){perfBox.hidden=!perfBox.hidden;localStorage.setItem('ss-perf',perfBox.hidden?'0':'1');lastPerfPaint=0;}
+const shortCount=(n:number|undefined)=>n===undefined?'?':n>=10000?(n/1000).toFixed(0)+'k':n>=1000?(n/1000).toFixed(1)+'k':String(n);
+function paintPerf(now:number){
+ if(perfBox.hidden||now-lastPerfPaint<250)return;
+ lastPerfPaint=now;
+ const perf=perfHooks.__ssPerf?.();
+ if(!perf){perfBox.textContent='PERF · waiting for renderer';return;}
+ const fps=perf.fps??(perf.frameMs&&perf.frameMs>0?1000/perf.frameMs:0),ms=perf.frameMs??(fps>0?1000/fps:0);
+ perfBox.textContent=`PERF ${fps.toFixed(0)} fps · ${ms.toFixed(1)} ms\nCALLS ${perf.calls??'?'} · TRIS ${shortCount(perf.triangles)}\nQUALITY ${String(perf.quality??perf.tier??localStorage.getItem('ss-quality')??'high').toUpperCase()}`;
+}
+window.addEventListener('keydown',e=>{
+ if(e.code!=='F3'||e.repeat)return;
+ const target=e.target;
+ if(target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement)return;
+ e.preventDefault();togglePerf();
+});
+
+// ---- Graphics quality selector, created into the Guide's settings row (no index.html edit) ----
+const QUALITY_TIERS=['low','medium','high'] as const;type QualityTier=(typeof QUALITY_TIERS)[number];
+const storedQuality=localStorage.getItem('ss-quality');
+let qualityTier:QualityTier=QUALITY_TIERS.find(t=>t===storedQuality)??'high';
+const qualitySelect=document.createElement('select');
+qualitySelect.id='qualityChoice';qualitySelect.setAttribute('aria-label','Graphics quality');
+for(const tier of QUALITY_TIERS){const option=document.createElement('option');option.value=tier;option.textContent=tier[0].toUpperCase()+tier.slice(1);qualitySelect.append(option);}
+qualitySelect.value=qualityTier;
+qualitySelect.onchange=()=>{
+ qualityTier=qualitySelect.value as QualityTier;
+ localStorage.setItem('ss-quality',qualityTier);
+ try{perfHooks.__ssQuality?.(qualityTier);}catch{}
+};
+const qualityLabel=document.createElement('label');
+qualityLabel.append('Graphics quality ',qualitySelect);
+document.querySelector('#guide .settings')?.append(qualityLabel);
 function toast(text:string){$('toast').textContent=text;toastUntil=performance.now()+5000;}
 function cmd(action:string){send({type:'command',action});}
 function cameraToggle(){first=!first;localStorage.setItem('ss-camera',first?'first':'third');$('cameraBtn').textContent=`${first?'First':'Third'} person · V / Y`;}
@@ -60,15 +116,43 @@ for(const location of ['landing','armory']){
     if(game) cmd('character:'+selectedCharacter);
   };
 }
+// ---- Progressive world loading: show real asset counts, gate joining on the core set only ----
+const defaultConnectionText=$('connection').textContent;
+let loadingTimer:number|undefined;
+function showWorldLoading(assets:AssetsLoading){
+ const paint=()=>{
+  const loaded=assets.progress?.loaded??0,total=assets.progress?.total??0;
+  $('connection').textContent=total>0?`Loading world… ${loaded}/${total}`:`Loading world… ${loaded>0?`${loaded} assets`:'starting engines'}`;
+ };
+ paint();
+ if(loadingTimer!==undefined)clearInterval(loadingTimer);
+ loadingTimer=window.setInterval(paint,120);
+}
+function hideWorldLoading(){if(loadingTimer!==undefined){clearInterval(loadingTimer);loadingTimer=undefined;}}
+let worldCorePromise:Promise<boolean>|undefined;
+function worldCore(){return worldCorePromise??=awaitWorldCore();}
+async function awaitWorldCore():Promise<boolean>{
+ const assets=view.characterAssets as unknown as AssetsLoading;
+ if(assets.customLoaded)return true;
+ $<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=true;
+ showWorldLoading(assets);
+ let failed=false;
+ try{await (assets.coreReady??assets.customReady);}catch{failed=true;}
+ finally{hideWorldLoading();}
+ if(failed||assets.loadError)return false;
+ // coreReady only covers the join-critical set; if the hook is not present yet fall back to the
+ // old full-preload contract (customLoaded) so behaviour is unchanged.
+ if(!assets.coreReady&&!assets.customLoaded)return false;
+ return true;
+}
+void worldCore().then(ok=>{
+ if(!ok){$('connection').textContent='Character files failed to load. Refresh to retry; check the browser console for the filename.';return;}
+ if(!ws&&!everJoined){$<HTMLButtonElement>('create').disabled=false;$<HTMLButtonElement>('join').disabled=false;$('connection').textContent=defaultConnectionText;}
+});
 async function connect(mode:'create'|'join'|'resume'){
- if(!view.characterAssets.customLoaded){
-   $('connection').textContent='Loading your generated characters...';
-   $<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=true;
-   await view.characterAssets.customReady;
-   if(!view.characterAssets.customLoaded){
-     $('connection').textContent='Character files failed to load. Refresh to retry; check the browser console for the filename.';
-     return;
-   }
+ if(!await worldCore()){
+   $('connection').textContent='Character files failed to load. Refresh to retry; check the browser console for the filename.';
+   return;
  }
 
  if(ws&&ws.readyState<2)return;stopped=false;$('connection').textContent=mode==='resume'?'Reconnecting…':'Connecting to the kingdom…';$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=true;
@@ -86,7 +170,7 @@ $('create').onclick=()=>connect('create');$('join').onclick=()=>connect('join');
 $('invite').onclick=async()=>{const url=new URL(location.href);url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);toast('Invitation link copied. Send it to your fellowship.');}catch{toast(`Room code: ${code}. Friends can enter it on this site.`);}};
 for(const id of WEAPON_IDS){const w=WEAPONS[id],b=document.createElement('button');b.id='equip-'+id;b.dataset.command='equip:'+id;b.innerHTML=`<strong>${w.name}</strong><span>${w.style}</span><span>${w.damage} damage · ${w.reach} m reach · ${w.stamina} stamina · ${w.cooldown}s recovery</span><small>Join a campaign to equip</small>`;b.disabled=true;$('weaponCards').append(b);}
 document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach(b=>b.onclick=()=>cmd(b.dataset.command!));
-window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement||guide.open||result.open)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='KeyR')cmd('nextWeapon');if(e.code==='KeyI')$('armoryBtn').click();if(e.code==='KeyV')cameraToggle();if(e.code==='KeyH')cmd('heal');if(e.code==='KeyQ')cmd('sweep');if(e.code==='Digit1')cmd('follow');if(e.code==='Digit2')cmd('hold');if(e.code==='Digit3')cmd('attack');if(e.code==='KeyG')openGuide();if(e.code==='KeyB'){$('manageCastle').click();}});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
+window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement||guide.open||result.open)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='KeyR')cmd('nextWeapon');if(e.code==='KeyI')$('armoryBtn').click();if(e.code==='KeyV')cameraToggle();if(e.code==='KeyH')cmd('heal');if(e.code==='KeyQ')cmd('sweep');if(e.code==='Digit1')cmd('follow');if(e.code==='Digit2')cmd('hold');if(e.code==='Digit3')cmd('attack');if(e.code==='KeyG')openGuide();if(e.code==='KeyB'){$('manageCastle').click();}});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release();updateAudioPause();});
 canvas.addEventListener('click',()=>{if(game&&!guide.open&&!result.open&&matchMedia('(pointer:fine)').matches)canvas.requestPointerLock?.();});canvas.addEventListener('contextmenu',e=>e.preventDefault());canvas.addEventListener('mousedown',e=>{if(document.pointerLockElement===canvas){if(e.button===0){mouse.attack=true;}if(e.button===2)mouse.block=true;}});window.addEventListener('mouseup',e=>{if(e.button===0)mouse.attack=false;if(e.button===2)mouse.block=false;});document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas)release();});document.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas){yaw+=e.movementX*.0025*sensitivity;pitch=clamp(pitch-e.movementY*.0025*sensitivity*(invert?-1:1),-1.05,1.05);}});
 const stick=$('stick');let stickId=-1;function stickMove(e:PointerEvent){const rect=stick.getBoundingClientRect();let x=(e.clientX-rect.left-rect.width/2)/35,z=(e.clientY-rect.top-rect.height/2)/35;const len=Math.max(1,Math.hypot(x,z));touch.mx=x/len;touch.forward=-z/len;(stick.firstElementChild as HTMLElement).style.transform=`translate(${touch.mx*25}px,${-touch.forward*25}px)`;}
 stick.onpointerdown=e=>{stickId=e.pointerId;stick.setPointerCapture(stickId);stickMove(e);};stick.onpointermove=e=>{if(e.pointerId===stickId)stickMove(e);};const stopStick=()=>{stickId=-1;touch.mx=touch.forward=0;(stick.firstElementChild as HTMLElement).style.transform='';};stick.onpointerup=stopStick;stick.onpointercancel=stopStick;
@@ -167,7 +251,7 @@ function frame(now:number){const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame
  let strafe=touch.mx+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0),forward=touch.forward+(keys.has('KeyW')?1:0)-(keys.has('KeyS')?1:0),attack=mouse.attack||touch.attack,block=mouse.block||touch.block,interact=keys.has('KeyE')||touch.interact;
  if(pad){const d=readPad(pad,padPrev);if(!game||guide.open||result.open)menuGamepad(pad);else if(!document.hidden){strafe+=d.mx;forward+=d.forward;yaw+=d.lookX*dt*2.6*sensitivity;pitch=clamp(pitch-d.lookY*dt*1.8*sensitivity*(invert?-1:1),-1.05,1.05);attack ||=d.attack;block ||=d.block;interact ||=d.interact;if(pad.buttons.some(b=>b.pressed))combatAudio.unlock();if(d.toggle)cameraToggle();if(d.heal)cmd('heal');if(d.sweep)cmd('sweep');if(d.menu)openGuide();for(const action of d.commands)cmd(action);}padPrev=d.previous;}
  const p=me();if(game&&p){if(now-lastSend>=50){const inactive=guide.open||result.open||document.hidden;send({type:'input',input:{mx:inactive?0:Math.cos(yaw)*strafe+Math.sin(yaw)*forward,mz:inactive?0:Math.sin(yaw)*strafe-Math.cos(yaw)*forward,yaw,attack:!inactive&&attack,block:!inactive&&block,interact:!inactive&&interact,seq:seq++}});lastSend=now;}if(now-lastHud>100){updateHud(p);lastHud=now;}}
- if(now>toastUntil)$('toast').textContent='';ambience.update(dt,game,p);view.draw(game,p,yaw,pitch,first,dt,now/1000);requestAnimationFrame(frame);
+ if(now>toastUntil)$('toast').textContent='';updateAudioPause();paintPerf(now);ambience.update(dt,game,p);view.draw(game,p,yaw,pitch,first,dt,now/1000);requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 try{const s=JSON.parse(sessionStorage.getItem('ss-session')||'null');if(s?.code&&s?.token){code=s.code;token=s.token;connect('resume');}}catch{}

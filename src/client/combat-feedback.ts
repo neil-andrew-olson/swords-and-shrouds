@@ -52,6 +52,7 @@ export class CombatAudio{
  private voices=0;
  private lastPlay=0;
  private eventVoices=0;
+ private paused=false;
  constructor(private enabled:()=>boolean){}
  unlock(){
   if(!this.enabled())return;
@@ -59,8 +60,17 @@ export class CombatAudio{
    if(!this.context)this.context=new AudioContext();
    const context=this.context;
    if(!this.master)this.build(context);
-   if(context.state==='suspended')void context.resume().catch(()=>{});
+   if(this.paused){if(context.state==='running')void context.suspend().catch(()=>{});}
+   else if(context.state==='suspended')void context.resume().catch(()=>{});
   }catch{}
+ }
+ /** Suspend synthesised audio while the tab is hidden or a dialog pauses the game (CPU win);
+  * resume on return. The Sound checkbox remains authoritative through enabled(). */
+ setPaused(paused:boolean){
+  if(this.paused===paused)return;
+  this.paused=paused;
+  const context=this.context;if(!context)return;
+  try{if(paused)void context.suspend().catch(()=>{});else if(this.enabled())void context.resume().catch(()=>{});}catch{}
  }
  private build(c:AudioContext){
   const master=c.createGain();master.gain.value=.9;master.connect(c.destination);this.master=master;
@@ -126,7 +136,7 @@ export class CombatAudio{
   * so a transition stinger is never dropped because of a burst of impact cues. */
  playEvent(kind:EventCue){
   const c=this.context,out=this.master;
-  if(!c||!out||c.state!=='running'||!this.enabled())return;
+  if(!c||!out||this.paused||c.state!=='running'||!this.enabled())return;
   if(this.eventVoices>=3)return;
   this.eventVoices++;
   const now=c.currentTime,voice=c.createGain();voice.gain.value=.9;
@@ -179,7 +189,7 @@ export class CombatAudio{
  }
  play(cue:CombatCue){
   const c=this.context,out=this.master;
-  if(!c||!out||c.state!=='running'||!this.enabled())return;
+  if(!c||!out||this.paused||c.state!=='running'||!this.enabled())return;
   const now=c.currentTime,volume=clamp01(cue.volume);
   if(volume<=.001)return;
   if(this.voices>=MAX_VOICES){if(now-this.lastPlay<1.5)return;this.voices=0;}

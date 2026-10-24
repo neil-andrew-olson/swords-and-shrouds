@@ -16,11 +16,17 @@
  *   node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ \
  *        --out qa/live --expect-weapons 10                              # deployed site, no build/server
  *   node scripts/smoke-browser.mjs --coop --skip-build --out qa/coop    # 2-player co-op (local server)
+ *   node scripts/smoke-browser.mjs --perf --skip-build --out qa/perf    # perf capture (__ssPerf hook)
  *
  * Options:
  *   --out <dir>        Screenshot output dir, relative to the game repo (default qa/baseline)
  *   --url <url>        Drive an already-deployed site: skips build + local server entirely
  *   --coop             Two independent browser contexts: A creates a room, B joins and plays
+ *   --perf             Capture performance evidence (renderer.info via window.__ssPerf, frame
+ *                      percentiles, load timings, request bytes, quality tiers, loading progress).
+ *                      Degrades to fps/load-only when the __ssPerf hook is absent (e.g. live site).
+ *   --perf-settle <ms> Settle time after joining before the third-person capture (default 4000)
+ *   --perf-samples <ms> Frame-time sampling window per capture point (default 4000)
  *   --expect-weapons <n> Gate `#weaponCards` to exactly n (default: report only)
  *   --expect-assets <list> Comma-separated asset paths (relative to assets/) to fetch and require 200
  *   --skip-build       Reuse the existing dist/client instead of running vite build
@@ -119,6 +125,76 @@ const WS_INSTRUMENT = `(()=>{
   window.WebSocket=QAWebSocket;
   document.addEventListener('visibilitychange',()=>state.visibility.push({state:document.visibilityState,at:Date.now()}));
   window.addEventListener('pagehide',()=>state.visibility.push({state:'pagehide',at:Date.now()}));
+  // Frame-gap tracker (loading-smoothness + perf): longest main-thread gap since page start.
+  if(!window.__qaRaf){
+    const raf={startAt:performance.now(),lastAt:performance.now(),count:0,maxGapMs:0,longestAtMs:0};
+    window.__qaRaf=raf;
+    (function tick(){
+      const now=performance.now();
+      const gap=now-raf.lastAt;
+      if(gap>raf.maxGapMs){raf.maxGapMs=gap;raf.longestAtMs=now-raf.startAt;}
+      raf.lastAt=now;raf.count++;
+      requestAnimationFrame(tick);
+    })();
+  }
+  // Loading-progress recorder: captures every #connection text transition + join-enable moment.
+  // Mutations + a cheap 80 ms poll fallback, because at document-start documentElement may not
+  // exist yet and very fast local loads can otherwise be missed.
+  if(!window.__qaLoading){
+    const load={events:[],joinEnabledAtMs:null,lastText:null,sawDisabled:false,startAt:performance.now()};
+    window.__qaLoading=load;
+    const record=()=>{
+      try{
+        const c=document.getElementById('connection');
+        const b=document.getElementById('create');
+        if(c){
+          const text=(c.textContent||'').replace(/\\s+/g,' ').trim().slice(0,120);
+          if(text!==load.lastText){load.lastText=text;load.events.push({atMs:Math.round(performance.now()-load.startAt),text});if(load.events.length>200)load.events.shift();}
+        }
+        if(b){
+          // Only count "join enabled" after we have seen it disabled (ignore the pre-JS default).
+          if(b.disabled){load.sawDisabled=true;}
+          else if(load.sawDisabled&&load.joinEnabledAtMs===null){load.joinEnabledAtMs=Math.round(performance.now()-load.startAt);}
+        }
+      }catch(e){}
+    };
+    const observe=()=>{
+      try{
+        const target=document.documentElement||document;
+        if(!target)return;
+        const obs=new MutationObserver(record);
+        obs.observe(target,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['disabled']});
+      }catch(e){}
+    };
+    observe();
+    document.addEventListener('DOMContentLoaded',()=>{observe();record();},{once:true});
+    const poll=setInterval(record,80);
+    const stopPoll=setInterval(()=>{
+      try{const h=document.getElementById('hud');if(h&&!h.hidden){clearInterval(poll);clearInterval(stopPoll);}}catch(e){}
+    },500);
+    record();
+  }
+  // QA-only slow-load simulation: delay /assets/*.glb.gz fetches when localStorage
+  // 'ss-qa-load-delay' is set (used to make the progressive-loading counter observable on a fast
+  // localhost load; production code and network are untouched).
+  if(!window.__qaFetchWrapped){
+    const origFetch=window.fetch.bind(window);
+    let delayed=0;
+    window.fetch=(...args)=>{
+      try{
+        const input=args[0];
+        const url=typeof input==='string'?input:(input&&input.url)||'';
+        const mode=window.localStorage.getItem('ss-qa-load-delay');
+        if(mode&&/\\/assets\\//.test(url)&&/\\.glb\\.gz($|\\?)/.test(url)){
+          const wait=Number(mode)||0;
+          const slot=delayed++*250;
+          return new Promise(resolve=>setTimeout(resolve,wait+slot)).then(()=>origFetch(...args));
+        }
+      }catch(e){}
+      return origFetch(...args);
+    };
+    window.__qaFetchWrapped=true;
+  }
 })();`;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const round = n => Math.round(n * 100) / 100;
@@ -142,6 +218,9 @@ function parseArgs(argv) {
     node: null,
     url: null,
     coop: false,
+    perf: false,
+    perfSettle: 4000,
+    perfSampleMs: 4000,
     expectWeapons: null,
     expectAssets: [],
   };
@@ -154,6 +233,9 @@ function parseArgs(argv) {
     else if (a === '--node') opts.node = argv[++i];
     else if (a === '--url') opts.url = argv[++i];
     else if (a === '--coop') opts.coop = true;
+    else if (a === '--perf') opts.perf = true;
+    else if (a === '--perf-settle') opts.perfSettle = Number(argv[++i]) || opts.perfSettle;
+    else if (a === '--perf-samples') opts.perfSampleMs = Number(argv[++i]) || opts.perfSampleMs;
     else if (a === '--expect-weapons') opts.expectWeapons = Number(argv[++i]);
     else if (a === '--expect-assets') opts.expectAssets = String(argv[++i] || '').split(',').map(s => s.trim()).filter(Boolean);
     else if (a === '--timeout') opts.hudTimeout = Number(argv[++i]) || opts.hudTimeout;
@@ -166,6 +248,7 @@ function parseArgs(argv) {
   }
   if (!opts.out) throw new Error('--out requires a directory');
   if (opts.coop && opts.url) throw new Error('--coop and --url are mutually exclusive');
+  if (opts.coop && opts.perf) throw new Error('--perf captures a single page; do not combine with --coop');
   if (opts.expectWeapons !== null && (!Number.isInteger(opts.expectWeapons) || opts.expectWeapons < 1)) {
     throw new Error('--expect-weapons requires a positive integer');
   }
@@ -758,6 +841,9 @@ function attachPage(page, {internalPrefix, assetPrefix, label, notesSink}) {
     failedRequests: [],
     assetRequests: [],
     internalRequests: 0,
+    responseBytes: 0,
+    finishedRequests: 0,
+    assetBytes: 0,
     navigations: 0,
     notes: notesSink || [],
   };
@@ -769,8 +855,12 @@ function attachPage(page, {internalPrefix, assetPrefix, label, notesSink}) {
   const internal = url => typeof url === 'string' && url.startsWith(internalPrefix);
   const isAsset = url => typeof url === 'string' && url.startsWith(assetPrefix);
   const requestUrls = new Map();
+  const requestMeta = new Map();
   page.on('Network.requestWillBeSent', params => {
-    if (params.request?.url) requestUrls.set(params.requestId, params.request.url);
+    if (params.request?.url) {
+      requestUrls.set(params.requestId, params.request.url);
+      requestMeta.set(params.requestId, {url: params.request.url, type: params.type || ''});
+    }
   });
   sink.navigations = 0;
   sink.navigationLog = [];
@@ -829,6 +919,14 @@ function attachPage(page, {internalPrefix, assetPrefix, label, notesSink}) {
     const url = requestUrls.get(params.requestId);
     if (internal(url)) sink.failedRequests.push({...entry, url, at: Date.now()});
   });
+  page.on('Network.loadingFinished', params => {
+    const meta = requestMeta.get(params.requestId);
+    if (!meta || !internal(meta.url)) return;
+    const bytes = params.encodedDataLength || 0;
+    sink.responseBytes += bytes;
+    sink.finishedRequests++;
+    if (isAsset(meta.url)) sink.assetBytes += bytes;
+  });
   return sink;
 }
 
@@ -882,9 +980,19 @@ async function navigateToLanding(page, url, {timeoutMs = 60000, label = 'page'} 
   );
 }
 
+/** Wait until a join/create button is actually enabled (batch-3 gates joining on core loading). */
+async function waitForJoinEnabled(page, selector, timeoutMs = 150000) {
+  await waitFor(
+    page,
+    `(()=>{const b=document.querySelector(${JSON.stringify(selector)});return !!b && b.disabled===false;})()`,
+    {timeoutMs, label: `${selector} enabled`},
+  );
+}
+
 /** Landing -> name -> "Begin a campaign" -> HUD + first authoritative snapshot. */
 async function createCampaign(page, {name = 'QA Knight', hudTimeout = 150000} = {}) {
   await typeInto(page, '#name', name);
+  await waitForJoinEnabled(page, '#create', hudTimeout);
   await clickSelector(page, '#create');
   await waitForHud(page, hudTimeout);
   await waitForGameState(page, 60000);
@@ -894,6 +1002,7 @@ async function createCampaign(page, {name = 'QA Knight', hudTimeout = 150000} = 
 async function joinCampaign(page, {name = 'QA Knight', code, hudTimeout = 150000} = {}) {
   await typeInto(page, '#name', name);
   await typeInto(page, '#code', String(code));
+  await waitForJoinEnabled(page, '#join', hudTimeout);
   await clickSelector(page, '#join');
   await waitForHud(page, hudTimeout);
   await waitForGameState(page, 60000);
@@ -1252,6 +1361,203 @@ async function coopFlow({opts, report, check, logDir, tempRoot, baseUrl, healthS
   check('coop: both page screenshots saved', required.every(s => shotNames.includes(s)), shotNames.join(', '));
 }
 
+/* ------------------------------------------------------------ perf helpers */
+
+/** Percentile stats for the rAF frame deltas collected in the page. */
+function frameStats(deltas, wallMs) {
+  if (!Array.isArray(deltas) || !deltas.length) return {frames: 0, wallMs, error: 'no frames sampled'};
+  const sorted = [...deltas].sort((a, b) => a - b);
+  const pick = p => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+  const mean = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+  return {
+    frames: deltas.length,
+    wallMs,
+    meanFrameMs: +mean.toFixed(1),
+    p50FrameMs: +pick(0.5).toFixed(1),
+    p95FrameMs: +pick(0.95).toFixed(1),
+    minFrameMs: +sorted[0].toFixed(1),
+    maxFrameMs: +sorted[sorted.length - 1].toFixed(1),
+    fps: +(1000 / mean).toFixed(2),
+  };
+}
+
+/** Sample rAF deltas in the page for `ms` wall time (first frame is not counted as a delta). */
+async function captureFrameStats(page, ms = 4000) {
+  const deltas = await page.evaluate(
+    `new Promise(res=>{const d=[];let t0=null,last=null;function f(now){if(last===null){last=now;t0=now;requestAnimationFrame(f);return;}d.push(now-last);last=now;if(now-t0<${ms})requestAnimationFrame(f);else res(d);}requestAnimationFrame(f);})`,
+    {awaitPromise: true, timeoutMs: ms + 60000},
+  );
+  return frameStats(deltas, ms);
+}
+
+/** window.__ssPerf() snapshot (world-scene hook) or null when the hook is absent. */
+async function capturePerfSnapshot(page) {
+  return page.evaluate(
+    `(()=>{if(typeof window.__ssPerf!=='function')return null;try{return JSON.parse(JSON.stringify(window.__ssPerf()));}catch(e){return {error:String((e&&e.message)||e)};}})()`,
+    {timeoutMs: 15000},
+  );
+}
+
+async function perfHookInfo(page) {
+  return page.evaluate(
+    `(()=>({hasPerf:typeof window.__ssPerf==='function',hasQuality:typeof window.__ssQuality==='function',quality:(()=>{try{if(typeof window.__ssQuality!=='function')return null;const q=window.__ssQuality();return q===undefined?null:q;}catch(e){return 'error:'+((e&&e.message)||e);}})()}))()`,
+    {timeoutMs: 15000},
+  );
+}
+
+async function readQuality(page) {
+  return page.evaluate(
+    `(()=>{if(typeof window.__ssQuality!=='function')return null;try{const q=window.__ssQuality();return q===undefined?null:q;}catch(e){return 'error:'+((e&&e.message)||e);}})()`,
+    {timeoutMs: 15000},
+  );
+}
+
+/** Page-side performance timings + resource byte totals. */
+async function capturePageTimings(page) {
+  return page.evaluate(
+    `(()=>{
+      const nav=performance.getEntriesByType('navigation')[0]||null;
+      const res=performance.getEntriesByType('resource')||[];
+      const assetRes=res.filter(r=>/\\/assets\\//.test(r.name));
+      const sum=list=>list.reduce((a,r)=>a+(r.transferSize||r.encodedBodySize||0),0);
+      return {
+        navigation:nav?{responseStart:Math.round(nav.responseStart),domContentLoaded:Math.round(nav.domContentLoadedEventEnd),loadEvent:Math.round(nav.loadEventEnd),transferSize:nav.transferSize||0,type:nav.type}:null,
+        resources:{count:res.length,assetCount:assetRes.length,transferBytes:sum(res),assetTransferBytes:sum(assetRes)},
+        timeOrigin:Math.round(performance.timeOrigin)
+      };
+    })()`,
+    {timeoutMs: 15000},
+  );
+}
+
+/** Find the dynamically-created graphics-quality select (options low/medium/high). */
+async function findQualitySelect(page) {
+  return page.evaluate(
+    `(()=>{
+      const sels=[...document.querySelectorAll('select')];
+      const s=sels.find(x=>[...x.options].some(o=>o.value==='low')&&[...x.options].some(o=>o.value==='medium')&&[...x.options].some(o=>o.value==='high'));
+      if(!s)return null;
+      return {id:s.id||null,value:s.value,options:[...s.options].map(o=>({value:o.value,label:(o.textContent||'').trim()}))};
+    })()`,
+    {timeoutMs: 15000},
+  );
+}
+
+async function setQualityViaSelect(page, tier) {
+  return page.evaluate(
+    `(()=>{
+      const s=[...document.querySelectorAll('select')].find(x=>[...x.options].some(o=>o.value==='low')&&[...x.options].some(o=>o.value==='high'));
+      if(!s)return {ok:false,reason:'quality select not found'};
+      s.value=${JSON.stringify(tier)};
+      s.dispatchEvent(new Event('change',{bubbles:true}));
+      return {ok:true,value:s.value};
+    })()`,
+    {timeoutMs: 15000},
+  );
+}
+
+/** Wait for join enable, then read the observer-recorded loading progress history. */
+async function captureLoadingProgress(page, {timeoutMs = 150000, interval = 120} = {}) {
+  const started = Date.now();
+  let joinEnabledAt = null;
+  while (Date.now() - started < timeoutMs) {
+    let state = null;
+    try {
+      state = await page.evaluate(`(()=>{const b=document.getElementById('create');return b?{disabled:b.disabled}:null;})()`, {timeoutMs: 8000});
+    } catch {}
+    if (state && state.disabled === false) {
+      joinEnabledAt = Date.now() - started;
+      break;
+    }
+    await sleep(interval);
+  }
+  let record = null;
+  try {
+    record = await page.evaluate(`window.__qaLoading ? JSON.parse(JSON.stringify(window.__qaLoading)) : null`);
+  } catch {}
+  let raf = null;
+  try {
+    raf = await page.evaluate(`window.__qaRaf ? JSON.parse(JSON.stringify(window.__qaRaf)) : null`);
+  } catch {}
+  const events = record?.events || [];
+  const distinctTexts = [...new Set(events.map(e => e.text).filter(Boolean))];
+  const progressLikeTexts = distinctTexts.filter(t => /loading/i.test(t));
+  const progressCounts = progressLikeTexts
+    .map(t => {
+      const m = /(\d+)\s*\/\s*(\d+)/.exec(t);
+      return m ? `${m[1]}/${m[2]}` : null;
+    })
+    .filter(Boolean);
+  return {
+    events,
+    distinctTexts,
+    progressLikeTexts,
+    progressCounts,
+    distinctProgressCounts: [...new Set(progressCounts)],
+    joinEnabledAtMs: record?.joinEnabledAtMs != null ? record.joinEnabledAtMs : joinEnabledAt,
+    maxFrameGapMs: raf ? +(raf.maxGapMs || 0).toFixed(1) : null,
+    frames: raf ? raf.count : null,
+  };
+}
+
+/** Extract "N/M" loading-count strings from observer events. */
+function progressCountsFromEvents(events) {
+  const texts = [...new Set((events || []).map(e => e && e.text).filter(Boolean))];
+  const counts = texts
+    .filter(t => /loading/i.test(t))
+    .map(t => {
+      const m = /(\d+)\s*\/\s*(\d+)/.exec(t);
+      return m ? `${m[1]}/${m[2]}` : null;
+    })
+    .filter(Boolean);
+  return {texts, counts: [...new Set(counts)]};
+}
+
+/** Sweep quality tiers low -> medium -> high capturing __ssPerf + frame percentiles. */
+async function captureQualitySweep(page, {tiers = ['low', 'medium', 'high'], settleMs = 2000, sampleMs = 3000} = {}) {
+  const out = {};
+  for (const tier of tiers) {
+    const set = await page.evaluate(
+      `(()=>{if(typeof window.__ssQuality!=='function')return false;try{window.__ssQuality(${JSON.stringify(tier)});return true;}catch(e){return false;}})()`,
+      {timeoutMs: 15000},
+    );
+    if (!set) return {available: false, tiers: out};
+    await sleep(settleMs);
+    out[tier] = {
+      quality: await readQuality(page),
+      perf: await capturePerfSnapshot(page),
+      frames: await captureFrameStats(page, sampleMs),
+    };
+    log(`PERF[${tier}]: calls=${perfMetric(out[tier].perf, 'calls')} triangles=${perfMetric(out[tier].perf, 'triangles')} fps=${out[tier].frames?.fps}`);
+  }
+  return {available: true, tiers: out};
+}
+
+/** Read a renderer.info-style metric tolerantly across possible __ssPerf shapes. */
+function perfMetric(perf, key) {
+  if (!perf || typeof perf !== 'object') return null;
+  if (perf.renderer && perf.renderer[key] != null) return perf.renderer[key];
+  if (perf[key] != null) return perf[key];
+  if (perf.info && perf.info[key] != null) return perf.info[key];
+  if (perf.render && perf.render[key] != null) return perf.render[key];
+  return null;
+}
+
+/** Compact summary of a __ssPerf snapshot + frame stats for logs/reports. */
+function perfSummary(perf, frames) {
+  return {
+    calls: perfMetric(perf, 'calls'),
+    triangles: perfMetric(perf, 'triangles'),
+    points: perfMetric(perf, 'points'),
+    geometries: perfMetric(perf, 'geometries'),
+    textures: perfMetric(perf, 'textures'),
+    programs: perfMetric(perf, 'programs'),
+    quality: perf?.quality ?? perf?.tier ?? null,
+    fps: frames?.fps ?? null,
+    meanFrameMs: frames?.meanFrameMs ?? null,
+  };
+}
+
 /* ---------------------------------------------------------------- update */
 
 async function run() {
@@ -1281,6 +1587,8 @@ async function run() {
     canvas: {},
     fps: null,
     weaponCards: null,
+    perf: null,
+    loading: null,
     websocket: null,
     websocketFinal: null,
     diagnostics: null,
@@ -1394,6 +1702,7 @@ async function run() {
     lastStage = 'navigate';
     report.navigatedAt = nowIso();
     const targetUrl = mode === 'url' ? opts.url : `${baseUrl}/`;
+    const navStartedAt = Date.now();
     await page.send('Page.navigate', {url: targetUrl}, 60000);
     await waitFor(page, `document.readyState==='complete'`, {timeoutMs: 90000, label: 'page load'});
     await waitFor(
@@ -1401,10 +1710,47 @@ async function run() {
       `(()=>{const l=document.getElementById('landing');const n=document.getElementById('name');return !!l && !l.hidden && !!n && l.getBoundingClientRect().height>0;})()`,
       {timeoutMs: 90000, label: 'landing UI'},
     );
+    const landingAt = Date.now();
     if (mode === 'url') check('live url loaded', true, targetUrl);
     check('landing UI visible', true, '');
-    await sleep(1200);
+    // Landing streaming-window evidence: capture immediately on landing, then a second frame
+    // ~0.6 s later. The legacy blue-cone tower tops were visible only while the modern keep towers
+    // streamed in, so these early frames prove the hidden-by-default fix on the landing page.
+    report.screenshots.push(await screenshot(page, opts.outDir, '00-landing-early.png'));
+    // Performance mode: capture loading progress UX before joining (progress text + join enable).
+    if (opts.perf) {
+      const loading = await captureLoadingProgress(page, {timeoutMs: Math.min(opts.hudTimeout, 150000)});
+      report.loading = loading;
+      log(`LOADING: joinEnabledAt=${loading.joinEnabledAtMs}ms maxFrameGap=${loading.maxFrameGapMs}ms texts=${JSON.stringify(loading.distinctTexts)}`);
+    }
+    await sleep(600);
+    report.screenshots.push(await screenshot(page, opts.outDir, '00-landing-mid.png'));
+    await sleep(600);
     report.screenshots.push(await screenshot(page, opts.outDir, '00-landing.png'));
+
+    // Performance mode: validate the graphics-quality selector wiring before joining. Persistence
+    // across a reload is checked at the END of the run so it cannot pollute the load timings.
+    if (opts.perf) {
+      const hook = await perfHookInfo(page);
+      report.perf = {mode: mode === 'url' ? 'fps-load-only' : 'full', hook, loading: report.loading};
+      log(`PERF HOOKS: ${JSON.stringify(hook)}`);
+      if (hook.hasPerf) {
+        report.perf.initialPageTimings = await capturePageTimings(page);
+        const selector = await findQualitySelect(page);
+        report.perf.qualitySelector = {found: !!selector, initial: selector, persisted: null, restored: null};
+        if (selector) {
+          await setQualityViaSelect(page, 'medium');
+          await sleep(600);
+          report.perf.qualitySelector.afterSelect = {hook: await readQuality(page), stored: await page.evaluate(`localStorage.getItem('ss-quality')`)};
+          await setQualityViaSelect(page, 'high');
+          await sleep(600);
+          report.perf.qualitySelector.restored = {hook: await readQuality(page), stored: await page.evaluate(`localStorage.getItem('ss-quality')`)};
+          log(`QUALITY SELECTOR: ${JSON.stringify(report.perf.qualitySelector)}`);
+        } else {
+          report.notes.push('perf: graphics-quality select not found in the DOM');
+        }
+      }
+    }
 
     /* 6. enter the campaign */
     lastStage = 'join';
@@ -1412,6 +1758,7 @@ async function run() {
     await typeInto(page, '#name', nameValue);
     const typed = await page.evaluate(`document.getElementById('name').value`);
     check('filled #name', typed === nameValue, `value=${JSON.stringify(typed)}`);
+    await waitForJoinEnabled(page, '#create', opts.hudTimeout);
     await clickSelector(page, '#create');
     log('FLOW: clicked "Begin a campaign", waiting for HUD + game state');
     await waitFor(
@@ -1421,12 +1768,14 @@ async function run() {
     );
     const hudVisible = await page.evaluate(`(()=>{const h=document.getElementById('hud');return !!h && !h.hidden && getComputedStyle(h).display!=='none';})()`);
     check('#hud visible after joining', hudVisible, '');
+    const hudAt = Date.now();
     await waitFor(
       page,
       `(()=>{const p=document.getElementById('playerName');const r=document.getElementById('resources');const w=document.getElementById('wayfinder');return !!p&&p.textContent.trim().length>0&&!!r&&r.textContent.includes('WOOD')&&!!w&&w.textContent.trim().length>0;})()`,
       {timeoutMs: 60000, label: 'game state (player name, resources, wayfinder)'},
     );
     check('game state received (authoritative snapshot)', true, '');
+    const stateAt = Date.now();
     // Expected weapon-card count (8 at batch 1, 10 after batch-2 weapons land).
     const hudEarly = await hudSnapshot(page);
     report.weaponCards = hudEarly.__weaponCards;
@@ -1441,7 +1790,7 @@ async function run() {
       report.expectedAssets = results;
       check('expected assets return 200', results.every(r => r.ok), JSON.stringify(results));
     }
-    await sleep(2500);
+    await sleep(opts.perf ? opts.perfSettle : 2500);
     report.fps = await measureFps(page, 1500);
     log(`FPS: ${JSON.stringify(report.fps)}`);
     report.renderer = await rendererInfo(page);
@@ -1449,6 +1798,39 @@ async function run() {
     log(`WS: instances=${report.websocket?.instances} opens=${report.websocket?.opens} closes=${report.websocket?.closes?.length || 0} states=${report.websocket?.stateCount} url=${report.websocket?.urls?.[0]}`);
     log(`RENDERER: ${report.renderer?.renderer || 'unknown'} | vendor ${report.renderer?.vendor || 'unknown'}`);
     report.hud = await hudSnapshot(page);
+    // Performance mode: third-person capture (renderer.info + 3-5 s frame percentiles + load
+    // timings/request bytes), then a low/medium/high quality sweep when the hooks exist.
+    if (opts.perf) {
+      report.perf.requests = {
+        internalRequests: sink.internalRequests,
+        finishedRequests: sink.finishedRequests,
+        responseBytes: sink.responseBytes,
+        assetBytes: sink.assetBytes,
+      };
+      report.perf.pageTimings = await capturePageTimings(page);
+      report.perf.load = {
+        navigationToLandingMs: landingAt - navStartedAt,
+        navigationToHudMs: hudAt - navStartedAt,
+        navigationToStateMs: stateAt - navStartedAt,
+        page: report.perf.initialPageTimings?.navigation ?? report.perf.pageTimings?.navigation ?? null,
+        resources: report.perf.initialPageTimings?.resources ?? report.perf.pageTimings?.resources ?? null,
+        requests: report.perf.requests,
+      };
+      report.perf.thirdPerson = {
+        snapshot: await capturePerfSnapshot(page),
+        frames: await captureFrameStats(page, opts.perfSampleMs),
+      };
+      const tpSummary = perfSummary(report.perf.thirdPerson.snapshot, report.perf.thirdPerson.frames);
+      log(`PERF[third-person]: ${JSON.stringify(tpSummary)}`);
+      if (report.perf.hook?.hasPerf) {
+        report.perf.qualities = await captureQualitySweep(page, {settleMs: 2000, sampleMs: Math.min(opts.perfSampleMs, 3000)});
+        // Restore the default high tier before the visual-regression screenshots.
+        await page.evaluate(`(()=>{try{if(typeof window.__ssQuality==='function')window.__ssQuality('high');}catch(e){}return true;})()`);
+        await sleep(1500);
+        report.perf.thirdPersonHigh = await capturePerfSnapshot(page);
+        report.perf.thirdPerson.framesHigh = await captureFrameStats(page, Math.min(opts.perfSampleMs, 3000));
+      }
+    }
     report.screenshots.push(await screenshot(page, opts.outDir, '01-third-person.png'));
     report.canvas['third-person'] = await canvasPixelStats(page, opts.outDir, 'third-person');
 
@@ -1463,6 +1845,13 @@ async function run() {
     await sleep(600);
     report.screenshots.push(await screenshot(page, opts.outDir, '02-first-person.png'));
     report.canvas['first-person'] = await canvasPixelStats(page, opts.outDir, 'first-person');
+    if (opts.perf) {
+      report.perf.firstPerson = {
+        snapshot: await capturePerfSnapshot(page),
+        frames: await captureFrameStats(page, opts.perfSampleMs),
+      };
+      log(`PERF[first-person]: ${JSON.stringify(perfSummary(report.perf.firstPerson.snapshot, report.perf.firstPerson.frames))}`);
+    }
 
     /* 8. movement + attack */
     lastStage = 'combat';
@@ -1541,6 +1930,69 @@ async function run() {
       );
     }
     log(`WS final: instances=${report.websocketFinal?.instances} opens=${report.websocketFinal?.opens} closes=${report.websocketFinal?.closes?.length || 0} states=${report.websocketFinal?.stateCount}${report.websocketFinal?.closes?.length ? ` closures=${JSON.stringify(report.websocketFinal.closes)}` : ''}`);
+    // Performance mode: deferred quality-persistence + progressive-loading validation. A reload is
+    // required to prove the stored tier is applied on startup; done last so it cannot pollute the
+    // load timings. QA also injects a pre-app fetch delay (localStorage 'ss-qa-load-delay', read by
+    // the injected instrumentation only) so the loading counter is observable — on a fast localhost
+    // load the heavy scene construction otherwise hides the whole progress sequence.
+    if (opts.perf && report.perf?.qualitySelector?.found) {
+      try {
+        await setQualityViaSelect(page, 'medium');
+        await sleep(400);
+        report.perf.qualitySelector.beforeReload = {hook: await readQuality(page), stored: await page.evaluate(`localStorage.getItem('ss-quality')`)};
+        const delayMs = 900;
+        await page.evaluate(`localStorage.setItem('ss-qa-load-delay', ${JSON.stringify(String(delayMs))})`);
+        // The app auto-resumes a session from sessionStorage on load; clear it so this reload
+        // exercises the fresh landing + loading UI instead of jumping straight into the HUD.
+        await page.evaluate(`sessionStorage.removeItem('ss-session')`);
+        await page.send('Page.reload', {}, 60000);
+        await sleep(2600);
+        try {
+          report.screenshots.push(await screenshot(page, opts.outDir, '05-loading-progress.png'));
+        } catch {}
+        await waitFor(page, `document.readyState==='complete'`, {timeoutMs: 90000, label: 'reload with simulated slow load'});
+        await waitFor(page, `(()=>{const l=document.getElementById('landing');return !!l && !l.hidden;})()`, {timeoutMs: 90000, label: 'landing after reload'});
+        await waitFor(
+          page,
+          `(()=>{const b=document.getElementById('create');return !!b && b.disabled===false;})()`,
+          {timeoutMs: 45000, interval: 100, label: 'join enabled after slow load'},
+        );
+        const loadingState = await page.evaluate(`window.__qaLoading ? JSON.parse(JSON.stringify(window.__qaLoading)) : null`);
+        const rafState = await page.evaluate(`window.__qaRaf ? JSON.parse(JSON.stringify(window.__qaRaf)) : null`);
+        const parsed = progressCountsFromEvents(loadingState?.events || []);
+        report.perf.loadingDelayed = {
+          simulated: `pre-app fetch delay ${delayMs}ms + 250ms/asset stagger (QA instrumentation only; src untouched)`,
+          events: loadingState?.events || [],
+          distinctTexts: parsed.texts,
+          counts: parsed.counts,
+          joinEnabledAtMs: loadingState?.joinEnabledAtMs ?? null,
+          maxFrameGapMs: rafState ? +(rafState.maxGapMs || 0).toFixed(1) : null,
+          screenshot: '05-loading-progress.png',
+        };
+        const reopened = await findQualitySelect(page);
+        const reloadType = await page.evaluate(`performance.getEntriesByType('navigation')[0]?.type ?? null`);
+        report.perf.qualitySelector.persisted = {
+          hook: await readQuality(page),
+          stored: await page.evaluate(`localStorage.getItem('ss-quality')`),
+          selectValue: reopened ? reopened.value : null,
+          reloadType,
+        };
+        await page.evaluate(`localStorage.removeItem('ss-qa-load-delay')`);
+        await setQualityViaSelect(page, 'high');
+        log(`QUALITY PERSISTENCE: ${JSON.stringify(report.perf.qualitySelector.persisted)}`);
+        log(`SLOW-LOAD PROGRESS: ${JSON.stringify({counts: parsed.counts, joinEnabledAtMs: report.perf.loadingDelayed.joinEnabledAtMs, maxFrameGapMs: report.perf.loadingDelayed.maxFrameGapMs})}`);
+      } catch (error) {
+        report.notes.push(`perf: quality persistence / slow-load progress check failed: ${error?.message || error}`);
+        // Capture why the slow-load check failed (visible loading state on the reloaded page).
+        try {
+          report.perf.slowLoadFailure = {
+            error: String(error?.message || error),
+            state: await page.evaluate(`(()=>{const c=document.getElementById('connection');const b=document.getElementById('create');return {href:location.href,connection:c?c.textContent.trim().slice(0,140):null,createDisabled:b?b.disabled:null,loading:window.__qaLoading?JSON.parse(JSON.stringify(window.__qaLoading)):null};})()`),
+          };
+          report.screenshots.push(await screenshot(page, opts.outDir, '05-loading-progress-failure.png'));
+        } catch {}
+      }
+    }
     // Reconnect-investigation diagnostics: navigation markers + server /health stall samples.
     report.diagnostics = {
       navigations: sink.navigations,
@@ -1576,6 +2028,51 @@ async function run() {
     const expectedShots = ['01-third-person.png', '02-first-person.png', '03-combat.png', '04-third-person-return.png'];
     const shotNames = report.screenshots.map(f => path.basename(f));
     check('required screenshots saved', expectedShots.every(s => shotNames.includes(s)), shotNames.join(', '));
+    if (opts.perf) {
+      const perf = report.perf;
+      const localFull = mode !== 'url';
+      check('perf: capture produced data', !!(perf && perf.thirdPerson && perf.load && perf.requests), JSON.stringify({hasThird: !!perf?.thirdPerson, hasLoad: !!perf?.load}));
+      if (localFull) {
+        check('perf: __ssPerf hook available', !!perf?.hook?.hasPerf, JSON.stringify(perf?.hook));
+        check('perf: __ssQuality hook available', !!perf?.hook?.hasQuality, JSON.stringify(perf?.hook));
+        const lowCalls = perfMetric(perf?.qualities?.tiers?.low?.perf, 'calls');
+        const highCalls = perfMetric(perf?.qualities?.tiers?.high?.perf, 'calls');
+        check(
+          'perf: draw calls drop at low quality',
+          lowCalls != null && highCalls != null && lowCalls < highCalls && lowCalls <= highCalls * 0.9,
+          `low=${lowCalls} high=${highCalls} ratio=${lowCalls != null && highCalls ? +(lowCalls / highCalls).toFixed(3) : 'n/a'}`,
+        );
+        const selector = perf?.qualitySelector;
+        const normQuality = v => (typeof v === 'string' ? v : v?.tier ?? v?.quality ?? v?.current ?? null);
+        check(
+          'perf: quality selector present + persists',
+          !!selector?.found && !!selector?.persisted && String(selector?.persisted?.stored) === 'medium' && normQuality(selector?.persisted?.hook) === 'medium',
+          JSON.stringify({found: selector?.found, afterSelect: selector?.afterSelect, persisted: selector?.persisted}),
+        );
+        const loading = report.loading;
+        const delayed = perf?.loadingDelayed;
+        const loadingCounts = [...new Set([...(loading?.distinctProgressCounts || []), ...(delayed?.counts || [])])];
+        const joinEnabledAtMs = loading?.joinEnabledAtMs ?? delayed?.joinEnabledAtMs ?? null;
+        check(
+          'perf: loading progress shows changing counts + join enabled',
+          loadingCounts.length >= 2 && joinEnabledAtMs != null,
+          JSON.stringify({
+            unthrottledCounts: loading?.distinctProgressCounts || [],
+            delayedCounts: delayed?.counts || [],
+            joinEnabledAtMs,
+            simulated: delayed?.simulated || null,
+          }),
+        );
+        check(
+          'perf: no long frozen frame during load',
+          loading?.maxFrameGapMs == null || loading.maxFrameGapMs <= 5000,
+          `maxFrameGap=${loading?.maxFrameGapMs}ms`,
+        );
+        log(`PERF SUMMARY: third=${JSON.stringify(perfSummary(perf?.thirdPerson?.snapshot, perf?.thirdPerson?.frames))} first=${JSON.stringify(perfSummary(perf?.firstPerson?.snapshot, perf?.firstPerson?.frames))} low=${JSON.stringify(perfSummary(perf?.qualities?.tiers?.low?.perf, perf?.qualities?.tiers?.low?.frames))} high=${JSON.stringify(perfSummary(perf?.qualities?.tiers?.high?.perf, perf?.qualities?.tiers?.high?.frames))}`);
+      } else {
+        check('perf: live reference captured (fps/load only, hook absent as expected)', !!perf?.thirdPerson?.frames, JSON.stringify(perfSummary(perf?.thirdPerson?.snapshot, perf?.thirdPerson?.frames)));
+      }
+    }
     if (report.consoleErrors.length) {
       report.notes.push(`${report.consoleErrors.length} console error(s) logged (reported, not gated)`);
     }
@@ -1673,6 +2170,21 @@ async function run() {
   console.log(`checks:    ${report.checks.filter(c => c.ok).length}/${report.checks.length} passed`);
   for (const c of report.checks) console.log(`  ${c.ok ? '[PASS]' : '[FAIL]'} ${c.name}${c.ok ? '' : ` -> ${c.detail}`}`);
   if (report.weaponCards !== null) console.log(`weapons:   ${report.weaponCards} cards${opts.expectWeapons !== null ? ` (expected ${opts.expectWeapons})` : ''}`);
+  if (report.perf) {
+    const perf = report.perf;
+    console.log(`perf:      mode=${perf.mode} third=${JSON.stringify(perfSummary(perf.thirdPerson?.snapshot, perf.thirdPerson?.frames))}`);
+    if (perf.firstPerson) console.log(`perf FP:   ${JSON.stringify(perfSummary(perf.firstPerson?.snapshot, perf.firstPerson?.frames))}`);
+    if (perf.qualities?.tiers) {
+      for (const [tier, data] of Object.entries(perf.qualities.tiers)) {
+        console.log(`perf ${tier}: ${JSON.stringify(perfSummary(data?.perf, data?.frames))}`);
+      }
+    }
+    if (perf.load) {
+      console.log(`load:      ${JSON.stringify({toLandingMs: perf.load.navigationToLandingMs, toHudMs: perf.load.navigationToHudMs, toStateMs: perf.load.navigationToStateMs, assetBytes: perf.load.resources?.assetTransferBytes ?? null, responseBytes: perf.load.requests?.responseBytes ?? null})}`);
+    }
+    if (report.loading) console.log(`loading:   ${JSON.stringify({joinEnabledAtMs: report.loading.joinEnabledAtMs, maxFrameGapMs: report.loading.maxFrameGapMs, texts: report.loading.distinctTexts})}`);
+    if (perf.qualitySelector) console.log(`quality:   ${JSON.stringify(perf.qualitySelector)}`);
+  }
   if (report.coop) console.log(`coop:      ${JSON.stringify(report.coop)}`);
   console.log(`page errors: ${report.pageErrors.length}${report.pageErrors.length ? ` -> ${JSON.stringify(report.pageErrors.slice(0, 3))}` : ''}`);
   console.log(`console errors: ${report.consoleErrors.length}${report.consoleErrors.length ? ` -> ${JSON.stringify(report.consoleErrors.slice(0, 3))}` : ''}`);

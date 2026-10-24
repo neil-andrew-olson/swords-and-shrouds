@@ -3,10 +3,17 @@ import { CASTLES, CAMPS, dist } from '../shared/world';
 import { loadAsset } from './assets';
 
 /**
- * Lush medieval vegetation: realistic grass tufts, dark spruce pines, gnarled oaks,
- * mossy boulders and — batch 2026-10 — baked `grass_tuft` / `rock_cluster` scatter.
- * Custom props are always instanced: +2 draw calls total for hundreds of props.
+ * Medieval vegetation + scatter.
+ *
+ * Batch 2026-10C performance pass:
+ *  - baked pine/oak/rock-cluster/grass-tuft meshes stay instanced (a handful of draws),
+ *  - only instances within a radius of the player are drawn each frame (the rest are fogged out
+ *    at night anyway), so triangle counts collapse without visible pop,
+ *  - tree/foliage shadow casting is disabled (tiny fronds do not read in shadow at night),
+ *  - the procedural grass wind shader is kept for both procedural and baked foliage.
  */
+type TreeInstance = { x: number; z: number; h: number; isPine: boolean; rot: number; scale: number };
+
 export function addLandscape(scene: THREE.Scene) {
   let seed = 9821;
   const rand = () => {
@@ -20,66 +27,22 @@ export function addLandscape(scene: THREE.Scene) {
     Math.abs(x) < 5;
   const castleFootprint = (x: number, z: number) =>
     CASTLES.some((c) => Math.abs(x - c.x) < 13 && Math.abs(z - c.z) < 13);
+  const nearTree = (x: number, z: number, radius: number, trees: TreeInstance[]) =>
+    trees.some((t) => (t.x - x) * (t.x - x) + (t.z - z) * (t.z - z) < radius * radius);
 
-  // Denser, more varied tree line than the original 360-slot pass.
-  const treePositions: { x: number; z: number; h: number; isPine: boolean; rot: number; scale: number; tint: number }[] = [];
-  for (let i = 0; i < 540; i++) {
+  // Denser, more varied tree line.
+  const treePositions: TreeInstance[] = [];
+  for (let i = 0; i < 480; i++) {
     const x = rand() * 152 - 65;
     const z = 35 - rand() * 710;
-    if (!clear(x, z)) {
-      treePositions.push({
-        x,
-        z,
-        h: 3.5 + rand() * 5.5,
-        isPine: rand() < 0.58,
-        rot: rand() * Math.PI * 2,
-        scale: 0.68 + rand() * 0.82,
-        tint: 0.78 + rand() * 0.34,
-      });
-    }
+    if (!clear(x, z)) treePositions.push({ x, z, h: 3.5 + rand() * 5.5, isPine: rand() < 0.58, rot: rand() * Math.PI * 2, scale: 0.68 + rand() * 0.82 });
   }
-
-  // 1. Lush multi-blade wild grass tuft geometry (fanned curved blades with dark-to-light gradient)
-  const grassPos: number[] = [];
-  const grassCol: number[] = [];
-  const bladeAngles = [0, 1.1, 2.2, 3.4, 4.6];
-
-  for (const angle of bladeAngles) {
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const w = 0.08;
-    const h = 0.52 + rand() * 0.15;
-    const lean = 0.14;
-
-    // Triangle blade: bottom-left, bottom-right, curved tip
-    const bx1 = -sin * w;
-    const bz1 = cos * w;
-    const bx2 = sin * w;
-    const bz2 = -cos * w;
-    const tx = cos * lean;
-    const tz = sin * lean;
-
-    // Quad/Triangle: v0, v1, v2
-    grassPos.push(bx1, 0, bz1, bx2, 0, bz2, tx, h, tz);
-    // Dark root -> lush vibrant tip
-    grassCol.push(0.12, 0.18, 0.08, 0.12, 0.18, 0.08, 0.42, 0.58, 0.24);
-
-    // Double-sided back triangle
-    grassPos.push(bx2, 0, bz2, bx1, 0, bz1, tx, h, tz);
-    grassCol.push(0.12, 0.18, 0.08, 0.12, 0.18, 0.08, 0.42, 0.58, 0.24);
-  }
-
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.Float32BufferAttribute(grassPos, 3));
-  geom.setAttribute('color', new THREE.Float32BufferAttribute(grassCol, 3));
-  geom.computeVertexNormals();
 
   const windUniform = { value: 0 };
-  const addWind = (mat: THREE.Material, scale = 0.38, power = 1.3, minY = 0.0) => {
+  const addWind = (mat: THREE.Material, scale = 0.38, power = 1.3, minY = 0) => {
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uWindTime = windUniform;
-      shader.vertexShader = `uniform float uWindTime;
-` + shader.vertexShader;
+      shader.vertexShader = 'uniform float uWindTime;\n' + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         `
@@ -93,23 +56,29 @@ export function addLandscape(scene: THREE.Scene) {
     };
   };
 
-  const grassMat = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.88,
-    side: THREE.DoubleSide,
-  });
-  addWind(grassMat, 0.42, 1.3, 0.0);
-
-  const grass = new THREE.InstancedMesh(geom, grassMat, 7600);
+  // 1. Procedural wild-grass tufts (cheap: 5 double-sided blades x 10 tris).
+  const grassPos: number[] = [];
+  const grassCol: number[] = [];
+  for (const angle of [0, 1.1, 2.2, 3.4, 4.6]) {
+    const cos = Math.cos(angle), sin = Math.sin(angle), w = 0.08, h = 0.52 + rand() * 0.15, lean = 0.14;
+    const bx1 = -sin * w, bz1 = cos * w, bx2 = sin * w, bz2 = -cos * w, tx = cos * lean, tz = sin * lean;
+    grassPos.push(bx1, 0, bz1, bx2, 0, bz2, tx, h, tz);
+    grassCol.push(0.06, 0.09, 0.04, 0.06, 0.09, 0.04, 0.2, 0.3, 0.12);
+    grassPos.push(bx2, 0, bz2, bx1, 0, bz1, tx, h, tz);
+    grassCol.push(0.06, 0.09, 0.04, 0.06, 0.09, 0.04, 0.2, 0.3, 0.12);
+  }
+  const grassGeo = new THREE.BufferGeometry();
+  grassGeo.setAttribute('position', new THREE.Float32BufferAttribute(grassPos, 3));
+  grassGeo.setAttribute('color', new THREE.Float32BufferAttribute(grassCol, 3));
+  grassGeo.computeVertexNormals();
+  const grassMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, side: THREE.DoubleSide });
+  addWind(grassMat, 0.42, 1.3, 0);
+  const grass = new THREE.InstancedMesh(grassGeo, grassMat, 5600);
   const dummy = new THREE.Object3D();
-  const tintColor = new THREE.Color();
   let count = 0;
-
-  for (let i = 0; i < 9800 && count < 7600; i++) {
-    const x = rand() * 152 - 65;
-    const z = 35 - rand() * 710;
+  for (let i = 0; i < 7200 && count < 5600; i++) {
+    const x = rand() * 152 - 65, z = 35 - rand() * 710;
     if (clear(x, z)) continue;
-
     dummy.position.set(x, 0.01, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
     const s = 0.65 + rand() * 0.7;
@@ -119,19 +88,15 @@ export function addLandscape(scene: THREE.Scene) {
   }
   grass.count = count;
   grass.receiveShadow = true;
+  grass.castShadow = false;
   grass.computeBoundingSphere();
   scene.add(grass);
 
-  // 2. Scatter mossy boulders
-  const rocks = new THREE.InstancedMesh(
-    new THREE.IcosahedronGeometry(1, 1),
-    new THREE.MeshStandardMaterial({ color: 0x5a6058, roughness: 0.95 }),
-    80
-  );
+  // 2. Procedural mossy boulders.
+  const rocks = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshStandardMaterial({ color: 0x5a6058, roughness: 0.95 }), 64);
   let ri = 0;
-  for (let i = 0; i < 110 && ri < 80; i++) {
-    const x = rand() * 150 - 65;
-    const z = 35 - rand() * 710;
+  for (let i = 0; i < 90 && ri < 64; i++) {
+    const x = rand() * 150 - 65, z = 35 - rand() * 710;
     if (clear(x, z)) continue;
     dummy.position.set(x, 0.25, z);
     dummy.rotation.set(rand(), rand() * 6, rand());
@@ -140,106 +105,127 @@ export function addLandscape(scene: THREE.Scene) {
     rocks.setMatrixAt(ri++, dummy.matrix);
   }
   rocks.count = ri;
-  rocks.castShadow = rocks.receiveShadow = true;
+  rocks.castShadow = true;
+  rocks.receiveShadow = true;
   rocks.computeBoundingSphere();
   scene.add(rocks);
 
-  // 3. Fast placeholder trees while 3D GLTF models stream in
+  // 3. Cheap placeholder trees while the real GLBs stream in.
   const bark = new THREE.MeshStandardMaterial({ color: 0x3d352e, roughness: 0.95 });
   const needle = new THREE.MeshStandardMaterial({ color: 0x273b32, roughness: 0.9 });
   addWind(needle, 0.14, 1.2, 0.6);
-  const placeholderTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.36, 1, 7), bark, treePositions.length);
+  const placeholderTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.36, 1, 5), bark, treePositions.length);
   const placeholderCrowns = new THREE.InstancedMesh(new THREE.ConeGeometry(1.6, 3.8, 5), needle, treePositions.length);
-  let pti = 0;
-  let pci = 0;
-
+  let pti = 0, pci = 0;
   for (const t of treePositions) {
     dummy.position.set(t.x, t.h * 0.4, t.z);
     dummy.rotation.set(0, t.rot, 0);
     dummy.scale.set(1, t.h * 0.8, 1);
     dummy.updateMatrix();
     placeholderTrunks.setMatrixAt(pti++, dummy.matrix);
-
     dummy.position.set(t.x, t.h * 0.85, t.z);
     dummy.rotation.set(0, t.rot * 1.7, 0);
     dummy.scale.set(t.scale * 1.2, t.h * (t.isPine ? 0.62 : 0.42), t.scale * 1.2);
     dummy.updateMatrix();
     placeholderCrowns.setMatrixAt(pci++, dummy.matrix);
   }
-  placeholderTrunks.castShadow = placeholderTrunks.receiveShadow = true;
-  placeholderCrowns.castShadow = placeholderCrowns.receiveShadow = true;
+  placeholderTrunks.castShadow = true;
+  placeholderCrowns.castShadow = true;
+  placeholderTrunks.receiveShadow = placeholderCrowns.receiveShadow = true;
   placeholderTrunks.computeBoundingSphere();
   placeholderCrowns.computeBoundingSphere();
   const placeholderGroup = new THREE.Group();
   placeholderGroup.add(placeholderTrunks, placeholderCrowns);
   scene.add(placeholderGroup);
 
-  // 4. Asynchronously load authentic 3D Dark Pine & Dead Oak models
+  // Some tree assets are flattened into several primitives (pine = 4, oak = 2). Instantiate
+  // EVERY primitive with the same per-instance matrices so the whole tree renders.
+  const collectMeshes = (root: THREE.Object3D) => {
+    const list: THREE.Mesh[] = [];
+    root.traverse((o) => { if (o instanceof THREE.Mesh) list.push(o as THREE.Mesh); });
+    return list;
+  };
+  const tuneTreeMaterial = (mesh: THREE.Mesh): THREE.Material => {
+    const mat = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).clone() as THREE.MeshStandardMaterial;
+    const name = (mat.name || '').toLowerCase();
+    const foliage = /leaf|grass|groundcover|branch|foliage|needle|frond/.test(name);
+    if (foliage) { mat.color.multiplyScalar(0.32); mat.envMapIntensity = 0.22; mat.roughness = 1; mat.metalness = 0; addWind(mat, 0.12, 1.2, 0.8); }
+    else { mat.color.multiplyScalar(0.72); mat.envMapIntensity = 0.45; mat.metalness = 0; }
+    return mat;
+  };
+  let pineInsts: THREE.InstancedMesh[] = [];
+  let oakInsts: THREE.InstancedMesh[] = [];
+  let pineMatrices: Float32Array | null = null;
+  let oakMatrices: Float32Array | null = null;
+  let pineCount = 0, oakCount = 0;
+  const tmpMatrix = new THREE.Matrix4();
+
+  const cullInto = (mesh: THREE.InstancedMesh, matrices: Float32Array, total: number, focusX: number, focusZ: number, radius: number) => {
+    let n = 0;
+    const r2 = radius * radius;
+    for (let i = 0; i < total; i++) {
+      const base = i * 16;
+      const dx = matrices[base + 12] - focusX;
+      const dz = matrices[base + 14] - focusZ;
+      if (dx * dx + dz * dz > r2) continue;
+      mesh.setMatrixAt(n++, tmpMatrix.fromArray(matrices, base));
+    }
+    mesh.count = n;
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+
   Promise.all([loadAsset('custom/pine'), loadAsset('custom/oak')])
     .then(([pineGltf, oakGltf]) => {
-      // Find mesh primitives in loaded GLTFs
-      let pineMesh: THREE.Mesh | undefined;
-      let oakMesh: THREE.Mesh | undefined;
-
-      pineGltf.scene.traverse((o) => {
-        if (!pineMesh && o instanceof THREE.Mesh) pineMesh = o;
-      });
-      oakGltf.scene.traverse((o) => {
-        if (!oakMesh && o instanceof THREE.Mesh) oakMesh = o;
-      });
-
-      if (!pineMesh || !oakMesh) return;
-
-      const pinesCount = treePositions.filter((t) => t.isPine).length;
-      const oaksCount = treePositions.length - pinesCount;
-
-      const pineMat = (pineMesh.material as THREE.Material).clone();
-      const oakMat = (oakMesh.material as THREE.Material).clone();
-      addWind(pineMat, 0.12, 1.2, 1.0);
-      addWind(oakMat, 0.12, 1.2, 1.0);
-      const pineInst = new THREE.InstancedMesh(pineMesh.geometry, pineMat, pinesCount);
-      const oakInst = new THREE.InstancedMesh(oakMesh.geometry, oakMat, oaksCount);
-      let pi = 0;
-      let oi = 0;
-
+      const treeOnly = (parts: THREE.Mesh[]) => {
+        const filtered = parts.filter((part) => {
+          const m = (Array.isArray(part.material) ? part.material[0] : part.material) as THREE.MeshStandardMaterial;
+          return /leaf|needle|branch|bark|trunk|foliage/i.test(m.name || '');
+        });
+        return filtered.length ? filtered : parts;
+      };
+      const pineParts = treeOnly(collectMeshes(pineGltf.scene));
+      const oakParts = treeOnly(collectMeshes(oakGltf.scene));
+      if (!pineParts.length || !oakParts.length) return;
+      pineCount = treePositions.filter((t) => t.isPine).length;
+      oakCount = treePositions.length - pineCount;
+      pineMatrices = new Float32Array(pineCount * 16);
+      oakMatrices = new Float32Array(oakCount * 16);
+      let pi = 0, oi = 0;
       for (const t of treePositions) {
         dummy.position.set(t.x, 0, t.z);
         dummy.rotation.set(0, t.rot, 0);
         dummy.scale.setScalar(t.scale * 1.35);
         dummy.updateMatrix();
-
-        if (t.isPine) {
-          pineInst.setMatrixAt(pi, dummy.matrix);
-          pineInst.setColorAt(pi, tintColor.setRGB(t.tint, t.tint * 1.02, t.tint * 0.96));
-          pi++;
-        } else {
-          oakInst.setMatrixAt(oi, dummy.matrix);
-          oakInst.setColorAt(oi, tintColor.setRGB(t.tint * 1.02, t.tint, t.tint * 0.94));
-          oi++;
-        }
+        if (t.isPine) dummy.matrix.toArray(pineMatrices!, pi++ * 16);
+        else dummy.matrix.toArray(oakMatrices!, oi++ * 16);
       }
-
-      pineInst.castShadow = pineInst.receiveShadow = true;
-      oakInst.castShadow = oakInst.receiveShadow = true;
-      pineInst.computeBoundingSphere();
-      oakInst.computeBoundingSphere();
-
-      // Seamlessly swap out placeholders
+      const buildInsts = (parts: THREE.Mesh[], total: number) => {
+        const insts: THREE.InstancedMesh[] = [];
+        for (const part of parts) {
+          const inst = new THREE.InstancedMesh(part.geometry, tuneTreeMaterial(part), total);
+          inst.castShadow = false; // foliage/prop shadows are invisible at night and were a big shadow cost
+          inst.receiveShadow = false;
+          inst.frustumCulled = false;
+          inst.count = 0;
+          inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          scene.add(inst);
+          insts.push(inst);
+        }
+        return insts;
+      };
+      pineInsts = buildInsts(pineParts, pineCount);
+      oakInsts = buildInsts(oakParts, oakCount);
       scene.remove(placeholderGroup);
-      scene.add(pineInst, oakInst);
     })
-    .catch((err) => {
-      console.warn('3D trees load error, keeping placeholders', err);
-    });
+    .catch((err) => console.warn('3D trees load error, keeping placeholders', err));
 
-  // 5. Batch 2026-10: baked grass tufts + rock clusters, two InstancedMeshes.
-  const nearTree = (x: number, z: number, radius: number) =>
-    treePositions.some((t) => (t.x - x) * (t.x - x) + (t.z - z) * (t.z - z) < radius * radius);
+  // 5. Baked grass tufts + rock clusters (rock clusters are distance-culled; they are dense geometry).
+  let rockInst: THREE.InstancedMesh | null = null;
+  let rockMatrices: Float32Array | null = null;
+  let rockTotal = 0;
   const firstMesh = (root: THREE.Object3D): THREE.Mesh | undefined => {
     let found: THREE.Mesh | undefined;
-    root.traverse((o) => {
-      if (!found && o instanceof THREE.Mesh) found = o;
-    });
+    root.traverse((o) => { if (!found && o instanceof THREE.Mesh) found = o as THREE.Mesh; });
     return found;
   };
   const firstMaterial = (mesh: THREE.Mesh): THREE.Material =>
@@ -249,19 +235,17 @@ export function addLandscape(scene: THREE.Scene) {
     .then(([grassGltf, rockGltf]) => {
       const tuftMesh = firstMesh(grassGltf.scene);
       const rockMesh = firstMesh(rockGltf.scene);
-      // Baked tufts cluster around survivor camps and along the forest edge.
       if (tuftMesh) {
         const tuftMat = firstMaterial(tuftMesh).clone() as THREE.MeshStandardMaterial;
+        tuftMat.color.multiplyScalar(0.42);tuftMat.envMapIntensity = 0.28;
         addWind(tuftMat, 0.16, 1.1, 0.04);
         const tuftCount = 440;
         const tufts = new THREE.InstancedMesh(tuftMesh.geometry, tuftMat, tuftCount);
         let ti = 0;
         for (const camp of CAMPS) {
           for (let i = 0; i < 22 && ti < tuftCount; i++) {
-            const angle = rand() * Math.PI * 2;
-            const radius = 5 + rand() * 13;
-            const x = camp.x + Math.cos(angle) * radius;
-            const z = camp.z + Math.sin(angle) * radius;
+            const angle = rand() * Math.PI * 2, radius = 5 + rand() * 13;
+            const x = camp.x + Math.cos(angle) * radius, z = camp.z + Math.sin(angle) * radius;
             if (Math.abs(x) < 4.2 || castleFootprint(x, z)) continue;
             dummy.position.set(x, 0.01, z);
             dummy.rotation.set(0, rand() * Math.PI * 2, 0);
@@ -272,9 +256,8 @@ export function addLandscape(scene: THREE.Scene) {
           }
         }
         for (let i = 0; i < tuftCount * 5 && ti < tuftCount; i++) {
-          const x = rand() * 152 - 65;
-          const z = 35 - rand() * 710;
-          if (clear(x, z) || !nearTree(x, z, 22) || castleFootprint(x, z)) continue;
+          const x = rand() * 152 - 65, z = 35 - rand() * 710;
+          if (clear(x, z) || !nearTree(x, z, 22, treePositions) || castleFootprint(x, z)) continue;
           dummy.position.set(x, 0.01, z);
           dummy.rotation.set(0, rand() * Math.PI * 2, 0);
           const s = 0.75 + rand() * 0.95;
@@ -283,29 +266,26 @@ export function addLandscape(scene: THREE.Scene) {
           tufts.setMatrixAt(ti++, dummy.matrix);
         }
         tufts.count = ti;
+        tufts.castShadow = false;
         tufts.receiveShadow = true;
-        tufts.computeBoundingSphere();
+        tufts.frustumCulled = false;
         scene.add(tufts);
       }
       if (rockMesh) {
         const rockMat = firstMaterial(rockMesh).clone() as THREE.MeshStandardMaterial;
-        const clusterCount = 96;
-        const clusters = new THREE.InstancedMesh(rockMesh.geometry, rockMat, clusterCount);
+        rockTotal = 96;
+        const matrices = new Float32Array(rockTotal * 16);
         let ci = 0;
-        for (let i = 0; i < clusterCount * 6 && ci < clusterCount; i++) {
+        for (let i = 0; i < rockTotal * 6 && ci < rockTotal; i++) {
           const nearCamp = i % 2 === 0 && CAMPS.length > 0;
-          let x: number;
-          let z: number;
+          let x: number, z: number;
           if (nearCamp) {
             const camp = CAMPS[Math.floor(rand() * CAMPS.length)];
-            const angle = rand() * Math.PI * 2;
-            const radius = 6 + rand() * 15;
-            x = camp.x + Math.cos(angle) * radius;
-            z = camp.z + Math.sin(angle) * radius;
+            const angle = rand() * Math.PI * 2, radius = 6 + rand() * 15;
+            x = camp.x + Math.cos(angle) * radius; z = camp.z + Math.sin(angle) * radius;
           } else {
-            x = rand() * 152 - 65;
-            z = 35 - rand() * 710;
-            if (!nearTree(x, z, 26)) continue;
+            x = rand() * 152 - 65; z = 35 - rand() * 710;
+            if (!nearTree(x, z, 26, treePositions)) continue;
           }
           if (clear(x, z) || castleFootprint(x, z)) continue;
           dummy.position.set(x, 0, z);
@@ -313,21 +293,30 @@ export function addLandscape(scene: THREE.Scene) {
           const s = 0.45 + rand() * 0.85;
           dummy.scale.set(s, s * (0.7 + rand() * 0.5), s);
           dummy.updateMatrix();
-          clusters.setMatrixAt(ci++, dummy.matrix);
+          dummy.matrix.toArray(matrices, ci++ * 16);
         }
-        clusters.count = ci;
-        clusters.castShadow = clusters.receiveShadow = true;
-        clusters.computeBoundingSphere();
+        rockTotal = ci;
+        const clusters = new THREE.InstancedMesh(rockMesh.geometry, rockMat, rockTotal);
+        clusters.castShadow = false;
+        clusters.receiveShadow = true;
+        clusters.frustumCulled = false;
+        clusters.count = 0;
+        clusters.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        rockInst = clusters;
+        rockMatrices = matrices;
         scene.add(clusters);
       }
     })
-    .catch((err) => {
-      console.warn('Scatter assets unavailable, keeping procedural grass/rocks', err);
-    });
+    .catch((err) => console.warn('Scatter assets unavailable, keeping procedural grass/rocks', err));
 
   return {
-    update: (time: number) => {
+    update: (time: number, focusX = 0, focusZ = 0) => {
       windUniform.value = time;
+      // Draw only trees/rocks near the player: they are fogged out beyond ~70 m and this keeps
+      // the triangle budget bounded even with full multi-primitive tree geometry (pine ~12.5 k tris).
+      if (pineMatrices) for (const inst of pineInsts) cullInto(inst, pineMatrices, pineCount, focusX, focusZ, 64);
+      if (oakMatrices) for (const inst of oakInsts) cullInto(inst, oakMatrices, oakCount, focusX, focusZ, 64);
+      if (rockInst && rockMatrices) cullInto(rockInst, rockMatrices, rockTotal, focusX, focusZ, 80);
     }
   };
 }

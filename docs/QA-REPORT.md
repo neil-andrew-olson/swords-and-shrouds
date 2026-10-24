@@ -471,3 +471,159 @@ Run after the Lead's Cloudflare deployment:
   grey road, readable actors, 10-card armory data in the HUD.
 
 **Batch-2 live deployment is verified end-to-end: green.**
+
+---
+
+## Batch 2026-10C — performance evidence (in progress)
+
+Smoothness/perf pass. Everything below is measured, not estimated; the authoritative after-numbers
+are captured on the Lead's final optimised build (see status at the end of this section).
+
+### Harness: `--perf` mode (`scripts/smoke-browser.mjs`)
+
+```bat
+:: after-capture on a local production build (read-only; dist must be final)
+& $node scripts/smoke-browser.mjs --perf --skip-build --out qa/perf-after-batch3
+
+:: reference capture against the deployed site (no __ssPerf hook => fps/load only)
+& $node scripts/smoke-browser.mjs --perf --url https://neilandrew.dev/games/swords-and-shrouds/ --out qa/perf-before-batch2-live
+```
+
+`--perf` captures, per view (third-person spawn, first-person) and per quality tier
+(`low|medium|high` via `window.__ssQuality`):
+`window.__ssPerf()` (`renderer.info`: calls, triangles, points, geometries, textures, programs;
+scene objects, meshes, materials, lights, skinned; quality tier, pixelRatio, rolling fps/frameMs),
+3–5 s of rAF frame-time samples (mean/p50/p95/min/max/fps), load timings
+(navigation → landing visible → HUD → first authoritative state, plus page `performance`
+navigation/resource entries), internal request count and encoded bytes (total and assets), the
+graphics-quality selector (presence, calls the hook, `ss-quality` persistence proven across a
+reload done at the end of the run), and loading-progress UX (observer-recorded
+`#connection` text transitions + join-enable time + max rAF main-thread gap). Local-full mode gates
+on: hook present, quality setter works, **low-tier draw calls ≥10 % below high**, selector persists,
+**≥2 distinct loading progress counts**, no frozen frame >5 s, plus all existing smoke gates.
+
+### Baseline (pre-optimisation, world-scene Phase-1 hooks build, quality forced high)
+
+| Metric | Third-person | First-person |
+| --- | --- | --- |
+| draw calls | **88,544** | **87,317** |
+| triangles | **4,041,177** | **4,070,005** |
+| points | 340 | 340 |
+| geometries | 2,605 | 2,608 |
+| textures | 114 | 114 |
+| programs | 53 | 53 |
+| scene objects / meshes / materials / lights / skinned | 175,324 / 96,671 / 276 / 17 / 27 | 175,297 / 96,626 / 277 / 17 / 27 |
+
+Pre-batching tier separation was negligible (calls low 86,074 / medium 84,604 / high 84,108).
+Load: navigation 5.2 s, 48 resources, **43.19 MB** transfer. Targets for this batch:
+**calls ≤ 35 % of baseline (≈31.0 k)** and **triangles ≤ 60 % (≈2.42 M)** in the spawn
+third-person view, with zero visual regressions.
+
+Independent QA "before" reference on the **deployed batch-2** site (no `__ssPerf` hook, so
+fps/load-only): **fps 0.58 TP / 0.59 FP**, mean frame 1.72 s, navigation→landing 6.1 s,
+navigation→HUD 34.2 s, **42.6 MB asset bytes** / 53 internal requests, 0 page errors, 0 asset
+404s, 10 weapon cards (PASS 19/19). Screenshots `qa/perf-before-batch2-live/`.
+
+### Interim build (context only — NOT the authoritative result)
+
+A read-only capture on the 01:55 interim build (`index-CFtW9YuC.js`, pre-final; asset-forge
+slimming + ruins instancing + part of world-scene batching already applied): TP calls **217**,
+triangles **2,508,998**, meshes 670, objects 4,280, geometries 142, textures 115, programs 63,
+lights 17, skinned 37; FP calls 181, tris 2,367,629; low/medium/high calls 147 / 217 / 216
+(low/high ratio 0.68 → tier gate passes); dist payload 9.93 MB gzip, 12.2 MB response bytes.
+This interim build also logged 8 `BufferGeometryUtils.mergeGeometries()` console errors and a
+pale-foliage visual regression — both reported to world-scene and expected to be fixed before the
+authoritative capture, so these numbers are indicative only.
+
+### Authoritative after-capture + regression suite (pending Lead's final-build ping)
+
+To run on the final optimised build: `--perf --skip-build` after-capture (`qa/perf-after-batch3`)
+with the before/after deltas; fresh-build local smoke (`qa/final-batch3`, expected 16/16);
+`--coop --skip-build` (expected 18/18); `--url` live baseline against the deployed batch-2 site;
+loading-progress/quality-selector gates; visual regression against
+`qa/live-batch2`/`qa/perf-before-batch2-live` screenshots; and a final `--url` run against the
+batch-3 deployment once the Lead ships it. Results and the green/red verdict will replace this
+paragraph.
+
+### Authoritative after-capture — PASS 23/23 (final dist `index-BeMuJwuM.js`)
+
+Final bundle after the surgical landing-page fix: **`dist/client/assets/index-BeMuJwuM.js`**
+(793,960 B). The fix hides the legacy blue-cone keep towers from the first frame and only reveals
+them if the modern `castle_tower`/`fortress_keep` assets fail to load; no rendering draws were
+added. A fresh `vite build` from the final tree reproduced **the same hash**, so the capture and
+the tree are byte-identical. Pre-fix capture on `index-DfbqKz3R.js` (793,534 B) was functionally
+identical; only the hidden legacy geometry differs (its removal left geometries 148→141 and
+textures 132→125 in the counters below).
+
+Command: `& $node scripts/smoke-browser.mjs --perf --skip-build --out qa/perf-after-batch3`
+SwiftShader, 1584×805, quality high unless stated. 0 page errors, 0 console errors, **0 console
+warnings**, 0 log errors, 0 bad responses, 0 failed requests, 10 weapon cards, WS opens=1/closes=0.
+(The fresh-build local smoke `qa/final-batch3` is PASS 16/16, vite build 1.4 s with bundled Node 24.)
+
+| Metric (spawn view) | Baseline | Final | Delta |
+| --- | --- | --- | --- |
+| draw calls TP | 88,544 | **301** | **0.34 %** (target ≤35 %) ✅ |
+| triangles TP | 4,041,177 | **1,761,097** | **43.6 %** (target ≤60 %) ✅ |
+| draw calls FP | 87,317 | **259** | **0.30 %** ✅ |
+| triangles FP | 4,070,005 | **1,584,700** | **38.9 %** ✅ |
+| meshes | 96,671 | **852** | 0.88 % |
+| scene objects | 175,324 | **4,728** | 2.7 % |
+| geometries | 2,605 | **141** | 5.4 % |
+| textures | 114 | 125 | 109.6 % (merged/instanced materials; legacy-tower textures gone) |
+| programs | 53 | 74 TP / 105 FP | measured after the quality-selector pre-test compiled both tier variants; world-scene's clean probe = 51 |
+| lights / skinned | 17 / 27 | 17 / 37 | unchanged lights |
+
+- **Landing streaming-window fix verified:** this batch's QA found legacy **blue-cone tower caps**
+  visible on the landing page while the modern keep towers streamed in (captured in
+  `qa/final-batch3/00-landing.png` pre-fix). After world-scene's hidden-by-default +
+  reveal-on-failure fix, `00-landing-early.png` (immediately on landing), `00-landing-mid.png`
+  (~0.6 s later) and `00-landing.png` all show **no blue cones at any point**, while
+  `01-third-person.png` still shows the modern masonry. The early/mid/late landing frames are now
+  part of the standard smoke capture for future visual regressions.
+
+- **Quality tiers:** low **238 calls / 1,453,625 tris**, medium 301 / 1,760,365, high 300 /
+  1,760,293 → **low tier = 79.3 % of high calls (−20.7 %), −17.4 % triangles** (gate ≥10 % drop ✅).
+  Quality selector: present (`#qualityChoice`, low/medium/high), calls `__ssQuality`, writes
+  `ss-quality`; set to medium → reload → hook reports **medium** and localStorage `medium`
+  (persistence proven); restored to high afterwards.
+- **Progressive loading:** `#connection` shows real counts (`Loading world… N/M`); with a QA-only
+  pre-app fetch delay (900 ms + 250 ms/asset, instrumentation only, src untouched) the observer
+  recorded **0/20 → 11/20 → 12/20 → 13/20** count changes and join-enabled at **3.89 s**, max
+  main-thread gap 1.67 s (<5 s gate) — screenshot
+  `qa/perf-after-batch3/05-loading-progress.png`. On a fast localhost load the count can jump
+  straight from 0/20 to ready because scene construction blocks the main thread while the assets
+  finish; the throttled-network path is what makes it visible.
+- **Load timings / payload:** navigation→landing **3.76 s** (baseline 5.2 s), →HUD 15.8–23.4 s
+  across runs (SwiftShader start-up variance), →first state 17.9–24.8 s; 66 internal requests;
+  **12.20 MB** transfer (asset bytes 12,201,905) vs **43.19 MB** baseline = **−71.8 %**; deployed
+  batch-2 live was 42.6 MB / landing 6.1 s / HUD 34.2 s. Resource count rose 48→66 (smaller, split
+  files) but bytes dropped 3.5×.
+- **fps:** SwiftShader rAF 1.53 TP / 1.37 FP (mean frame 653/732 ms; app-ring `frameMs` 46.3 ms is
+  headless-throttled). Absolute software fps is only a relative proxy; the structural wins
+  (calls/tris/objects) are the reliable target and they are enormous.
+- **Visual regression vs `qa/live-batch2`:** screenshots `qa/perf-after-batch3/` show the same
+  composition — moon + halo + stars, dark night sky, tents at the mill camp, low ruined stone
+  walls, weapon racks, 10-card armory, HUD readable. Trees now read **dark green** (the pale/white
+  masses are the white stone-wall/ruin scans, as world-scene confirmed). The road is **cooler and
+  darker** than batch 2 (measured road patch mean RGB 82,98,115 vs 109,113,117; frame mean 26,37,42
+  vs 49,60,61) — a night-toning/hue shift with a similar ratio, **not a brightness regression**
+  (world-scene's framing). Gate towers read as stone masonry from the first landing frame (no
+  legacy blue cones), which reads intentional and better than batch-2's white caps.
+- **Build reproducibility:** the fresh-build local smoke (`qa/final-batch3`, PASS 16/16, vite build
+  1.4 s with bundled Node 24) reproduced the *same* bundle
+  `dist/client/assets/index-BeMuJwuM.js` (793,960 B), so the read-only perf capture and the rebuilt
+  tree are byte-identical code. (Pre-fix build reproduced `index-DfbqKz3R.js`, 793,534 B.)
+- **Co-op on the final build:** `qa/coop-batch3` PASS 18/18 — same room, both snapshots list both
+  players, B movement propagated 3.0 m, A recovered the Warhammer rack and B's armory became
+  `["sword","hammer"]`, both HUDs live, 0 errors both pages (dual SwiftShader 1.2 fps each).
+- **Live baseline (deployed batch-2, 2026-10-24 02:51):** `--url https://neilandrew.dev/games/swords-and-shrouds/ --out qa/live-prebatch3 --expect-weapons 10` → **PASS 17/17**;
+  deployed batch-2 bundle still served, 10 weapon cards, 0 page errors, 0 asset 404s, WS
+  opens=1/closes=0 (one 9.9 s message gap, no reconnect), fps 0.7. Only log-level entry is the
+  third-party Cloudflare-Insights beacon (`ERR_ADDRESS_UNREACHABLE`, not gated). This is the
+  pre-batch-3 deployment reference; the final new-live run happens after the Lead ships batch 3.
+
+**Verdict: batch-3 smoothness pass is green on every measured axis** on the final bundle
+`index-BeMuJwuM.js` — draw calls 0.34 % and triangles 43.6 % of baseline in the spawn view, local
+payload −71.8 %, tier separation working, progressive loading observable, landing blue-cone fix
+verified in three early frames, co-op intact, no page/console errors or asset 404s. Remaining
+notes are cosmetic (cooler/darker road hue; textures/programs +counts explained above).
