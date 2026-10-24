@@ -1751,3 +1751,46 @@ baseline **21/21**, 0 page/console/log errors and 0 404s throughout.
 items. Cycle-7 gaps: strict-mask palette (hero/fallen/ranger), altar culling/teleport capture hook,
 physical-gamepad rumble/hardware verification, surface-audio ear check, real-GPU/perceptual/controller/
 mobile passes, content depth. After deploy: final live pass + task-66 complete.
+
+### Final live deployment verification — cycle-6 (game `d4b095c9`, hosting `ed6a59b3`)
+
+Deployed after the Lead accepted the cycle-6 pass. Live verification runs:
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch9-deployed --expect-weapons 10 `
+    --expect-assets custom/templar.glb.gz,custom/hero.glb.gz,custom/berserker.glb.gz,custom/ranger.glb.gz,custom/ally.glb.gz,custom/survivor.glb.gz,custom/fallen.glb.gz,custom/stone_well.glb.gz,custom/blacksmith_stall.glb.gz,custom/stone_altar.glb.gz,custom/forge_furnace.glb.gz
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --probe-preview --out qa/live-sixth-c6
+```
+
+- **Results: PASS 27/27 (deployed pass) + PASS 25/25 (live sixth-appearance/probe run).** Live serves
+  **`assets/index-CwNoKm_O.js` (883,519 B)** — hosting/base-path build of authoritative
+  `index-BY6s-QI9.js` (883,369 B; +150 B, consistent with prior hosting deltas); `/health` OK;
+  **11/11 expected assets HTTP 200** (7 armour GLBs incl. **survivor 791,204 B**, hero 798,296,
+  stone_well, blacksmith_stall, **stone_altar 220,895**, **forge_furnace 280,799**); 10 cards; 0
+  page/console errors, 0 bad/404/failed requests; WS opens=1/closes=0. Only log: external
+  Cloudflare-Insights beacon (third-party, not gated).
+- **Live payload:** 17,074,377 B = **16.28 MiB** across 86 assets (curl-verified) — +0.06 MB vs
+  cycle-5 live; CREDITS 4,697 B.
+- **Sixth appearance live:** selector synced to **survivor** (`__ssCharacterSelect` value/inGameValue
+  survivor, in-game `#characterChoiceInGame`); authoritative snapshot **appearance:'survivor'**; live
+  third-person `probe-survivor-tp.png` shows the Wandering Survivor as the player with weapon attached;
+  0 page errors.
+- **Controller live:** cycle-6 hooks present — `__ssPad()` connected/standard/hintsVisible; HUD
+  `#padHints` **6 glyph hints** + `pad-connected` class + connection toast; rumble guarded with no
+  `vibrationActuator` (0 errors); reduced-motion emulation flips `reducedMotion/rumbleGuarded` true;
+  disconnect hides hints/class and shows keyboard toast.
+- **Reduced motion live:** two heavy-hit samples under `__ssSetReducedMotion(true)` → vignette **0**,
+  hit-stop **0**, kick **0**; normal peaks intact (hit-stop 60 ms, vignette 0.749, kick 0.068).
+  Low-tier `__ssCharacterFx()` reports `clothWind:false` (high/medium true) live.
+- **Night/weather live:** TP canvas mean **56.12** (deployed pass) / **50.99** (probe run) ≤75;
+  deterministic clear-weather night capture via `__ssSetWeather('march','clear',0)`; `__ssClearWeather`
+  ships from world-scene (used for local QA clear; not separately re-exercised live). Regions/crown
+  verified on the authoritative artifact; altar content capture remains culling-limited (cycle-7 ask).
+- **Live HUD/regression:** join button enabled 3.77 s local (tight ≤3.8); live nav→HUD includes QA
+  landing overhead as usual; 0 404s; 10 cards; no console/page errors.
+
+**Cycle-6 live deployment is verified end-to-end: green, with the deferred strict-mask palette debt and
+the altar-culling capture caveat carried into cycle 7.** task-66 complete; cycle-7 candidates:
+strict-mask palette hero/fallen/ranger, altar capture/teleport hook, physical controller rumble/real
+hardware, surface-audio ear check, real-GPU/perceptual/mobile passes, content depth.
