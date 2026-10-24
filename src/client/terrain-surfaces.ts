@@ -154,11 +154,12 @@ function applyToMesh(mesh: THREE.Mesh, surface: SurfaceKind, textures: SurfaceTe
       if (surface !== 'ground') {
         copy.color.setRGB(1, 1, 1);
       } else {
-        // Neutralise most of the daylight-green region tint so moonlight reads blue-grey.
+        // Neutralise most of the daylight-green region tint so moonlight reads blue-grey, and cool
+        // the remainder slightly; scene.ts may tint on top of this, so keep the shift moderate.
         const tint = copy.color;
         const luma = tint.r * 0.299 + tint.g * 0.587 + tint.b * 0.114;
-        tint.lerp(new THREE.Color(luma * 1.06, luma * 1.12, luma * 1.24), 0.62);
-        tint.multiplyScalar(1.35);
+        tint.lerp(new THREE.Color(luma * 1.02, luma * 1.1, luma * 1.3), 0.66);
+        tint.multiplyScalar(1.28);
       }
     }
     copy.needsUpdate = true;
@@ -173,48 +174,72 @@ function applyToMesh(mesh: THREE.Mesh, surface: SurfaceKind, textures: SurfaceTe
  * Loads the scanned surface textures and applies them to every `mesh.userData.surface`-tagged
  * mesh currently in the scene. Safe to call once after the world is built.
  */
-const flatGroundCache = new Map<THREE.Texture, THREE.Texture>();
+const remapCache = new WeakMap<THREE.Texture, THREE.Texture>();
+
+type ChannelRemap = (red: number, green: number, blue: number) => readonly [number, number, number];
+
+const clampByte = (value: number) => Math.max(0, Math.min(255, value));
+const lumaOf = (red: number, green: number, blue: number) => red * 0.299 + green * 0.587 + blue * 0.114;
+
 /**
- * The scanned mud/grass detail map is high-contrast and strongly green; multiplied by the dark
- * region tint under moonlight it reads as bright-green polygons against near-black shadow. Re-map
- * it to a low-contrast, cool blue-grey night albedo: the moss/soil luminance detail stays, but the
- * daylight-green saturation that fought the night palette goes. The green world colour then comes
- * from the grass/foliage instances rather than the ground itself.
+ * Canvas remap for scanned albedo maps: keeps the luminance detail but rewrites the palette.
+ * Used for the night ground pass and to turn the country-road scan into grey stone. Missing DOM
+ * (tests / non-browser) or an unloaded image simply returns the source texture untouched.
  */
-function flattenGroundTexture(source: THREE.Texture): THREE.Texture {
-  const cached = flatGroundCache.get(source);
+function remapTexture(source: THREE.Texture, size: number, blur: string, remap: ChannelRemap): THREE.Texture {
+  const cached = remapCache.get(source);
   if (cached) return cached;
   try {
     if (typeof document === 'undefined' || !source.image) return source;
-    const size = 512;
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = size;
     const context = canvas.getContext('2d');
     if (!context) return source;
-    context.filter = 'blur(1.5px)';
+    context.filter = blur;
     context.drawImage(source.image as CanvasImageSource, 0, 0, size, size);
     context.filter = 'none';
     const image = context.getImageData(0, 0, size, size);
     const data = image.data;
-    for (let i = 0; i < data.length; i += 4) {
-      const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-      // Compress the luminance swing (0.42x around mid-grey) and cool it toward moonlight.
-      const level = (luma - 128) * 0.42 + 96;
-      data[i] = Math.max(0, Math.min(255, level * 0.82 + 10));
-      data[i + 1] = Math.max(0, Math.min(255, level * 0.92 + 12));
-      data[i + 2] = Math.max(0, Math.min(255, level * 1.02 + 14));
+    for (let index = 0; index < data.length; index += 4) {
+      const [red, green, blue] = remap(data[index], data[index + 1], data[index + 2]);
+      data[index] = red;
+      data[index + 1] = green;
+      data[index + 2] = blue;
     }
     context.putImageData(image, 0, 0);
-    const flattened = new THREE.CanvasTexture(canvas);
-    flattened.colorSpace = THREE.SRGBColorSpace;
-    flattened.wrapS = flattened.wrapT = THREE.RepeatWrapping;
-    flattened.anisotropy = source.anisotropy;
-    flattened.needsUpdate = true;
-    flatGroundCache.set(source, flattened);
-    return flattened;
+    const remapped = new THREE.CanvasTexture(canvas);
+    remapped.colorSpace = THREE.SRGBColorSpace;
+    remapped.wrapS = remapped.wrapT = THREE.RepeatWrapping;
+    remapped.anisotropy = source.anisotropy;
+    remapped.needsUpdate = true;
+    remapCache.set(source, remapped);
+    return remapped;
   } catch {
     return source;
   }
+}
+
+/**
+ * Night ground (batch 2026-10B): the scanned mud/grass detail map is high-contrast and strongly
+ * green, and multiplied by the dark region tint it reads as bright-green polygons against the long
+ * castle shadow. Compress the luminance swing, lower the mid-point slightly and pull the palette
+ * toward cool blue-grey: moss/soil detail stays, the daylight-green saturation goes. The green of
+ * the world then comes from the grass/foliage instances rather than the ground itself.
+ */
+function nightGroundRemap(red: number, green: number, blue: number): readonly [number, number, number] {
+  const level = (lumaOf(red, green, blue) - 128) * 0.36 + 90;
+  return [clampByte(level * 0.79 + 8), clampByte(level * 0.9 + 10), clampByte(level * 1.03 + 13)];
+}
+
+/**
+ * Country road -> grey stone (batch 2026-10B): desaturate the scanned earth tones toward a neutral
+ * cool grey and compress contrast slightly, keeping all the scan detail. world-scene still
+ * multiplies the material colour down in scene.ts, so this stays moderately bright: the detail
+ * carries the read, not the exposure.
+ */
+function greyStoneRemap(red: number, green: number, blue: number): readonly [number, number, number] {
+  const level = (lumaOf(red, green, blue) - 128) * 0.84 + 124;
+  return [clampByte(level * 0.96 + 4), clampByte(level + 6), clampByte(level * 1.04 + 9)];
 }
 
 export async function applySurfaceTextures(scene: THREE.Scene, maxAnisotropy: number): Promise<void> {
@@ -230,9 +255,15 @@ export async function applySurfaceTextures(scene: THREE.Scene, maxAnisotropy: nu
           loadTexture(loader, assetUrl(spec.map), THREE.SRGBColorSpace, anisotropy),
           spec.normal ? loadTexture(loader, assetUrl(spec.normal), THREE.NoColorSpace, anisotropy) : Promise.resolve(null)
         ]);
-        const flattened = surface === 'ground' && color ? flattenGroundTexture(color) : color;
+        // Ground -> cool low-contrast night albedo; road -> grey stone; cobble keeps its scan as-is.
+        const mapped =
+          !color || surface === 'cobble'
+            ? color
+            : surface === 'ground'
+              ? remapTexture(color, 512, 'blur(1.5px)', nightGroundRemap)
+              : remapTexture(color, 1024, 'blur(0.4px)', greyStoneRemap);
         loaded.set(surface, {
-          color: flattened ? new TextureVariants(flattened) : null,
+          color: mapped ? new TextureVariants(mapped) : null,
           normal: normal ? new TextureVariants(normal) : null
         });
       })

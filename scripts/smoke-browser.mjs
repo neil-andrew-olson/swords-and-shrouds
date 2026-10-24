@@ -12,10 +12,17 @@
  *
  * Usage:
  *   node scripts/smoke-browser.mjs --out qa/baseline
- *   node scripts/smoke-browser.mjs --out qa/final --skip-build
+ *   node scripts/smoke-browser.mjs --out qa/final-batch2                 # fresh build + local server
+ *   node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ \
+ *        --out qa/live --expect-weapons 10                              # deployed site, no build/server
+ *   node scripts/smoke-browser.mjs --coop --skip-build --out qa/coop    # 2-player co-op (local server)
  *
  * Options:
  *   --out <dir>        Screenshot output dir, relative to the game repo (default qa/baseline)
+ *   --url <url>        Drive an already-deployed site: skips build + local server entirely
+ *   --coop             Two independent browser contexts: A creates a room, B joins and plays
+ *   --expect-weapons <n> Gate `#weaponCards` to exactly n (default: report only)
+ *   --expect-assets <list> Comma-separated asset paths (relative to assets/) to fetch and require 200
  *   --skip-build       Reuse the existing dist/client instead of running vite build
  *   --keep             Keep the temp Chrome profile / logs after the run
  *   --chrome <path>    Chrome executable (default C:\Program Files\Google\Chrome\Application\chrome.exe)
@@ -43,24 +50,75 @@ const DEFAULT_CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.e
 const BUNDLED_NODE = 'C:\\Users\\neil\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\node\\bin\\node.exe';
 const VIEWPORT = {width: 1600, height: 900};
 const CANVAS_GATE = {minStd: 2, minNonDarkPct: 2, minColors: 32};
-// Injected before the app boots: records every WebSocket lifecycle so the report can tell a real
-// server disconnect/reconnect from a transient toast (e.g. "Connection lost. Reconnecting...").
+// Injected before the app boots: records the WebSocket lifecycle AND a summary of the last
+// authoritative snapshot on every page. This is what lets the harness (a) prove a real
+// disconnect/reconnect vs a transient toast, (b) carry out co-op assertions (players, positions,
+// shared armory) without touching src/, and (c) time closes against navigations / server stalls.
 const WS_INSTRUMENT = `(()=>{
   if(window.__qaWs)return;
   const O=window.WebSocket;
-  window.__qaWs={instances:0,opens:0,closes:[],errors:[],urls:[]};
+  const state={instances:0,opens:0,closes:[],errors:[],urls:[],openedAt:[],stateCount:0,
+    welcome:null,firstStateAt:null,lastMessageAt:null,lastState:null,visibility:[],conns:[]};
+  window.__qaWs=state;
+  function summarizeState(m){
+    const game=m.game||{};
+    return {
+      at:Date.now(),
+      players:(m.players||[]).map(p=>({id:p.id,name:p.name,connected:!!p.connected})),
+      // Only player actors: co-op assertions need player positions, not the 90+ NPCs/waves.
+      actors:(game.actors||[]).filter(a=>a.kind==='player').map(a=>({id:a.id,name:a.name,kind:a.kind,hp:a.hp,
+        x:Math.round(a.x*10)/10,z:Math.round(a.z*10)/10,yaw:a.yaw})),
+      armory:(game.armory||[]).slice(),
+      weaponDrops:(game.weaponDrops||[]).map(d=>({weapon:d.weapon,
+        x:Math.round(d.x*10)/10,z:Math.round(d.z*10)/10,taken:!!d.taken})),
+      resources:game.resources?{wood:game.resources.wood,iron:game.resources.iron,medicine:game.resources.medicine,recruits:game.resources.recruits}:null,
+      status:game.status
+    };
+  }
   class QAWebSocket extends O {
     constructor(...args){
       super(...args);
-      const state=window.__qaWs;
-      state.instances++;
+      const idx=state.instances++;
       state.urls.push(String(args[0]||''));
-      this.addEventListener('open',()=>{state.opens++;});
-      this.addEventListener('close',event=>{state.closes.push({code:event.code,reason:event.reason,wasClean:event.wasClean,at:Date.now()});});
-      this.addEventListener('error',()=>{state.errors.push({at:Date.now()});});
+      state.openedAt.push(null);
+      state.conns.push({url:String(args[0]||''),openedAt:null,closedAt:null,closeCode:null,stateCount:0,msgCount:0,maxGapMs:0,lastMessageAt:null});
+      this.__qaIndex=idx;
+      this.addEventListener('open',()=>{state.opens++;state.openedAt[idx]=Date.now();state.conns[idx].openedAt=Date.now();});
+      this.addEventListener('close',event=>{
+        const openedAt=state.openedAt[idx];
+        const close={instance:idx,code:event.code,reason:event.reason,wasClean:event.wasClean,
+          at:Date.now(),openedAt,openMs:openedAt?Date.now()-openedAt:null,
+          statesBeforeClose:state.conns[idx]?state.conns[idx].stateCount:null,
+          lastMessageAgoMs:state.lastMessageAt?Date.now()-state.lastMessageAt:null};
+        state.closes.push(close);
+        if(state.conns[idx])Object.assign(state.conns[idx],{closedAt:close.at,closeCode:event.code});
+      });
+      this.addEventListener('error',()=>{state.errors.push({instance:idx,at:Date.now()});});
+      this.addEventListener('message',event=>{
+        const now=Date.now();
+        state.lastMessageAt=now;
+        const conn=state.conns[idx];
+        if(conn){
+          if(conn.lastMessageAt){const gap=now-conn.lastMessageAt;if(gap>conn.maxGapMs)conn.maxGapMs=gap;}
+          conn.lastMessageAt=now;
+          conn.msgCount++;
+        }
+        try{
+          const m=JSON.parse(event.data);
+          if(m&&m.type==='welcome'){state.welcome={id:m.id,code:m.code,at:Date.now()};}
+          else if(m&&m.type==='state'){
+            state.stateCount++;
+            if(state.conns[idx])state.conns[idx].stateCount++;
+            if(!state.firstStateAt)state.firstStateAt=Date.now();
+            state.lastState=summarizeState(m);
+          }
+        }catch(e){}
+      });
     }
   }
   window.WebSocket=QAWebSocket;
+  document.addEventListener('visibilitychange',()=>state.visibility.push({state:document.visibilityState,at:Date.now()}));
+  window.addEventListener('pagehide',()=>state.visibility.push({state:'pagehide',at:Date.now()}));
 })();`;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const round = n => Math.round(n * 100) / 100;
@@ -82,6 +140,10 @@ function parseArgs(argv) {
     chrome: DEFAULT_CHROME,
     hudTimeout: 150000,
     node: null,
+    url: null,
+    coop: false,
+    expectWeapons: null,
+    expectAssets: [],
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -90,6 +152,10 @@ function parseArgs(argv) {
     else if (a === '--keep') opts.keep = true;
     else if (a === '--chrome') opts.chrome = argv[++i];
     else if (a === '--node') opts.node = argv[++i];
+    else if (a === '--url') opts.url = argv[++i];
+    else if (a === '--coop') opts.coop = true;
+    else if (a === '--expect-weapons') opts.expectWeapons = Number(argv[++i]);
+    else if (a === '--expect-assets') opts.expectAssets = String(argv[++i] || '').split(',').map(s => s.trim()).filter(Boolean);
     else if (a === '--timeout') opts.hudTimeout = Number(argv[++i]) || opts.hudTimeout;
     else if (a === '--help' || a === '-h') {
       console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('*/')[0]);
@@ -99,6 +165,17 @@ function parseArgs(argv) {
     }
   }
   if (!opts.out) throw new Error('--out requires a directory');
+  if (opts.coop && opts.url) throw new Error('--coop and --url are mutually exclusive');
+  if (opts.expectWeapons !== null && (!Number.isInteger(opts.expectWeapons) || opts.expectWeapons < 1)) {
+    throw new Error('--expect-weapons requires a positive integer');
+  }
+  if (opts.url) {
+    try {
+      opts.url = new URL(opts.url).href;
+    } catch {
+      throw new Error(`--url is not a valid URL: ${opts.url}`);
+    }
+  }
   opts.outDir = path.isAbsolute(opts.out) ? opts.out : path.join(ROOT, opts.out);
   return opts;
 }
@@ -656,6 +733,525 @@ async function rendererInfo(page) {
   })()`);
 }
 
+/* ------------------------------------------------ shared page/session helpers */
+
+/** Root URL of the deployed site (keeps the sub-path, always trailing slash). */
+function siteRootFromUrl(raw) {
+  const u = new URL(raw);
+  const p = u.pathname.endsWith('/') ? u.pathname : u.pathname.slice(0, u.pathname.lastIndexOf('/') + 1);
+  return `${u.origin}${p}`;
+}
+
+/**
+ * Wire DevTools events for one page into a collector object. Used for the single-page flow and
+ * for both co-op pages. `internalPrefix`/`assetPrefix` scope the 4xx/failed-request gates so a
+ * third-party CDN failure is reported as a warning instead of failing the run.
+ */
+function attachPage(page, {internalPrefix, assetPrefix, label, notesSink}) {
+  const sink = {
+    label,
+    pageErrors: [],
+    consoleErrors: [],
+    consoleWarnings: [],
+    logErrors: [],
+    badResponses: [],
+    failedRequests: [],
+    assetRequests: [],
+    internalRequests: 0,
+    navigations: 0,
+    notes: notesSink || [],
+  };
+  const note = text => {
+    if (notesSink) {
+      if (!notesSink.includes(text)) notesSink.push(text);
+    } else if (!sink.notes.includes(text)) sink.notes.push(text);
+  };
+  const internal = url => typeof url === 'string' && url.startsWith(internalPrefix);
+  const isAsset = url => typeof url === 'string' && url.startsWith(assetPrefix);
+  const requestUrls = new Map();
+  page.on('Network.requestWillBeSent', params => {
+    if (params.request?.url) requestUrls.set(params.requestId, params.request.url);
+  });
+  sink.navigations = 0;
+  sink.navigationLog = [];
+  page.on('Page.frameNavigated', params => {
+    if (params.frame && !params.frame.parentId) {
+      sink.navigations++;
+      sink.navigationLog.push({url: params.frame.url, at: Date.now()});
+    }
+  });
+  page.on('Runtime.exceptionThrown', params => {
+    const d = params.exceptionDetails || {};
+    sink.pageErrors.push({
+      text: d.exception?.description || d.text || 'unknown exception',
+      url: d.url || '',
+      line: d.lineNumber,
+      at: Date.now(),
+    });
+  });
+  page.on('Runtime.consoleAPICalled', params => {
+    const type = params.type;
+    const text = (params.args || [])
+      .map(arg => {
+        if (arg.value !== undefined) return typeof arg.value === 'string' ? arg.value : JSON.stringify(arg.value);
+        return arg.description || arg.unserializableValue || String(arg.type);
+      })
+      .join(' ');
+    if (type === 'error' || type === 'assert') sink.consoleErrors.push({type, text, at: Date.now()});
+    else if (type === 'warning') sink.consoleWarnings.push({type, text, at: Date.now()});
+  });
+  page.on('Log.entryAdded', params => {
+    const entry = params.entry || {};
+    if (entry.level === 'error') sink.logErrors.push({source: entry.source, text: entry.text, url: entry.url || '', at: Date.now()});
+    else if (entry.level === 'warning') sink.consoleWarnings.push({type: `log:${entry.source}`, text: entry.text, at: Date.now()});
+  });
+  page.on('Network.responseReceived', params => {
+    const r = params.response || {};
+    const url = r.url || '';
+    if (internal(url)) {
+      sink.internalRequests++;
+      if (isAsset(url) && !sink.assetRequests.includes(url)) sink.assetRequests.push(url);
+    }
+    if (typeof r.status === 'number' && r.status >= 400) {
+      const entry = {url, status: r.status, type: params.type, mimeType: r.mimeType || ''};
+      if (internal(url)) {
+        if (/\/favicon\.ico$/.test(url)) note('favicon.ico is 404 (cosmetic, ignored)');
+        else sink.badResponses.push(entry);
+      } else {
+        sink.consoleWarnings.push({type: 'external-http', text: `${r.status} ${url}`, at: Date.now()});
+      }
+    }
+  });
+  page.on('Network.loadingFailed', params => {
+    if (params.canceled) return;
+    const entry = {requestId: params.requestId, errorText: params.errorText, type: params.type};
+    // Network.loadingFailed does not carry the URL; resolve it from requestWillBeSent.
+    const url = requestUrls.get(params.requestId);
+    if (internal(url)) sink.failedRequests.push({...entry, url, at: Date.now()});
+  });
+  return sink;
+}
+
+/** Create a fresh page target in Chrome and wire it up for QA driving. */
+async function openPageSession({debugPort, internalPrefix, assetPrefix, label, notesSink}) {
+  const info = await createPageTarget(debugPort);
+  const page = new CDP(info.webSocketDebuggerUrl, label);
+  await page.open();
+  const sink = attachPage(page, {internalPrefix, assetPrefix, label, notesSink});
+  await page.send('Page.enable');
+  await page.send('Runtime.enable');
+  await page.send('Log.enable');
+  await page.send('Network.enable', {maxTotalBufferSize: 50 * 1024 * 1024, maxResourceBufferSize: 10 * 1024 * 1024});
+  try {
+    await page.send('Emulation.setFocusEmulationEnabled', {enabled: true}, 5000);
+  } catch (error) {
+    sink.notes.push(`[${label}] Emulation.setFocusEmulationEnabled unavailable: ${error?.message || error}`);
+  }
+  try {
+    await page.send('Page.bringToFront', {}, 5000);
+  } catch {}
+  // Install the WebSocket recorder before the app's first script runs.
+  await page.send('Page.addScriptToEvaluateOnNewDocument', {source: WS_INSTRUMENT});
+  log(`CDP[${label}]: Page/Runtime/Log/Network enabled + WS instrumentation`);
+  return {page, sink, info};
+}
+
+async function waitForHud(page, timeoutMs = 150000) {
+  await waitFor(
+    page,
+    `(()=>{const h=document.getElementById('hud');return !!h && !h.hidden && getComputedStyle(h).display!=='none';})()`,
+    {timeoutMs, label: 'HUD visible'},
+  );
+}
+
+async function waitForGameState(page, timeoutMs = 60000) {
+  await waitFor(
+    page,
+    `(()=>{const p=document.getElementById('playerName');const r=document.getElementById('resources');const w=document.getElementById('wayfinder');return !!p&&p.textContent.trim().length>0&&!!r&&r.textContent.includes('WOOD')&&!!w&&w.textContent.trim().length>0;})()`,
+    {timeoutMs, label: 'game state (player name, resources, wayfinder)'},
+  );
+}
+
+async function navigateToLanding(page, url, {timeoutMs = 60000, label = 'page'} = {}) {
+  await page.send('Page.navigate', {url}, 60000);
+  await waitFor(page, `document.readyState==='complete'`, {timeoutMs, label: `${label} load`});
+  await waitFor(
+    page,
+    `(()=>{const l=document.getElementById('landing');const n=document.getElementById('name');return !!l && !l.hidden && !!n && l.getBoundingClientRect().height>0;})()`,
+    {timeoutMs, label: `${label} landing UI`},
+  );
+}
+
+/** Landing -> name -> "Begin a campaign" -> HUD + first authoritative snapshot. */
+async function createCampaign(page, {name = 'QA Knight', hudTimeout = 150000} = {}) {
+  await typeInto(page, '#name', name);
+  await clickSelector(page, '#create');
+  await waitForHud(page, hudTimeout);
+  await waitForGameState(page, 60000);
+}
+
+/** Landing -> name + room code -> "Join" -> HUD + first authoritative snapshot. */
+async function joinCampaign(page, {name = 'QA Knight', code, hudTimeout = 150000} = {}) {
+  await typeInto(page, '#name', name);
+  await typeInto(page, '#code', String(code));
+  await clickSelector(page, '#join');
+  await waitForHud(page, hudTimeout);
+  await waitForGameState(page, 60000);
+}
+
+/** Read the instrumented WebSocket/state summary from a page. */
+async function readQaState(page) {
+  return page.evaluate(`window.__qaWs ? JSON.parse(JSON.stringify({
+    instances:window.__qaWs.instances,opens:window.__qaWs.opens,closes:window.__qaWs.closes,
+    errors:window.__qaWs.errors,urls:window.__qaWs.urls,openedAt:window.__qaWs.openedAt,
+    conns:window.__qaWs.conns,
+    welcome:window.__qaWs.welcome,stateCount:window.__qaWs.stateCount,
+    firstStateAt:window.__qaWs.firstStateAt,lastMessageAt:window.__qaWs.lastMessageAt,
+    lastState:window.__qaWs.lastState,visibility:window.__qaWs.visibility
+  })) : null`);
+}
+
+async function holdKeys(page, keys, ms) {
+  for (const [code, key, vk] of keys) {
+    await page.send('Input.dispatchKeyEvent', {type: 'keyDown', code, key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk});
+  }
+  await sleep(ms);
+  for (const [code, key, vk] of keys) {
+    await page.send('Input.dispatchKeyEvent', {type: 'keyUp', code, key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk});
+  }
+}
+
+/** Make sure a page target is foregrounded (two independent Chrome instances otherwise blur). */
+async function focusPage(page, label = 'page') {
+  try {
+    await page.send('Page.bringToFront', {}, 5000);
+  } catch {}
+  try {
+    await page.send('Emulation.setFocusEmulationEnabled', {enabled: true}, 5000);
+  } catch {}
+  if (process.env.QA_DEBUG) {
+    try {
+      const state = await page.evaluate(`({focus:document.hasFocus(),visibility:document.visibilityState})`);
+      log(`FOCUS[${label}]: ${JSON.stringify(state)}`);
+    } catch {}
+  }
+}
+
+/**
+ * Keyboard-only walk to a weapon-rack drop using the authoritative snapshot (yaw + positions),
+ * so the co-op test can prove a rack pickup without relying on visual navigation. Holds each
+ * direction long enough to survive the very slow dual-SwiftShader frame ping-pong, and re-focuses
+ * the page every round (a second Chrome instance blurs the first, which releases held keys).
+ */
+async function moveToRack(page, rack, {iterations = 24, stepMs = 1200, label = 'rack'} = {}) {
+  for (let i = 0; i < iterations; i++) {
+    await focusPage(page, label);
+    const state = await readQaState(page);
+    const me = state?.welcome ? (state.lastState?.actors || []).find(a => a.id === state.welcome.id) : null;
+    const target = (state?.lastState?.weaponDrops || []).find(d => !d.taken && d.weapon === rack.weapon) || rack;
+    if (!me || !target) return {reason: 'no-player-or-target', iteration: i};
+    const dx = target.x - me.x;
+    const dz = target.z - me.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance < 2.2) return {distance: +distance.toFixed(2), iteration: i};
+    const prompt = await page.evaluate(`document.getElementById('prompt').textContent`);
+    if (/Recover/i.test(prompt || '')) return {distance: +distance.toFixed(2), iteration: i, prompt};
+    const yaw = me.yaw || 0;
+    const forward = dx * Math.sin(yaw) + dz * -Math.cos(yaw);
+    const right = dx * Math.cos(yaw) + dz * Math.sin(yaw);
+    const keys = [];
+    if (forward > 0.4) keys.push(['KeyW', 'w', 87]);
+    else if (forward < -0.4) keys.push(['KeyS', 's', 83]);
+    if (right > 0.4) keys.push(['KeyD', 'd', 68]);
+    else if (right < -0.4) keys.push(['KeyA', 'a', 65]);
+    if (!keys.length) return {distance: +distance.toFixed(2), stalled: true, iteration: i};
+    if (process.env.QA_DEBUG) {
+      log(`moveToRack[${label}] i=${i} me=(${me.x},${me.z}) yaw=${me.yaw} target=(${target.x},${target.z}) d=${distance.toFixed(2)} keys=${keys.map(k => k[0]).join('+')}`);
+    }
+    await holdKeys(page, keys, stepMs);
+    await sleep(250);
+  }
+  return null;
+}
+
+/** Fetch a list of asset paths directly in the page and require HTTP 200 for each. */
+async function verifyExpectedAssets(page, assetPrefix, list, {timeoutMs = 120000} = {}) {
+  if (!list.length) return [];
+  return page.evaluate(
+    `(async()=>{const out=[];for(const rel of ${JSON.stringify(list)}){const url=${JSON.stringify(assetPrefix)}+String(rel).replace(/^\\/+/,'');try{const res=await fetch(url,{cache:'no-store'});out.push({path:rel,url,status:res.status,ok:res.ok});}catch(e){out.push({path:rel,url,status:null,ok:false,error:String((e&&e.message)||e)});}}return out;})()`,
+    {awaitPromise: true, timeoutMs},
+  );
+}
+
+/** Poll the local server's /health every second to detect event-loop/CPU starvation stalls. */
+function startHealthSampler(port) {
+  const samples = [];
+  let stopped = false;
+  let inFlight = false;
+  const timer = setInterval(async () => {
+    if (stopped || inFlight) return;
+    inFlight = true;
+    const started = Date.now();
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/health`, {signal: AbortSignal.timeout(5000)});
+      samples.push({at: started, rttMs: Date.now() - started, ok: res.ok});
+    } catch (error) {
+      samples.push({at: started, rttMs: Date.now() - started, ok: false, error: String(error?.cause?.code || error?.message || error)});
+    } finally {
+      inFlight = false;
+    }
+  }, 1000);
+  timer.unref?.();
+  return {
+    samples,
+    stop() {
+      stopped = true;
+      clearInterval(timer);
+    },
+  };
+}
+
+function summarizeHealth(samples) {
+  if (!samples.length) return null;
+  const rtts = samples.map(s => s.rttMs).sort((a, b) => a - b);
+  const pick = f => rtts[Math.min(rtts.length - 1, Math.floor(rtts.length * f))];
+  return {
+    samples: samples.length,
+    p50Ms: pick(0.5),
+    p95Ms: pick(0.95),
+    maxMs: rtts[rtts.length - 1],
+    stallsOver2s: samples.filter(s => s.rttMs > 2000).length,
+    failures: samples.filter(s => !s.ok).length,
+  };
+}
+
+/** Compact WS/state diagnostics for the reconnect investigation. */
+function wsDiagnostics(state, startedAt) {
+  if (!state) return null;
+  return {
+    instances: state.instances,
+    opens: state.opens,
+    closes: state.closes || [],
+    conns: state.conns || [],
+    errors: state.errors || [],
+    urls: state.urls || [],
+    stateCount: state.stateCount,
+    welcome: state.welcome,
+    firstStateAt: state.firstStateAt,
+    lastMessageAt: state.lastMessageAt,
+    reconnected: (state.opens || 0) > 1 || (state.closes || []).length > 0,
+    firstStateSinceStartMs: startedAt && state.firstStateAt ? state.firstStateAt - startedAt : null,
+    // Client reconnect delay: setTimeout(500ms * 2^attempt) fired late proves a renderer stall.
+    reconnectGapsMs: (state.closes || []).map(close => {
+      const nextOpen = (state.openedAt || [])[close.instance + 1];
+      return nextOpen ? nextOpen - close.at : null;
+    }),
+  };
+}
+
+/**
+ * Two-player co-op verification: two completely independent Chrome instances/profiles against
+ * the local authoritative server. A creates a room, B joins with the code, then we prove via the
+ * instrumented authoritative snapshots that both clients see both players, B's movement reaches
+ * A, and a weapon-rack pickup unlocks for both (shared armory rule).
+ */
+async function coopFlow({opts, report, check, logDir, tempRoot, baseUrl, healthSampler, handles}) {
+  const internalPrefix = baseUrl;
+  const assetPrefix = `${baseUrl}/assets/`;
+  const coopStartedAt = Date.now();
+  report.coop = {roomCode: null, playersA: null, playersB: null, movement: null, pickup: null, hud: null};
+
+  // --- Player A: fresh profile, create the campaign/room.
+  const debugA = await freePort();
+  const chromeA = await startChrome(debugA, path.join(tempRoot, 'chrome-coop-a'), opts.chrome, logDir);
+  handles.chromes.push(chromeA);
+  const sessionA = await openPageSession({debugPort: debugA, internalPrefix, assetPrefix, label: 'coop-A', notesSink: report.notes});
+  handles.pages.push(sessionA.page);
+  await navigateToLanding(sessionA.page, `${baseUrl}/`, {timeoutMs: opts.hudTimeout, label: 'coop A'});
+  await createCampaign(sessionA.page, {name: 'Coop A', hudTimeout: opts.hudTimeout});
+  const roomCode = ((await sessionA.page.evaluate(`document.getElementById('roomCode').textContent`)) || '').trim().toUpperCase();
+  report.coop.roomCode = roomCode;
+  check('coop: room created (6-char room code shown)', /^[0-9A-F]{6}$/.test(roomCode), roomCode);
+
+  // --- Player B: second independent Chrome instance + profile, join by room code.
+  const debugB = await freePort();
+  const chromeB = await startChrome(debugB, path.join(tempRoot, 'chrome-coop-b'), opts.chrome, logDir);
+  handles.chromes.push(chromeB);
+  const sessionB = await openPageSession({debugPort: debugB, internalPrefix, assetPrefix, label: 'coop-B', notesSink: report.notes});
+  handles.pages.push(sessionB.page);
+  await navigateToLanding(sessionB.page, `${baseUrl}/`, {timeoutMs: opts.hudTimeout, label: 'coop B'});
+  await joinCampaign(sessionB.page, {name: 'Coop B', code: roomCode, hudTimeout: opts.hudTimeout});
+  check('coop: B joined the campaign via room code', true, roomCode);
+  // Wait until both instrumented snapshots list both players (slow software renderer can lag).
+  try {
+    await waitFor(sessionA.page, `window.__qaWs && window.__qaWs.lastState && window.__qaWs.lastState.players.length>=2`, {timeoutMs: 45000, label: 'A sees 2 players'});
+    await waitFor(sessionB.page, `window.__qaWs && window.__qaWs.lastState && window.__qaWs.lastState.players.length>=2`, {timeoutMs: 45000, label: 'B sees 2 players'});
+  } catch (error) {
+    report.notes.push(`coop: timed out waiting for both clients to see 2 players (${error?.message || error})`);
+  }
+  await sleep(1500);
+
+  const stateA = await readQaState(sessionA.page);
+  const stateB = await readQaState(sessionB.page);
+  const idA = stateA?.welcome?.id;
+  const idB = stateB?.welcome?.id;
+  const playersA = stateA?.lastState?.players || [];
+  const playersB = stateB?.lastState?.players || [];
+  const hudA = await hudSnapshot(sessionA.page);
+  const hudB = await hudSnapshot(sessionB.page);
+  report.coop.playersA = playersA;
+  report.coop.playersB = playersB;
+  report.coop.hud = {
+    a: {playerName: hudA.playerName, resources: hudA.resources, hudHidden: hudA.__hudHidden},
+    b: {playerName: hudB.playerName, resources: hudB.resources, hudHidden: hudB.__hudHidden},
+  };
+
+  check(
+    'coop: A and B are in the same room',
+    !!idA && !!idB && stateA?.welcome?.code === stateB?.welcome?.code,
+    `A=${idA} B=${idB} codeA=${stateA?.welcome?.code} codeB=${stateB?.welcome?.code}`,
+  );
+  check(
+    'coop: both authoritative snapshots list both player ids',
+    [idA, idB].every(id => playersA.some(p => p.id === id)) && [idA, idB].every(id => playersB.some(p => p.id === id)),
+    `A sees ${playersA.length} (${playersA.map(p => p.name).join(',')}), B sees ${playersB.length} (${playersB.map(p => p.name).join(',')})`,
+  );
+  check(
+    'coop: both HUDs visible with correct names',
+    !hudA.__hudHidden && !hudB.__hudHidden && hudA.playerName === 'Coop A' && hudB.playerName === 'Coop B',
+    `A="${hudA.playerName}"/hidden=${hudA.__hudHidden} B="${hudB.playerName}"/hidden=${hudB.__hudHidden}`,
+  );
+  check(
+    'coop: both clients receive live state',
+    (stateA?.stateCount || 0) > 0 && (stateB?.stateCount || 0) > 0,
+    `A=${stateA?.stateCount} states, B=${stateB?.stateCount} states`,
+  );
+  check(
+    'coop: both HUDs show live resources',
+    /WOOD/.test(hudA.resources || '') && /WOOD/.test(hudB.resources || ''),
+    `A="${hudA.resources}" B="${hudB.resources}"`,
+  );
+
+  // --- Movement propagation: hold W on B, then poll A's snapshot until B's actor moves.
+  const bBefore = (stateA?.lastState?.actors || []).find(a => a.id === idB);
+  await focusPage(sessionB.page, 'coop-B-move');
+  await holdKey(sessionB.page, 'KeyW', 'w', 87, 2600);
+  let bAfter = null;
+  const moveDeadline = Date.now() + 25000;
+  while (Date.now() < moveDeadline) {
+    const live = await readQaState(sessionA.page);
+    const seen = (live?.lastState?.actors || []).find(a => a.id === idB);
+    if (seen && bBefore && Math.hypot(seen.x - bBefore.x, seen.z - bBefore.z) > 0.5) {
+      bAfter = seen;
+      break;
+    }
+    await sleep(400);
+  }
+  const stateB2 = await readQaState(sessionB.page);
+  if (!bAfter) bAfter = (await readQaState(sessionA.page))?.lastState?.actors?.find(a => a.id === idB) || null;
+  const moved = bBefore && bAfter ? Math.hypot(bAfter.x - bBefore.x, bAfter.z - bBefore.z) : 0;
+  report.coop.movement = {before: bBefore || null, after: bAfter || null, meters: +moved.toFixed(2)};
+  check('coop: B movement propagates to A snapshot', moved > 0.5, `${moved.toFixed(2)} m seen by A`);
+  check('coop: B keeps receiving state while moving', (stateB2?.stateCount || 0) > 0, `B states=${stateB2?.stateCount}`);
+
+  // Record per-page fps: dual software-rendered Chrome instances are the reconnect scenario.
+  report.coop.fpsA = await measureFps(sessionA.page, 2000);
+  report.coop.fpsB = await measureFps(sessionB.page, 2000);
+  log(`COOP FPS: A=${JSON.stringify(report.coop.fpsA)} B=${JSON.stringify(report.coop.fpsB)}`);
+
+  // --- Weapon-rack pickup: A walks to the nearest untaken rack (keyboard-only steering from the
+  // authoritative snapshot), holds E, and the shared armory must gain the weapon for B too.
+  const beforeState = await readQaState(sessionA.page);
+  const beforeArmory = beforeState?.lastState?.armory || [];
+  const meA = (beforeState?.lastState?.actors || []).find(a => a.id === idA);
+  const rack = (beforeState?.lastState?.weaponDrops || [])
+    .filter(d => !d.taken)
+    .sort((a, b) => {
+      const da = meA ? Math.hypot(a.x - meA.x, a.z - meA.z) : 0;
+      const db = meA ? Math.hypot(b.x - meA.x, b.z - meA.z) : 0;
+      return da - db;
+    })[0];
+  report.coop.pickup = {targetWeapon: rack?.weapon || null, beforeArmory, arrived: null, prompt: null, afterArmory: beforeArmory};
+  if (rack) {
+    report.coop.pickup.arrived = await moveToRack(sessionA.page, rack, {iterations: 24, stepMs: 1300, label: 'coop-A-rack'});
+    let prompt = '';
+    try {
+      await waitFor(sessionA.page, `document.getElementById('prompt').textContent.includes('Recover')`, {timeoutMs: 15000, label: 'weapon rack prompt'});
+      prompt = await sessionA.page.evaluate(`document.getElementById('prompt').textContent`);
+    } catch {
+      prompt = await sessionA.page.evaluate(`document.getElementById('prompt').textContent`);
+    }
+    report.coop.pickup.prompt = prompt;
+    check('coop: A reached the weapon rack prompt', /Recover/i.test(prompt || ''), `arrived=${JSON.stringify(report.coop.pickup.arrived)} prompt="${prompt}"`);
+    await focusPage(sessionA.page, 'coop-A-interact');
+    await holdKey(sessionA.page, 'KeyE', 'e', 69, 6000);
+    // Poll both armories for the unlock (shared armory rule) instead of a fixed sleep.
+    const pickupDeadline = Date.now() + 20000;
+    while (Date.now() < pickupDeadline) {
+      const liveA = await readQaState(sessionA.page);
+      const liveB = await readQaState(sessionB.page);
+      const aArmory = liveA?.lastState?.armory || [];
+      const bArmory = liveB?.lastState?.armory || [];
+      if (aArmory.some(w => !beforeArmory.includes(w)) && bArmory.some(w => !beforeArmory.includes(w))) break;
+      await sleep(500);
+    }
+  }
+  const afterState = await readQaState(sessionA.page);
+  const afterArmory = afterState?.lastState?.armory || [];
+  const armoryB = (await readQaState(sessionB.page))?.lastState?.armory || [];
+  const newWeapons = afterArmory.filter(w => !beforeArmory.includes(w));
+  const shared = newWeapons.filter(w => armoryB.includes(w));
+  report.coop.pickup.afterArmory = afterArmory;
+  report.coop.pickup.newWeapons = newWeapons;
+  report.coop.pickup.armoryB = armoryB;
+  check('coop: A recovered a weapon rack', newWeapons.length > 0, `new=${JSON.stringify(newWeapons)}`);
+  check('coop: rack unlock is shared with B', shared.length > 0, `new=${JSON.stringify(newWeapons)} B armory=${JSON.stringify(armoryB)}`);
+
+  // --- Both pages' screenshots (after the pickup so the shared armory is visible in the HUD).
+  await focusPage(sessionA.page, 'coop-A-shot');
+  report.screenshots.push(await screenshot(sessionA.page, opts.outDir, 'coop-a-third-person.png'));
+  await focusPage(sessionB.page, 'coop-B-shot');
+  report.screenshots.push(await screenshot(sessionB.page, opts.outDir, 'coop-b-third-person.png'));
+  await focusPage(sessionA.page, 'coop-A-shot2');
+  report.screenshots.push(await screenshot(sessionA.page, opts.outDir, 'coop-a-after-pickup.png'));
+  await focusPage(sessionB.page, 'coop-B-shot2');
+  report.screenshots.push(await screenshot(sessionB.page, opts.outDir, 'coop-b-after-pickup.png'));
+
+  // --- Merge both collectors and gate errors.
+  const prefix = (pageLabel, list) => list.map(entry => ({page: pageLabel, ...entry}));
+  report.pageErrors = [...prefix('A', sessionA.sink.pageErrors), ...prefix('B', sessionB.sink.pageErrors)];
+  report.consoleErrors = [...prefix('A', sessionA.sink.consoleErrors), ...prefix('B', sessionB.sink.consoleErrors)];
+  report.consoleWarnings = [...prefix('A', sessionA.sink.consoleWarnings), ...prefix('B', sessionB.sink.consoleWarnings)];
+  report.logErrors = [...prefix('A', sessionA.sink.logErrors), ...prefix('B', sessionB.sink.logErrors)];
+  report.badResponses = [...prefix('A', sessionA.sink.badResponses), ...prefix('B', sessionB.sink.badResponses)];
+  report.failedRequests = [...prefix('A', sessionA.sink.failedRequests), ...prefix('B', sessionB.sink.failedRequests)];
+  report.assetRequests = [...new Set([...sessionA.sink.assetRequests, ...sessionB.sink.assetRequests])];
+  report.internalRequests = sessionA.sink.internalRequests + sessionB.sink.internalRequests;
+  report.navigations = sessionA.sink.navigations + sessionB.sink.navigations;
+  report.websocket = wsDiagnostics(stateA, coopStartedAt);
+  report.websocketFinal = report.websocket;
+  report.websocketB = wsDiagnostics(stateB, coopStartedAt);
+  report.diagnostics = {
+    navigations: report.navigations,
+    navigationLogA: sessionA.sink.navigationLog,
+    navigationLogB: sessionB.sink.navigationLog,
+    wsA: report.websocket,
+    wsB: report.websocketB,
+    health: healthSampler ? summarizeHealth(healthSampler.samples) : null,
+  };
+  if (report.websocket?.reconnected || report.websocketB?.reconnected) {
+    report.notes.push(
+      `coop WebSocket reconnects: A closes=${JSON.stringify(report.websocket?.closes || [])} B closes=${JSON.stringify(report.websocketB?.closes || [])}`,
+    );
+  }
+  check('coop: zero uncaught page errors (both pages)', report.pageErrors.length === 0, JSON.stringify(report.pageErrors.slice(0, 4)));
+  check('coop: zero internal 4xx/5xx (both pages)', report.badResponses.length === 0, JSON.stringify(report.badResponses.slice(0, 4)));
+  check('coop: zero failed internal requests (both pages)', report.failedRequests.length === 0, JSON.stringify(report.failedRequests.slice(0, 4)));
+  const required = ['coop-a-third-person.png', 'coop-b-third-person.png'];
+  const shotNames = report.screenshots.map(f => path.basename(f));
+  check('coop: both page screenshots saved', required.every(s => shotNames.includes(s)), shotNames.join(', '));
+}
+
 /* ---------------------------------------------------------------- update */
 
 async function run() {
@@ -666,6 +1262,10 @@ async function run() {
     startedAt: nowIso(),
     command: `node scripts/smoke-browser.mjs ${process.argv.slice(2).join(' ')}`.trim(),
     outDir: opts.outDir,
+    mode: null,
+    url: opts.url,
+    expectedWeapons: opts.expectWeapons,
+    expectedAssets: opts.expectAssets,
     checks: [],
     pageErrors: [],
     consoleErrors: [],
@@ -676,9 +1276,15 @@ async function run() {
     internalRequests: 0,
     assetRequests: [],
     hud: null,
+    hudAfter: null,
     renderer: null,
     canvas: {},
     fps: null,
+    weaponCards: null,
+    websocket: null,
+    websocketFinal: null,
+    diagnostics: null,
+    coop: null,
     screenshots: [],
     logs: {},
     notes: [],
@@ -693,6 +1299,8 @@ async function run() {
   let pageInfo = null;
   let fatal = null;
   let lastStage = 'startup';
+  let healthSampler = null;
+  const handles = {chromes: [], pages: []};
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-smoke-'));
   tempDir = tempRoot;
@@ -708,133 +1316,92 @@ async function run() {
   };
 
   try {
-    /* 1. build */
-    lastStage = 'build';
-    if (opts.skipBuild) {
-      const indexFile = path.join(ROOT, 'dist', 'client', 'index.html');
-      if (!fs.existsSync(indexFile)) throw new Error('--skip-build given but dist/client/index.html is missing; run a build first');
-      log('BUILD: skipped (--skip-build), reusing dist/client');
+    const mode = opts.coop ? 'coop' : opts.url ? 'url' : 'local';
+    report.mode = mode;
+    report.localServer = mode !== 'url';
+    let baseUrl = null;
+    let internalPrefix = null;
+    let assetPrefix = null;
+
+    if (mode === 'url') {
+      /* Deployed-site mode: no build, no local server, everything is driven over the network. */
+      lastStage = 'url';
+      internalPrefix = siteRootFromUrl(opts.url);
+      assetPrefix = `${internalPrefix}assets/`;
+      report.siteRoot = internalPrefix;
+      log(`URL MODE: driving ${opts.url} (no build, no local server)`);
+      check('url mode: build + local server skipped', true, opts.url);
     } else {
-      const buildNode = pickBuildNode(opts.node);
-      report.buildNode = {path: buildNode.path, version: buildNode.version?.raw ?? 'unknown', label: buildNode.label};
-      log(`NODE: build will use ${buildNode.path} (${buildNode.version?.raw ?? 'unknown'}, ${buildNode.label}); harness Node ${process.version}`);
-      buildInfo = await viteBuild(logDir, buildNode);
+      /* 1. build */
+      lastStage = 'build';
+      if (opts.skipBuild) {
+        const indexFile = path.join(ROOT, 'dist', 'client', 'index.html');
+        if (!fs.existsSync(indexFile)) throw new Error('--skip-build given but dist/client/index.html is missing; run a build first');
+        log('BUILD: skipped (--skip-build), reusing dist/client');
+      } else {
+        const buildNode = pickBuildNode(opts.node);
+        report.buildNode = {path: buildNode.path, version: buildNode.version?.raw ?? 'unknown', label: buildNode.label};
+        log(`NODE: build will use ${buildNode.path} (${buildNode.version?.raw ?? 'unknown'}, ${buildNode.label}); harness Node ${process.version}`);
+        buildInfo = await viteBuild(logDir, buildNode);
+      }
+      const distIndex = path.join(ROOT, 'dist', 'client', 'index.html');
+      if (!fs.existsSync(distIndex)) throw new Error('dist/client/index.html missing after build');
+      check(
+        'production build (vite build)',
+        true,
+        opts.skipBuild
+          ? 'reused existing dist/client'
+          : `built in ${(buildInfo.ms / 1000).toFixed(1)}s with Node ${buildInfo.nodeVersion} (${buildInfo.label})`,
+      );
+
+      /* 2. server */
+      lastStage = 'server';
+      const serverPort = await freePort();
+      server = await startServer(serverPort, logDir);
+      baseUrl = `http://127.0.0.1:${serverPort}`;
+      report.baseUrl = baseUrl;
+      check('server started + /health', true, JSON.stringify(server.health));
+      internalPrefix = baseUrl;
+      assetPrefix = `${baseUrl}/assets/`;
+      // Sample /health every second so WS reconnects can be correlated with server/CPU stalls.
+      healthSampler = startHealthSampler(serverPort);
     }
-    const distIndex = path.join(ROOT, 'dist', 'client', 'index.html');
-    if (!fs.existsSync(distIndex)) throw new Error('dist/client/index.html missing after build');
-    check(
-      'production build (vite build)',
-      true,
-      opts.skipBuild
-        ? 'reused existing dist/client'
-        : `built in ${(buildInfo.ms / 1000).toFixed(1)}s with Node ${buildInfo.nodeVersion} (${buildInfo.label})`,
-    );
 
-    /* 2. server */
-    lastStage = 'server';
-    const serverPort = await freePort();
-    server = await startServer(serverPort, logDir);
-    const baseUrl = `http://127.0.0.1:${serverPort}`;
-    report.baseUrl = baseUrl;
-    check('server started + /health', true, JSON.stringify(server.health));
-
-    /* 3. chrome */
+    /* 3. browser(s) + flow */
     lastStage = 'chrome';
-    const debugPort = await freePort();
-    chrome = await startChrome(debugPort, path.join(tempRoot, 'chrome-profile'), opts.chrome, logDir);
+    if (mode === 'coop') {
+      await coopFlow({opts, report, check, logDir, tempRoot, baseUrl, healthSampler, handles});
+    } else {
+      const debugPort = await freePort();
+      chrome = await startChrome(debugPort, path.join(tempRoot, 'chrome-profile'), opts.chrome, logDir);
+      handles.chromes.push(chrome);
 
-    /* 4. CDP page + event collection */
-    lastStage = 'cdp';
-    pageInfo = await createPageTarget(debugPort);
-    page = new CDP(pageInfo.webSocketDebuggerUrl, 'page');
-    await page.open();
-
-    const internal = url => typeof url === 'string' && url.startsWith(baseUrl);
-    const assetUrl = url => typeof url === 'string' && url.startsWith(`${baseUrl}/assets/`);
-    const requestUrls = new Map();
-    page.on('Network.requestWillBeSent', params => {
-      if (params.request?.url) requestUrls.set(params.requestId, params.request.url);
-    });
-    page.on('Runtime.exceptionThrown', params => {
-      const d = params.exceptionDetails || {};
-      report.pageErrors.push({
-        text: d.exception?.description || d.text || 'unknown exception',
-        url: d.url || '',
-        line: d.lineNumber,
-        column: d.columnNumber,
-      });
-    });
-    page.on('Runtime.consoleAPICalled', params => {
-      const type = params.type;
-      const text = (params.args || [])
-        .map(arg => {
-          if (arg.value !== undefined) return typeof arg.value === 'string' ? arg.value : JSON.stringify(arg.value);
-          return arg.description || arg.unserializableValue || String(arg.type);
-        })
-        .join(' ');
-      if (type === 'error' || type === 'assert') report.consoleErrors.push({type, text});
-      else if (type === 'warning') report.consoleWarnings.push({type, text});
-    });
-    page.on('Log.entryAdded', params => {
-      const entry = params.entry || {};
-      if (entry.level === 'error') report.logErrors.push({source: entry.source, text: entry.text, url: entry.url || ''});
-      else if (entry.level === 'warning') report.consoleWarnings.push({type: `log:${entry.source}`, text: entry.text});
-    });
-    page.on('Network.responseReceived', params => {
-      const r = params.response || {};
-      const url = r.url || '';
-      if (internal(url)) {
-        report.internalRequests++;
-        if (assetUrl(url) && !report.assetRequests.includes(url)) report.assetRequests.push(url);
-      }
-      if (typeof r.status === 'number' && r.status >= 400) {
-        const entry = {url, status: r.status, type: params.type, mimeType: r.mimeType || ''};
-        if (internal(url)) {
-          if (/\/favicon\.ico$/.test(url)) report.notes.push('favicon.ico is 404 (cosmetic, ignored)');
-          else report.badResponses.push(entry);
-        } else {
-          report.consoleWarnings.push({type: 'external-http', text: `${r.status} ${url}`});
-        }
-      }
-    });
-    page.on('Network.loadingFailed', params => {
-      if (params.canceled) return;
-      const entry = {requestId: params.requestId, errorText: params.errorText, type: params.type};
-      // Network.loadingFailed does not carry the URL; resolve it from requestWillBeSent.
-      const url = requestUrls.get(params.requestId);
-      if (internal(url)) report.failedRequests.push({...entry, url});
-    });
-
-    await page.send('Page.enable');
-    await page.send('Runtime.enable');
-    await page.send('Log.enable');
-    await page.send('Network.enable', {maxTotalBufferSize: 50 * 1024 * 1024, maxResourceBufferSize: 10 * 1024 * 1024});
-    // Headless windows are not "focused" by default; focus emulation makes document.hasFocus()
-    // true, which pointer lock and a few page behaviours depend on. Harmless when unsupported.
-    try {
-      await page.send('Emulation.setFocusEmulationEnabled', {enabled: true}, 5000);
-      log('CDP: focus emulation enabled');
-    } catch (error) {
-      report.notes.push(`Emulation.setFocusEmulationEnabled unavailable: ${error?.message || error}`);
-    }
-    try {
-      await page.send('Page.bringToFront', {}, 5000);
-    } catch {}
-    // Install the WebSocket lifecycle recorder before the app's first script runs.
-    await page.send('Page.addScriptToEvaluateOnNewDocument', {source: WS_INSTRUMENT});
-    log('CDP: WebSocket lifecycle instrumentation installed');
-    log('CDP: Page/Runtime/Log/Network enabled');
+      /* 4. CDP page + event collection */
+      lastStage = 'cdp';
+      const session = await openPageSession({debugPort, internalPrefix, assetPrefix, label: 'page', notesSink: report.notes});
+      page = session.page;
+      const sink = session.sink;
+      handles.pages.push(page);
+      report.pageErrors = sink.pageErrors;
+      report.consoleErrors = sink.consoleErrors;
+      report.consoleWarnings = sink.consoleWarnings;
+      report.logErrors = sink.logErrors;
+      report.badResponses = sink.badResponses;
+      report.failedRequests = sink.failedRequests;
+      report.assetRequests = sink.assetRequests;
 
     /* 5. navigate + landing */
     lastStage = 'navigate';
     report.navigatedAt = nowIso();
-    await page.send('Page.navigate', {url: `${baseUrl}/`}, 60000);
-    await waitFor(page, `document.readyState==='complete'`, {timeoutMs: 60000, label: 'page load'});
+    const targetUrl = mode === 'url' ? opts.url : `${baseUrl}/`;
+    await page.send('Page.navigate', {url: targetUrl}, 60000);
+    await waitFor(page, `document.readyState==='complete'`, {timeoutMs: 90000, label: 'page load'});
     await waitFor(
       page,
       `(()=>{const l=document.getElementById('landing');const n=document.getElementById('name');return !!l && !l.hidden && !!n && l.getBoundingClientRect().height>0;})()`,
-      {timeoutMs: 60000, label: 'landing UI'},
+      {timeoutMs: 90000, label: 'landing UI'},
     );
+    if (mode === 'url') check('live url loaded', true, targetUrl);
     check('landing UI visible', true, '');
     await sleep(1200);
     report.screenshots.push(await screenshot(page, opts.outDir, '00-landing.png'));
@@ -860,12 +1427,26 @@ async function run() {
       {timeoutMs: 60000, label: 'game state (player name, resources, wayfinder)'},
     );
     check('game state received (authoritative snapshot)', true, '');
+    // Expected weapon-card count (8 at batch 1, 10 after batch-2 weapons land).
+    const hudEarly = await hudSnapshot(page);
+    report.weaponCards = hudEarly.__weaponCards;
+    if (opts.expectWeapons !== null) {
+      check(`weapon cards == ${opts.expectWeapons}`, hudEarly.__weaponCards === opts.expectWeapons, `found ${hudEarly.__weaponCards}`);
+    } else {
+      report.notes.push(`#weaponCards = ${hudEarly.__weaponCards} (no --expect-weapons gate)`);
+    }
+    // Optional direct 200-check for specific assets (especially newly-added ones on the live URL).
+    if (opts.expectAssets.length) {
+      const results = await verifyExpectedAssets(page, assetPrefix, opts.expectAssets);
+      report.expectedAssets = results;
+      check('expected assets return 200', results.every(r => r.ok), JSON.stringify(results));
+    }
     await sleep(2500);
     report.fps = await measureFps(page, 1500);
     log(`FPS: ${JSON.stringify(report.fps)}`);
     report.renderer = await rendererInfo(page);
     report.websocket = await page.evaluate(`window.__qaWs ? JSON.parse(JSON.stringify(window.__qaWs)) : null`);
-    log(`WS: ${JSON.stringify(report.websocket)}`);
+    log(`WS: instances=${report.websocket?.instances} opens=${report.websocket?.opens} closes=${report.websocket?.closes?.length || 0} states=${report.websocket?.stateCount} url=${report.websocket?.urls?.[0]}`);
     log(`RENDERER: ${report.renderer?.renderer || 'unknown'} | vendor ${report.renderer?.vendor || 'unknown'}`);
     report.hud = await hudSnapshot(page);
     report.screenshots.push(await screenshot(page, opts.outDir, '01-third-person.png'));
@@ -959,7 +1540,21 @@ async function run() {
           `${report.websocketFinal.opens} successful open(s) — check whether the client recovered.`,
       );
     }
-    log(`WS final: ${JSON.stringify(report.websocketFinal)}`);
+    log(`WS final: instances=${report.websocketFinal?.instances} opens=${report.websocketFinal?.opens} closes=${report.websocketFinal?.closes?.length || 0} states=${report.websocketFinal?.stateCount}${report.websocketFinal?.closes?.length ? ` closures=${JSON.stringify(report.websocketFinal.closes)}` : ''}`);
+    // Reconnect-investigation diagnostics: navigation markers + server /health stall samples.
+    report.diagnostics = {
+      navigations: sink.navigations,
+      navigationLog: sink.navigationLog,
+      internalRequests: sink.internalRequests,
+      ws: wsDiagnostics(report.websocketFinal, startedAt),
+      health: healthSampler ? summarizeHealth(healthSampler.samples) : null,
+    };
+    report.internalRequests = sink.internalRequests;
+    report.navigations = sink.navigations;
+    log(`DIAG: ${JSON.stringify(report.diagnostics)}`);
+    if (report.diagnostics.health && (report.diagnostics.health.stallsOver2s > 0 || report.diagnostics.health.maxMs > 2000)) {
+      report.notes.push(`local server /health stall(s) observed: ${JSON.stringify(report.diagnostics.health)}`);
+    }
 
     /* 10. assertions */
     lastStage = 'assert';
@@ -987,6 +1582,7 @@ async function run() {
     if (report.consoleWarnings.length) {
       report.notes.push(`${report.consoleWarnings.length} console/log warning(s) (reported, not gated)`);
     }
+    } // end single-page flow
   } catch (error) {
     fatal = error;
     report.errors.push(`${lastStage}: ${error?.stack || error?.message || String(error)}`);
@@ -1009,10 +1605,15 @@ async function run() {
     /* 11. cleanup - always */
     lastStage = 'cleanup';
     try {
-      page?.close();
+      healthSampler?.stop();
     } catch {}
-    if (chrome?.child) {
-      await killTree(chrome.child);
+    for (const p of handles.pages) {
+      try {
+        p.close();
+      } catch {}
+    }
+    for (const c of handles.chromes) {
+      await killTree(c.child);
       log('CLEANUP: chrome stopped');
     }
     if (server?.child) {
@@ -1067,14 +1668,18 @@ async function run() {
   console.log('\n================ SMOKE SUMMARY ================');
   console.log(`command:   ${report.command}`);
   console.log(`out:       ${opts.outDir}`);
+  console.log(`mode:      ${report.mode}${report.siteRoot ? ` (${report.siteRoot})` : ''}`);
   console.log(`result:    ${report.pass ? 'PASS' : 'FAIL'}`);
   console.log(`checks:    ${report.checks.filter(c => c.ok).length}/${report.checks.length} passed`);
   for (const c of report.checks) console.log(`  ${c.ok ? '[PASS]' : '[FAIL]'} ${c.name}${c.ok ? '' : ` -> ${c.detail}`}`);
+  if (report.weaponCards !== null) console.log(`weapons:   ${report.weaponCards} cards${opts.expectWeapons !== null ? ` (expected ${opts.expectWeapons})` : ''}`);
+  if (report.coop) console.log(`coop:      ${JSON.stringify(report.coop)}`);
   console.log(`page errors: ${report.pageErrors.length}${report.pageErrors.length ? ` -> ${JSON.stringify(report.pageErrors.slice(0, 3))}` : ''}`);
   console.log(`console errors: ${report.consoleErrors.length}${report.consoleErrors.length ? ` -> ${JSON.stringify(report.consoleErrors.slice(0, 3))}` : ''}`);
   console.log(`log errors: ${report.logErrors.length}${report.logErrors.length ? ` -> ${JSON.stringify(report.logErrors.slice(0, 3))}` : ''}`);
   console.log(`bad responses: ${report.badResponses.length}`);
   console.log(`websocket: ${report.websocketFinal ? `opens=${report.websocketFinal.opens} closes=${report.websocketFinal.closes.length} errors=${report.websocketFinal.errors.length}` : 'n/a'}`);
+  if (report.diagnostics) console.log(`diagnostics: ${JSON.stringify({navigations: report.diagnostics.navigations, health: report.diagnostics.health, closes: report.diagnostics.ws?.closes})}`);
   console.log(`renderer:  ${report.renderer?.renderer || 'n/a'}`);
   console.log(`canvas:    ${JSON.stringify(report.canvas)}`);
   console.log(`fps:       ${JSON.stringify(report.fps)}`);

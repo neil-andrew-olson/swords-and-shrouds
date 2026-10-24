@@ -47,3 +47,19 @@ Every model in this batch was re-authored for the game: decimated to a 14,000-tr
 (weapons 3,400; props 6,000), textures re-encoded to 512/1024 JPEG/PNG, UVs preserved, glTF 2.0
 with embedded buffers/images, gzip level 9. No paid generation service, API key or runtime
 third-party asset server is required.
+
+=== Batch 2026-10B additions (readability/combat-feel batch) ===
+
+- "Flamberge": sketchlab/flamberge.zip -> source/Flamberg2.fbx. The archive records its own licence;
+  the FBX shipped no material, so the archive's baseColor/normal/roughness/metallic maps were wired in.
+- "Flanged mace": sketchlab/medieval-mace.zip -> source/Mace.rar (extracted with bsdtar/libarchive).
+  Licence recorded with the source archive; OpenGL normal map used for glTF tangent space.
+- "Top down low poly medieval camp" by rakutin (sketchfab.com/rakutin) — CC-BY-4.0.
+  sketchlab/top_down_low_poly_medieval_camp.glb — the tent/shelter cluster was isolated from the
+  larger camp scene and re-authored as `camp_tent.glb.gz` (decimated, re-textured, origin at ground).
+- "stone wall scan 2" by JabRomich (sketchfab.com/JabRomich) — SKETCHFAB Standard licence
+  (as recorded in the source file's asset metadata). sketchlab/stone_wall_scan_2.glb — simplified
+  and scaled into a 6 m ruined wall segment (`stone_wall.glb.gz`).
+
+All batch-2 models: glTF 2.0 with embedded JPEG textures, indexed primitives with UVs, gzip level 9,
+weapons <=3,400 triangles and props <=8,000, no paid generation service or runtime asset server.

@@ -18,6 +18,11 @@ import type {Actor, Game} from '../shared/types';
  *  - all set pieces are >= 10 m from every road centreline (spec floor is 6 m),
  *  - all set pieces are >= 11 m clear of every `walls(castle)` footprint,
  *  - the gate corridor along `(castle.x, castle.z + 10)` is kept empty of ruins/racks/props.
+ *
+ * Batch 2026-10B adds camp tents (2-3 per survivor camp, hidden with the camp's rescued/far
+ * visibility) and ruined `stone_wall` segments flanking the Castle 1 -> Castle 2 road plus a few
+ * per other region: all >= 8 m from every road centreline, clear of castle wall footprints, off
+ * the gate corridor and >= 10 m apart (verified against `shared/world` by a placement check).
  */
 
 export type RuinAsset = 'chapel_ruin' | 'aqueduct_ruin' | 'bridge_ruin' | 'courtyard_ruin';
@@ -42,6 +47,26 @@ export interface RuinPropPlacement {
   dz: number;
   height: number;
   rotY: number;
+}
+
+export interface CampTentPlacement {
+  /** Offset from the camp anchor (mill / crossing / hamlet layout). */
+  dx: number;
+  dz: number;
+  /** Target model height in metres. */
+  height: number;
+}
+
+export interface StoneWallPlacement {
+  /** Index into `REGIONS`. */
+  region: number;
+  /** Absolute world coordinates (origin at ground centre). */
+  x: number;
+  z: number;
+  /** Yaw of the road the wall flanks; the loader aligns the model's long horizontal axis to it. */
+  rotY: number;
+  /** Target wall length along its long axis in metres (the scan is only ~0.86 m tall). */
+  length: number;
 }
 
 interface RuinSite {
@@ -93,6 +118,56 @@ export const CAMP_PROPS: readonly RuinPropPlacement[] = [
   {asset: 'well', dx: -5.5, dz: -3.0, height: 1.4, rotY: 0},
   {asset: 'chest', dx: 5.0, dz: -2.0, height: 0.9, rotY: 0.9},
   {asset: 'bench', dx: -1.0, dz: -5.2, height: 0.8, rotY: 0.35}
+];
+
+/**
+ * Tents per camp type: 0 = mill/refuge, 1 = crossing, 2 = hamlet (CAMPS cycles mill, crossing,
+ * hamlet per region). The baked `camp_tent` scan is ~5.2 m x 4.5 m footprint at ~3 m tall, so
+ * offsets keep a scaled half-diagonal (~3.05 m at the largest allowed height variance) clear of the
+ * camp house/firepit/cauldron/barrels/brazier, the well/chest/bench from batch 1 and the 3.8 m
+ * beacon ring; all >= 6.5 m off roads and >= 6.1 m apart from each other.
+ */
+export const CAMP_TENTS: readonly (readonly CampTentPlacement[])[] = [
+  [
+    {dx: 9.0, dz: 0, height: 2.35},
+    {dx: 6.79, dz: 6.79, height: 2.1},
+    {dx: 0, dz: 9.0, height: 2.5}
+  ],
+  [
+    {dx: 2.23, dz: 8.31, height: 2.4},
+    {dx: -4.8, dz: 8.31, height: 2.15},
+    {dx: -8.69, dz: 2.33, height: 2.55}
+  ],
+  [
+    {dx: 9.0, dz: 0, height: 2.2},
+    {dx: 6.79, dz: 6.79, height: 2.45},
+    {dx: -6.56, dz: -7.81, height: 2.05}
+  ]
+];
+
+/**
+ * Ruined stone-wall segments. Six region-0 walls flank the diagonal Castle 1 -> Castle 2 road
+ * (five on the north-east flank, one on the keep-side flank); regions 1 and 2 repeat two each.
+ * Lengths are the target long-axis size; the baked scan is ~6 m x 0.86 m, so the loader scales by
+ * length and keeps its natural low-ruin proportions. Verified (endpoint-sampled): >= 10.6 m from
+ * every road centreline, > 13 m Chebyshev from every castle centre (outside wall footprints),
+ * off every gate corridor, >= 24 m from camp anchors, >= 12 m apart (centre spacing).
+ */
+export const STONE_WALL_PLACEMENTS: readonly StoneWallPlacement[] = [
+  // Green March: Castle 1 (0,0) -> Castle 2 (42,-67) road.
+  {region: 0, x: 24.4, z: 6.7, rotY: 2.6, length: 5.6},
+  {region: 0, x: 31.97, z: -3.82, rotY: 2.55, length: 6.6},
+  {region: 0, x: 37.03, z: -14.85, rotY: 2.62, length: 6.0},
+  {region: 0, x: 45.44, z: -23.92, rotY: 2.57, length: 5.4},
+  {region: 0, x: 50.05, z: -35.75, rotY: 2.6, length: 6.2},
+  // Keep-side flank, outside the courtyard, between the keep and the chapel ruin.
+  {region: 0, x: 5.4, z: -15.6, rotY: 2.55, length: 5.5},
+  // Ashen Moor repeats.
+  {region: 1, x: 31.97, z: -243.82, rotY: 2.63, length: 6.2},
+  {region: 1, x: 37.03, z: -254.85, rotY: 2.56, length: 5.6},
+  // Frozen Crown repeats.
+  {region: 2, x: 45.44, z: -503.92, rotY: 2.62, length: 5.2},
+  {region: 2, x: 50.05, z: -515.75, rotY: 2.57, length: 5.8}
 ];
 
 const RACK_DX = 5.0;
@@ -250,6 +325,54 @@ export function addRuins(scene: THREE.Scene): {
     );
   }
 
+  async function placeCampTents(): Promise<void> {
+    const gltf = await loadModel('custom/camp_tent');
+    if (!gltf) return;
+    const metrics = measureModel(gltf.scene);
+    for (let campIndex = 0; campIndex < CAMPS.length; campIndex++) {
+      const camp = CAMPS[campIndex];
+      const layout = CAMP_TENTS[campIndex % CAMP_TENTS.length];
+      for (let tentIndex = 0; tentIndex < layout.length; tentIndex++) {
+        const tent = layout[tentIndex];
+        // Deterministic per-camp variance: yaw faces the camp fire, scale wobbles a little.
+        const yaw = Math.atan2(-tent.dx, -tent.dz) + Math.sin(campIndex * 2.1 + tentIndex * 1.7) * 0.32;
+        const height = tent.height * (0.94 + ((campIndex * 5 + tentIndex * 2) % 3) * 0.05);
+        const x = camp.x + tent.dx;
+        const z = camp.z + tent.dz;
+        try {
+          const group = instantiate(scene, gltf.scene, metrics, height, x, z, yaw);
+          // Tents share the camp rescued/far visibility with the other camp furniture.
+          if (group) campProps.push({campId: camp.id, x, z, group});
+        } catch (error) {
+          console.warn('[ruins] camp tent placement failed', camp.id, error);
+        }
+      }
+    }
+  }
+
+  async function placeStoneWalls(): Promise<void> {
+    const gltf = await loadModel('custom/stone_wall');
+    if (!gltf) return;
+    const metrics = measureModel(gltf.scene);
+    const longExtent = Math.max(metrics.size.x, metrics.size.z);
+    if (!Number.isFinite(longExtent) || longExtent < 0.1 || metrics.size.y < 0.01) {
+      console.warn('[ruins] stone_wall model has unusable bounds, skipping');
+      return;
+    }
+    // The exported yaw is the road direction; align whichever horizontal axis is longer to it.
+    const longAxisIsZ = metrics.size.z >= metrics.size.x;
+    for (const wall of STONE_WALL_PLACEMENTS) {
+      try {
+        const yaw = longAxisIsZ ? wall.rotY : wall.rotY - Math.PI / 2;
+        // Scale by length, not height: the ruined-wall scan is wide and low (~6 m x 0.86 m).
+        const height = metrics.size.y * (wall.length / longExtent);
+        instantiate(scene, gltf.scene, metrics, height, wall.x, wall.z, yaw);
+      } catch (error) {
+        console.warn('[ruins] stone wall placement failed', wall.x, wall.z, error);
+      }
+    }
+  }
+
   function buildRack(castleId: string, x: number, z: number, sources: Map<WeaponId, GLTF>): RackState {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
@@ -324,8 +447,8 @@ export function addRuins(scene: THREE.Scene): {
     }
   }
 
-  void Promise.all([placeSetPieces(), placePropAssets(), placeWeaponRacks()]).catch((error) =>
-    console.warn('[ruins] asynchronous placement failed', error)
+  void Promise.all([placeSetPieces(), placePropAssets(), placeCampTents(), placeStoneWalls(), placeWeaponRacks()]).catch(
+    (error) => console.warn('[ruins] asynchronous placement failed', error)
   );
 
   return {

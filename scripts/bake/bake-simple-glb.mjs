@@ -20,6 +20,7 @@ const name = arg('--name');
 const src = arg('--src');
 const budget = Number(arg('--tris', '14000'));
 const height = Number(arg('--height', '0'));
+const length = Number(arg('--length', '0')); // scale so the longest horizontal extent = this many m
 const texScale = Number(arg('--tex', '0')); // optional: extra uniform scale on x/z
 
 const io = new NodeIO();
@@ -57,7 +58,9 @@ while (tris > budget && guard++ < 6) {
 await doc.transform(join({keepNamed: false}), weld(), dedup(), prune());
 // scale + origin (glTF Y-up)
 let b = getBounds(scene);
-let scale = height > 0 ? height / (b.max[1] - b.min[1]) : 1;
+let scale = 1;
+if (height > 0) scale = height / (b.max[1] - b.min[1]);
+else if (length > 0) scale = length / Math.max(b.max[0] - b.min[0], b.max[2] - b.min[2]);
 if (texScale > 0) scale *= texScale;
 const S = mat4Scale(scale, scale, scale);
 for (const node of doc.getRoot().listNodes()) if (node.getMesh()) transformMesh(node.getMesh(), S);

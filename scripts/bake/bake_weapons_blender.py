@@ -49,6 +49,32 @@ WEAPONS = {
         "butt_hints": ["handle"],
         "crop_box": None,
     },
+    # ---- batch 2026-10B ----
+    "flamberge": {
+        # warehouse zip: flamberge.zip -> source/Flamberg2.fbx (single object, no material in
+        # the FBX; the parquet PNG set is wired up below).
+        "src": r"C:\Users\neil\Desktop\AIprojects\swords\temp_sketchlab\flamberge\source\Flamberg2.fbx",
+        "budget": 3400,
+        "mode": "blade",
+        "textures": {
+            "base": r"C:\Users\neil\Desktop\AIprojects\swords\temp_sketchlab\flamberge\textures\Flamberge_DefaultMaterial_BaseColor.png",
+            "normal": r"C:\Users\neil\Desktop\AIprojects\swords\temp_sketchlab\flamberge\textures\Flamberge_DefaultMaterial_Normal.png",
+            "roughness": r"C:\Users\neil\Desktop\AIprojects\swords\temp_sketchlab\flamberge\textures\Flamberge_DefaultMaterial_Roughness.png",
+            "metallic": r"C:\Users\neil\Desktop\AIprojects\swords\temp_sketchlab\flamberge\textures\Flamberge_DefaultMaterial_Metallic.png",
+        },
+    },
+    "mace": {
+        # warehouse zip: medieval-mace.zip -> source/Mace.rar -> Mace.fbx (+ textures/Mace/*)
+        "src": r"C:\Users\neil\Desktop\AIprojects\swords\temp_sketchlab\medieval-mace\source\Mace\Mace.fbx",
+        "budget": 3400,
+        "mode": "pca",
+        "textures": {
+            "base": r"C:\Users\neil\Desktop\AIprojects\swords\temp_sketchlab\medieval-mace\source\Mace\DefaultMaterial_Base_Color.jpg",
+            "normal": r"C:\Users\neil\Desktop\AIprojects\swords\temp_sketchlab\medieval-mace\source\Mace\DefaultMaterial_Normal_OpenGL.jpg",
+            "roughness": r"C:\Users\neil\Desktop\AIprojects\swords\temp_sketchlab\medieval-mace\source\Mace\DefaultMaterial_Roughness.jpg",
+            "metallic": r"C:\Users\neil\Desktop\AIprojects\swords\temp_sketchlab\medieval-mace\source\Mace\DefaultMaterial_Metallic.jpg",
+        },
+    },
 }
 
 
@@ -65,7 +91,10 @@ def mesh_objects():
 
 
 def import_glb(path):
-    bpy.ops.import_scene.gltf(filepath=path)
+    if path.lower().endswith(".fbx"):
+        bpy.ops.import_scene.fbx(filepath=path)
+    else:
+        bpy.ops.import_scene.gltf(filepath=path)
     objs = mesh_objects()
     if not objs:
         raise RuntimeError("no mesh objects imported from " + path)
@@ -138,6 +167,82 @@ def pca_head_direction(objs):
     return Vector(axis.tolist())
 
 
+def pca_blade_direction(objs):
+    """Sword-style orientation: the crossguard is the widest cross-section along the principal
+    axis; the blade is the *longer* side of that widest point, the handle/pommel the shorter."""
+    import numpy as np
+    pts = []
+    for o in objs:
+        for v in o.data.vertices:
+            pts.append(v.co[:])
+    a = np.array(pts)
+    centre = a.mean(axis=0)
+    cov = np.cov((a - centre).T)
+    vals, vecs = np.linalg.eigh(cov)
+    axis = vecs[:, int(np.argmax(vals))]
+    axis = axis / np.linalg.norm(axis)
+    t = (a - centre) @ axis
+    lo, hi = float(t.min()), float(t.max())
+    span = hi - lo
+    bins = 40
+    spread = np.zeros(bins)
+    for b in range(bins):
+        sel = (t >= lo + span * b / bins) & (t < lo + span * (b + 1) / bins)
+        if sel.sum() < 3:
+            continue
+        radial = a[sel] - centre - np.outer((a[sel] - centre) @ axis, axis)
+        spread[b] = np.percentile(np.linalg.norm(radial, axis=1), 90)
+    # smooth and find the widest slice (crossguard)
+    sm = np.convolve(spread, np.ones(3) / 3, mode="same")
+    widest = float(np.argmax(sm)) / bins
+    log(f"  blade: spans {lo:.2f}..{hi:.2f}, widest slice at t={widest:.2f} "
+        f"(spread {sm.max():.3f}) -> blade toward {'+' if widest < 0.5 else '-'}axis")
+    if widest >= 0.5:
+        axis = -axis
+    return Vector(axis.tolist())
+
+
+def assign_material(objs, tex):
+    """Build a Principled material from the loose texture set shipped with the FBX."""
+    mat = bpy.data.materials.new("weapon_mat")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    principled = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
+
+    def image_node(path, colorspace, label):
+        if not path or not os.path.exists(path):
+            log(f"  WARNING missing {label} texture: {path}")
+            return None
+        img = bpy.data.images.load(path, check_existing=True)
+        img.colorspace_settings.name = colorspace
+        node = nt.nodes.new("ShaderNodeTexImage")
+        node.image = img
+        node.label = label
+        return node
+
+    base = image_node(tex.get("base"), "sRGB", "basecolor")
+    if base:
+        nt.links.new(base.outputs["Color"], principled.inputs["Base Color"])
+    normal = image_node(tex.get("normal"), "Non-Color", "normal")
+    if normal:
+        nmap = nt.nodes.new("ShaderNodeNormalMap")
+        nt.links.new(normal.outputs["Color"], nmap.inputs["Color"])
+        nt.links.new(nmap.outputs["Normal"], principled.inputs["Normal"])
+    rough = image_node(tex.get("roughness"), "Non-Color", "roughness")
+    if rough:
+        nt.links.new(rough.outputs["Color"], principled.inputs["Roughness"])
+    metal = image_node(tex.get("metallic"), "Non-Color", "metallic")
+    if metal:
+        nt.links.new(metal.outputs["Color"], principled.inputs["Metallic"])
+    else:
+        principled.inputs["Metallic"].default_value = 0.4
+    for o in objs:
+        o.data.materials.clear()
+        o.data.materials.append(mat)
+    log("  material wired: " + ", ".join(k for k, v in tex.items() if v))
+    return mat
+
+
 def crop_objects(objs, box):
     """Delete faces whose centre lies beyond box['max'] along box['axis']."""
     axis = box["axis"]
@@ -192,6 +297,7 @@ def decimate(objs, budget):
         mod.decimate_type = "COLLAPSE"
         mod.ratio = ratio
         mod.use_collapse_triangulate = True
+        bpy.context.view_layer.update()
         dg = bpy.context.evaluated_depsgraph_get()
         ev = o.evaluated_get(dg)
         new_mesh = bpy.data.meshes.new_from_object(ev)
@@ -209,6 +315,7 @@ def decimate(objs, budget):
             mod.decimate_type = "COLLAPSE"
             mod.ratio = r2
             mod.use_collapse_triangulate = True
+            bpy.context.view_layer.update()
             dg = bpy.context.evaluated_depsgraph_get()
             ev = o.evaluated_get(dg)
             new_mesh = bpy.data.meshes.new_from_object(ev)
@@ -282,6 +389,12 @@ def bake(name, cfg):
     log(f"  imported {len(objs)} objects, {tri_count(objs)} tris")
     lo, hi = world_bounds(objs)
     log(f"  source bbox min={tuple(round(v,2) for v in lo)} max={tuple(round(v,2) for v in hi)}")
+    if cfg.get("source_scale"):
+        s = cfg["source_scale"]
+        for o in objs:
+            o.data.transform(Matrix.Scale(s, 4))
+        lo, hi = world_bounds(objs)
+        log(f"  pre-scaled x{s}: bbox size={tuple(round(hi[i]-lo[i],3) for i in range(3))}")
 
     if cfg.get("crop_box"):
         kept = crop_objects(objs, cfg["crop_box"])
@@ -289,9 +402,15 @@ def bake(name, cfg):
         lo, hi = world_bounds(objs)
         log(f"  cropped to {kept} faces, bbox min={tuple(round(v,2) for v in lo)} max={tuple(round(v,2) for v in hi)}")
 
+    if cfg.get("textures"):
+        assign_material(objs, cfg["textures"])
+
     # head/blade direction in Blender world space
     tip_dir = None
-    if cfg.get("mode") == "pca":
+    if cfg.get("mode") == "blade":
+        tip_dir = pca_blade_direction(objs)
+        log(f"  blade direction: {tuple(round(c, 2) for c in tip_dir)}")
+    elif cfg.get("mode") == "pca":
         tip_dir = pca_head_direction(objs)
         log(f"  PCA head direction: {tuple(round(c, 2) for c in tip_dir)}")
     elif cfg.get("force_tip"):

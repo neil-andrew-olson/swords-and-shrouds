@@ -3,9 +3,10 @@ import {dist} from '../shared/world';
 const clamp01=(v:number)=>(v<0?0:v>1?1:v);
 /**
  * Procedural WebAudio ambience. Every bed is synthesised at runtime — no audio files:
- * a wind bed, a horde drone that rises with the count of nearby undead, a plague-nest hum,
- * fire crackle near castle braziers and camp fires, a low-health heartbeat, and footstep
- * cadence while moving. Silent before unlock() (user gesture) and while Sound is unchecked.
+ * a wind bed, a horde drone that rises with the count of nearby undead, a plague-nest hum and a
+ * very quiet plague pad near the nest, fire crackle near castle braziers and camp fires, a
+ * low-health heartbeat, and footstep cadence while moving. Silent before unlock() (user gesture)
+ * and while Sound is unchecked.
  *
  * update() is deliberately allocation-light: it loops the existing game arrays with plain
  * for-loops, schedules at most one short envelope per step/beat, and only re-targets
@@ -19,6 +20,7 @@ export class Ambience{
  private hordeGain?:GainNode;
  private hordeFilter?:BiquadFilterNode;
  private nestGain?:GainNode;
+ private nestPadGain?:GainNode;
  private fireGain?:GainNode;
  private stepGain?:GainNode;
  private heartGain?:GainNode;
@@ -90,6 +92,17 @@ export class Ambience{
   const wobbleGain=c.createGain();wobbleGain.gain.value=.004;
   wobble.connect(wobbleGain);wobbleGain.connect(nestGain.gain);wobble.start();
   this.nestGain=nestGain;
+  // Plague pad: a very quiet low fifth that creeps in from further away than the nest hum.
+  const padFilter=c.createBiquadFilter();padFilter.type='lowpass';padFilter.frequency.value=150;padFilter.Q.value=.7;
+  const nestPad=c.createGain();nestPad.gain.value=0;
+  for(const freq of [32.7,49]){
+   const osc=c.createOscillator();osc.type='triangle';osc.frequency.value=freq;osc.connect(padFilter);osc.start();
+  }
+  padFilter.connect(nestPad);nestPad.connect(master);
+  const padWobble=c.createOscillator();padWobble.type='sine';padWobble.frequency.value=.07;
+  const padWobbleGain=c.createGain();padWobbleGain.gain.value=.003;
+  padWobble.connect(padWobbleGain);padWobbleGain.connect(nestPad.gain);padWobble.start();
+  this.nestPadGain=nestPad;
   // Fire: looped sparse pops, brightened by a high-pass.
   const fireFilter=c.createBiquadFilter();fireFilter.type='highpass';fireFilter.frequency.value=900;fireFilter.Q.value=.7;
   const fireGain=c.createGain();fireGain.gain.value=0;
@@ -136,7 +149,7 @@ export class Ambience{
   if(this.slowTimer>=.08){
    this.slowTimer=0;
    master.gain.setTargetAtTime(masterTarget,now,.22);
-   let undead=0,nestLevel=0,fireLevel=0;
+   let undead=0,nestLevel=0,nestPadLevel=0,fireLevel=0;
    if(game&&me){
     for(const a of game.actors){
      if(a.hp<=0||(a.kind!=='zombie'&&a.kind!=='corrupted'))continue;
@@ -144,6 +157,7 @@ export class Ambience{
     }
     const nestD=dist(me,game.nest);
     if(nestD<170){const near=1-nestD/170;nestLevel=near*near*Math.sqrt(near);}
+    if(nestD<260){const near=1-nestD/260;nestPadLevel=near*near*.02;}
     let fireD=Infinity;
     for(const castle of game.castles){const d=dist(me,castle);if(d<fireD)fireD=d;}
     for(const camp of game.camps){const d=dist(me,camp);if(d<fireD)fireD=d;}
@@ -162,6 +176,7 @@ export class Ambience{
     if(hordeFilter)hordeFilter.frequency.setTargetAtTime(170+undead*26,now,.4);
    }
    const nest=this.nestGain;if(nest)nest.gain.setTargetAtTime(enabled?nestLevel*.055:0,now,.4);
+   const nestPad=this.nestPadGain;if(nestPad)nestPad.gain.setTargetAtTime(enabled?nestPadLevel:0,now,.6);
    const fire=this.fireGain;if(fire)fire.gain.setTargetAtTime(enabled?fireLevel*.075:0,now,.08);
   }
   const hpRatio=me?clamp01(me.hp/me.maxHp):1;

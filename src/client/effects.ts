@@ -150,10 +150,205 @@ class ParticlePool {
   get active() { return this.alive; }
 }
 
+/** World-space third-person swing trail arcs (pooled instanced ring sectors). */
+class SwingTrailPool {
+  private readonly mesh: THREE.InstancedMesh;
+  private readonly capacity: number;
+  private alive = 0;
+  private readonly x: Float32Array;
+  private readonly z: Float32Array;
+  private readonly yaw: Float32Array;
+  private readonly life: Float32Array;
+  private readonly maxLife: Float32Array;
+  private readonly size: Float32Array;
+  private readonly col: Float32Array;
+  private readonly dummy = new THREE.Object3D();
+  private readonly color = new THREE.Color();
+
+  constructor(scene: THREE.Scene, capacity = 14) {
+    this.capacity = capacity;
+    const geo = new THREE.RingGeometry(0.42, 1, 20, 1, -0.35, 1.75);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    this.mesh = new THREE.InstancedMesh(geo, mat, capacity);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 8;
+    this.x = new Float32Array(capacity);
+    this.z = new Float32Array(capacity);
+    this.yaw = new Float32Array(capacity);
+    this.life = new Float32Array(capacity);
+    this.maxLife = new Float32Array(capacity);
+    this.size = new Float32Array(capacity);
+    this.col = new Float32Array(capacity * 3);
+    scene.add(this.mesh);
+  }
+
+  emit(x: number, z: number, yaw: number, size: number, r: number, g: number, b: number) {
+    if (this.alive >= this.capacity) return;
+    const i = this.alive++;
+    this.x[i] = x; this.z[i] = z; this.yaw[i] = yaw;
+    this.life[i] = 0.22; this.maxLife[i] = 0.22;
+    this.size[i] = size;
+    const c3 = i * 3;
+    this.col[c3] = r; this.col[c3 + 1] = g; this.col[c3 + 2] = b;
+  }
+
+  update(dt: number) {
+    for (let i = 0; i < this.alive; ) {
+      this.life[i] -= dt;
+      if (this.life[i] <= 0) {
+        this.alive--;
+        const last = this.alive;
+        if (i !== last) {
+          this.x[i] = this.x[last]; this.z[i] = this.z[last]; this.yaw[i] = this.yaw[last];
+          this.life[i] = this.life[last]; this.maxLife[i] = this.maxLife[last]; this.size[i] = this.size[last];
+          const f3 = last * 3, t3 = i * 3;
+          this.col[t3] = this.col[f3]; this.col[t3 + 1] = this.col[f3 + 1]; this.col[t3 + 2] = this.col[f3 + 2];
+        }
+        continue;
+      }
+      i++;
+    }
+    this.mesh.count = this.alive;
+    if (this.alive === 0) return;
+    for (let i = 0; i < this.alive; i++) {
+      const t = 1 - this.life[i] / this.maxLife[i];
+      const grow = 0.85 + t * 0.35;
+      const fade = (1 - t) * (1 - t);
+      this.dummy.position.set(this.x[i], 1.25, this.z[i]);
+      this.dummy.rotation.set(0, Math.PI - this.yaw[i], 0);
+      this.dummy.scale.setScalar(this.size[i] * grow);
+      this.dummy.updateMatrix();
+      this.mesh.setMatrixAt(i, this.dummy.matrix);
+      const c3 = i * 3;
+      this.mesh.setColorAt(i, this.color.setRGB(this.col[c3] * fade, this.col[c3 + 1] * fade, this.col[c3 + 2] * fade));
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+}
+
+/** Long-lived pooled ground splatter decals (blood red / corruption violet), cap 32. */
+class GroundDecals {
+  private readonly mesh: THREE.InstancedMesh;
+  private readonly capacity: number;
+  private readonly x: Float32Array;
+  private readonly z: Float32Array;
+  private readonly yaw: Float32Array;
+  private readonly life: Float32Array;
+  private readonly maxLife: Float32Array;
+  private readonly size: Float32Array;
+  private readonly col: Float32Array;
+  private next = 0;
+  private readonly dummy = new THREE.Object3D();
+  private readonly color = new THREE.Color();
+
+  constructor(scene: THREE.Scene, capacity = 32) {
+    this.capacity = capacity;
+    // Soft procedural splatter (no external asset): white alpha mask tinted per decal.
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, 128, 128);
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 16; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.pow(Math.random(), 0.7) * 42;
+      const cx = 64 + Math.cos(a) * r;
+      const cy = 64 + Math.sin(a) * r;
+      const rad = 7 + Math.random() * 22;
+      const grad = ctx.createRadialGradient(cx, cy, rad * 0.15, cx, cy, rad);
+      grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+      grad.addColorStop(0.65, 'rgba(255,255,255,0.55)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (let i = 0; i < 26; i++) {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(64 + (Math.random() - 0.5) * 110, 64 + (Math.random() - 0.5) * 110, 1 + Math.random() * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const geo = new THREE.PlaneGeometry(1, 1);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      map: tex,
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2
+    });
+    this.mesh = new THREE.InstancedMesh(geo, mat, capacity);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 3;
+    this.x = new Float32Array(capacity);
+    this.z = new Float32Array(capacity);
+    this.yaw = new Float32Array(capacity);
+    this.life = new Float32Array(capacity);
+    this.maxLife = new Float32Array(capacity);
+    this.size = new Float32Array(capacity);
+    this.col = new Float32Array(capacity * 3);
+    scene.add(this.mesh);
+  }
+
+  emit(x: number, z: number, corruption: boolean, amount: number) {
+    const i = this.next;
+    this.next = (this.next + 1) % this.capacity;
+    this.x[i] = x + (Math.random() - 0.5) * 1.1;
+    this.z[i] = z + (Math.random() - 0.5) * 1.1;
+    this.yaw[i] = Math.random() * Math.PI * 2;
+    this.maxLife[i] = 9 + Math.random() * 7;
+    this.life[i] = this.maxLife[i];
+    this.size[i] = (0.85 + Math.random() * 0.75) * Math.min(2, amount);
+    const c3 = i * 3;
+    if (corruption) { this.col[c3] = 0.2; this.col[c3 + 1] = 0.028; this.col[c3 + 2] = 0.24; }
+    else { this.col[c3] = 0.24; this.col[c3 + 1] = 0.024; this.col[c3 + 2] = 0.028; }
+  }
+
+  update(dt: number) {
+    this.mesh.count = this.capacity;
+    for (let i = 0; i < this.capacity; i++) {
+      if (this.life[i] > 0) this.life[i] -= dt;
+      const alive = this.life[i] > 0;
+      let scale = 0;
+      if (alive) {
+        const fadeStart = 1.5;
+        scale = this.size[i] * (this.life[i] < fadeStart ? this.life[i] / fadeStart : 1);
+      }
+      this.dummy.position.set(this.x[i], 0.055, this.z[i]);
+      this.dummy.rotation.set(0, this.yaw[i], 0);
+      this.dummy.scale.set(scale, 1, scale);
+      this.dummy.updateMatrix();
+      this.mesh.setMatrixAt(i, this.dummy.matrix);
+      const c3 = i * 3;
+      this.mesh.setColorAt(i, this.color.setRGB(this.col[c3], this.col[c3 + 1], this.col[c3 + 2]));
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+}
+
 export class CombatEffects {
   private readonly sparksPool: ParticlePool;
   private readonly bloodPool: ParticlePool;
   private readonly dustPool: ParticlePool;
+  private readonly trails: SwingTrailPool;
+  private readonly decals: GroundDecals;
 
   constructor(scene: THREE.Scene) {
     const sparkGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -179,23 +374,37 @@ export class CombatEffects {
       depthWrite: false
     });
     this.dustPool = new ParticlePool(scene, dustGeo, dustMat, 72, new THREE.Vector3(1.6, 1.0, 1.6), true);
+    this.trails = new SwingTrailPool(scene);
+    this.decals = new GroundDecals(scene);
+  }
+
+  /** Third-person swing arc in world space; colour is per combat style. */
+  trail(position: THREE.Vector3, yaw: number, reach: number, r: number, g: number, b: number) {
+    this.trails.emit(position.x, position.z, yaw, Math.max(0.7, reach * 0.55), r, g, b);
+  }
+
+  /** Long-lived ground splatter under a hit/death (blood red or corruption violet). */
+  splatter(position: THREE.Vector3, corruption: boolean, amount = 1) {
+    const count = amount > 1.4 ? 3 : amount > 0.9 ? 2 : 1;
+    for (let i = 0; i < count; i++) this.decals.emit(position.x, position.z, corruption, amount);
   }
 
   /** Metallic ring-off / blood spray / spectral wisps on every landed hit. */
   sparks(position: THREE.Vector3, kind: SparkKind = 'metal') {
     const {x, y, z} = position;
-    const count = kind === 'undead' ? 11 : 9;
+    const count = kind === 'undead' ? 15 : 13;
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = 0.7 + Math.random() * (kind === 'metal' ? 3.4 : 2.4);
+      const speed = 0.9 + Math.random() * (kind === 'metal' ? 4.2 : 3);
       let r: number, g: number, b: number;
       if (kind === 'metal') {
-        const white = Math.random() < 0.3;
-        r = 1; g = white ? 0.95 : 0.62 + Math.random() * 0.3; b = white ? 0.85 : 0.18 + Math.random() * 0.2;
+        const white = Math.random() < 0.34;
+        // >1 channels are intentional: additive HDR sparks catch the bloom threshold.
+        r = white ? 1.9 : 1.5; g = white ? 1.8 : 0.95 + Math.random() * 0.4; b = white ? 1.6 : 0.3 + Math.random() * 0.3;
       } else if (kind === 'flesh') {
-        r = 0.78 + Math.random() * 0.2; g = 0.09 + Math.random() * 0.12; b = 0.08 + Math.random() * 0.1;
+        r = 1.1 + Math.random() * 0.3; g = 0.12 + Math.random() * 0.16; b = 0.1 + Math.random() * 0.12;
       } else {
-        r = 0.32 + Math.random() * 0.18; g = 0.78 + Math.random() * 0.2; b = 0.42 + Math.random() * 0.3;
+        r = 0.44 + Math.random() * 0.25; g = 1.15 + Math.random() * 0.3; b = 0.6 + Math.random() * 0.4;
       }
       this.sparksPool.emit(
         x + (Math.random() - 0.5) * 0.35,
@@ -204,8 +413,8 @@ export class CombatEffects {
         Math.cos(angle) * speed,
         1.1 + Math.random() * (kind === 'undead' ? 2.2 : 4.2),
         Math.sin(angle) * speed,
-        kind === 'undead' ? 0.45 + Math.random() * 0.55 : 0.22 + Math.random() * 0.33,
-        0.055, 0.012,
+        kind === 'undead' ? 0.45 + Math.random() * 0.55 : 0.26 + Math.random() * 0.36,
+        0.07, 0.014,
         kind === 'undead' ? 2.2 : 13,
         0.7,
         r, g, b
@@ -295,6 +504,8 @@ export class CombatEffects {
     this.sparksPool.update(step);
     this.bloodPool.update(step);
     this.dustPool.update(step);
+    this.trails.update(step);
+    this.decals.update(step);
   }
 
   /** Live particle count, exposed for the perf HUD / QA reporting. */

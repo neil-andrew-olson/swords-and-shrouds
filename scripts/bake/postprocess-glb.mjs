@@ -28,6 +28,11 @@ const CONFIG = {
   bench: {tex: 512},
   grass_tuft: {tex: 512, alpha: true},
   rock_cluster: {tex: 1024},
+  // batch 2026-10B
+  flamberge: {tex: 1024},
+  mace: {tex: 512},
+  camp_tent: {tex: 1024},
+  stone_wall: {tex: 1024},
 };
 
 const args = process.argv.slice(2);

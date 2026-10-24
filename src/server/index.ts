@@ -18,11 +18,14 @@ export function makeServer(){
  function removeExpired(r:Room,now:number){for(const s of [...r.seats])if(!s.ws&&now-s.left>60_000){r.seats=r.seats.filter(a=>a!==s);r.game.actors=r.game.actors.filter(a=>a.id!==s.id);for(const a of r.game.actors)if(a.owner===s.id)a.owner=r.seats[0]?.id;}if(!r.seats.some(s=>s.id===r.host&&s.ws))r.host=r.seats.find(s=>s.ws)?.id??r.host;}
  wss.on('connection',(ws,req)=>{
   const origin=req.headers.origin;if(origin){try{if(new URL(origin).host!==req.headers.host){ws.close(1008,'Origin rejected');return;}}catch{ws.close(1008);return;}}
-  let room:Room|undefined,seat:Seat|undefined,windowAt=Date.now(),count=0,alive=true,lastCommand=0;
+  let room:Room|undefined,seat:Seat|undefined,windowAt=Date.now(),count=0,alive=true,missedPongs=0,lastCommand=0;
   const error=(text:string)=>send(ws,{type:'error',text});
-  ws.on('pong',()=>{alive=true;});ws.on('error',()=>ws.terminate());
+  ws.on('pong',()=>{alive=true;missedPongs=0;});ws.on('error',()=>ws.terminate());
   const joinTimeout=setTimeout(()=>{if(!seat)ws.close(1008,'Join timeout');},15000);
-  const heartbeat=setInterval(()=>{if(!alive){ws.terminate();return;}alive=false;ws.ping();},15000);
+  // Tolerate one missed pong: software-rendered / low-FPS clients can stall their main thread for
+  // long enough to delay the pong, and terminating on the first miss caused spurious 1006 closes
+  // followed by a full room resume. Two consecutive misses (~30 s) is still a dead connection.
+  const heartbeat=setInterval(()=>{if(!alive){if(++missedPongs>=2)ws.terminate();}else missedPongs=0;alive=false;ws.ping();},15000);
   ws.on('message',raw=>{const now=Date.now();if(now-windowAt>1000){count=0;windowAt=now;}if(++count>65){ws.close(1008,'Too many messages');return;}
    let m:any;try{m=JSON.parse(raw.toString());}catch{return error('Invalid message.');}if(!m||typeof m.type!=='string')return error('Invalid message.');
    if(m.type==='create'||m.type==='join'||m.type==='resume'){

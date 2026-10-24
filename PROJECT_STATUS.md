@@ -1,100 +1,93 @@
 # Swords & Shrouds — project checkpoint
 
-Updated: 2026-10-23. Read this file first when continuing in a new chat.
+Updated: 2026-10-24. Read this file first when continuing in a new chat.
 Do not require the previous conversation or import its full transcript.
 Inspect current code and git history before assuming this checkpoint is still current.
 
-## Latest completed batch — Objectives 1–5: battlefield art, ruins, arsenal, atmosphere, audio
+## Latest completed batch — 2026-10B: readability, combat feel, arsenal depth, live/co-op QA
 
-Implementation commits (branch `main`):
-- `c5d3d99` — phase 1: scanned ground materials, terrain-surfaces pass, post-FX composer,
-  PMREM environment + pooled lighting, regional fog/moonlight grading, combat-effects system,
-  ruins/props/courtyard-rack framework, WebAudio ambience, and three new weapons (rapier, halberd,
-  dane axe) with canonical grip profiles and rack distribution.
-- `6576c37` — phase 2: eleven baked scene assets (chapel/aqueduct/bridge/courtyard ruins, modular
-  fortress keep, castle tower, well, chest, bench, grass tuft, rock cluster), modular keeps and
-  instanced towers for all nine castles, courtyard/camp props, visible camera-following night sky
-  (far-plane + sRGB gradient fixes), softened ground lighting, and asset/QA documentation.
-
-Deployed asset work lives in `public/assets/custom/*.glb.gz` (14 new GLBs) and
-`public/assets/textures/` (4 scanned seamless tiles). The bake pipeline is reproducible from
-`scripts/bake/` with Blender 5.2 + glTF-Transform + sharp + Python; sources and attribution are in
-`docs/ASSET-PIPELINE.md` and `public/assets/CREDITS.txt`. Contracts and acceptance criteria:
-`docs/BATCH-2026-10-SPEC.md`; results and remaining defects: `docs/BATCH-2026-10-RESULTS.md`;
-browser evidence: `docs/QA-REPORT.md`.
+Implementation on branch `main` (exact SHA in the commit log; hosting pin updated to it).
+Contract: `docs/BATCH-2026-10B-SPEC.md`; results: `docs/BATCH-2026-10B-RESULTS.md`.
 
 ### Behaviour changed
 
-- Objective 1: road network, three region slabs and castle courtyards use scanned seamless
-  country-road/cobblestone albedo + normal maps, with per-mesh material cloning, geometry-derived
-  tiling and a night-level tint. The high-contrast grass/soil detail map is remapped to a
-  low-contrast cool night albedo so the ground no longer reads as day-green polygons.
-- Objective 2: all nine castles replace the simplified keep boxes with region-tinted modular
-  `fortress_keep` models and `castle_tower` masonry; gothic chapel, aqueduct and broken-bridge ruins
-  line the Castle 1 → Castle 2 road (plus per-region repeats); wells, chests and stone benches dress
-  every castle courtyard and survivor camp. Every new asset is optional: a missing file leaves the
-  previous art in place.
-- Objective 3: `rapier` (fast 1H thrust, shield), `halberd` (longest reach, two-handed) and
-  `dane_axe` (heavy two-handed cleave) added with measured canonical grips, distinct stats and
-  server-authoritative behaviour. Castle racks cover every `WEAPON_IDS` entry; captured castles
-  display a 3-D rack of every weapon.
-- Objective 4: two extra InstancedMeshes (`grass_tuft` ×440, `rock_cluster` ×96) plus 540 varied
-  trees; the wind shader still drives both procedural and baked foliage.
-- Objective 5: night-sky immersion (visible gradient dome, stars and moon; camera-following),
-  post-processing bloom with correct tone mapping/colour space, regional fog and moonlight grading,
-  constant 14-light torch pool + player fill, pooled combat particles (sparks/blood/corruption/dust/
-  embers), tinted hit flashes, procedural ambience and layered combat audio, plus HUD/landing fixes.
-- New tooling: `scripts/validate-assets.mjs`, the `scripts/bake/` pipeline, and
-  `scripts/smoke-browser.mjs` (headless-Chrome QA harness with WebSocket instrumentation).
+- **Readability**: the white ground fill-light pool is gone (player fill is now a shadowless
+  camera-facing directional light), exposure/moon/hemisphere were rebalanced with a dusk-blue
+  ambient floor, night-sky IBL/actor `envMapIntensity` were raised so distant actors read, the moon
+  and 340 stars were moved into the default camera framing, road/cobble were tinted to grey stone
+  and the ground detail albedo remapped cooler/darker/lower-contrast. The adaptive-quality composer
+  steps pixel ratio down when frame time exceeds ~28 ms and recovers when healthy.
+- **Combat feel**: per-weapon first-person motion (thrust/cleave/crush/sweep), pooled third-person
+  swing-trail ribbons, hit-stagger lean, brighter HDR impact sparks, and pooled long-lived ground
+  blood/corruption splatter decals. The two-handed support-hand pose was rewritten as an analytic
+  two-bone reach with finger aim and clavicle assist (wrist→shaft distance 0.64 m → 0.11–0.13 m).
+- **Arsenal**: 10 weapons now — `flamberge` (2H wavy greatsword) and `mace` (1H flanged mace) added
+  with measured canonical grips; nine castle racks cover every non-sword weapon exactly once.
+- **Environment**: 27 camp tents (3 per survivor camp) and 10 low ruined stone-wall segments along
+  the Castle 1 → 2 road and the other regions.
+- **Audio**: authoritative-state event stingers (capture/rescue/siege/victory/defeat), weapon-class
+  swing synthesis profiles, and a quiet plague-nest pad bed.
+- **Robustness fix**: the local authoritative server now tolerates two consecutive missed WebSocket
+  pongs (~30 s) instead of terminating on the first miss. QA proved the spurious `1006` reconnects
+  were renderer main-thread stalls (software rendering) delaying pongs past the old 15 s heartbeat;
+  the client reconnect path itself was correct. Cloudflare's Durable Object already used a 45 s
+  message-age timeout and was not changed.
+- **Assets**: four new GLBs (`flamberge`, `mace`, `camp_tent`, `stone_wall`) — see
+  `docs/ASSET-PIPELINE.md` and `public/assets/CREDITS.txt`.
 
 ### Checks actually run (final state)
 
-- `npm test` — **58/58 passing**, exactly 58 `test(...)` blocks (no tests added or removed; existing
-  tests extended in place for the new weapons and cue metadata).
+- `npm test` — **58/58 passing**, exactly 58 `test(...)` blocks (tests extended in place only).
 - `npx tsc --noEmit` — 0 errors.
-- `vite build` — success (758.7 kB JS / 202.3 kB gzip; CSS 15.7 kB). **System Node is 22.11.0, which
-  is below Vite 7's engine floor; builds must use the bundled Node v24.21.0** at
-  `C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe` (the QA harness
-  auto-selects it).
-- `node scripts/validate-assets.mjs` — 58/58 checks (glTF 2.0, embedded buffers/images, TEXCOORD_0,
-  indexed primitives, triangle budgets, gzip-9, no Draco/KTX2/meshopt extensions).
-- Headless Chrome production smoke — 16/16 gates, 0 page errors, 0 console errors, 0 failed
-  requests, 0 asset 404s, `#weaponCards = 8`, both cameras, live input/combat, WS lifecycle
-  recorded. Screenshots: `qa/final/` (gitignored) and `qa/final-lead2/` (Lead re-run after the final
-  sky/ground polish).
-- Not verified: real-GPU frame rate (SwiftShader software rendering only, sub-1 fps), perceptual
-  audio, physical Xbox controller, and a full campaign playthrough.
+- `vite build` — success: `index-KD7Bp8Pr.js` 774.05 kB / 206.88 kB gzip. **Use the bundled Node
+  v24.21.0** (`C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe`);
+  the system Node 22.11 is below Vite 7's engine floor and hard-fails the build.
+- `scripts/validate-assets.mjs` — 62/62 checks; `tests/assets.test.ts` 5/5.
+- Headless local smoke — 16/16 gates, 10 weapon cards, 0 page/console/log errors, 0 bad responses,
+  0 asset 404s (`qa/final-batch2/`).
+- Live-URL mode against the deployed batch-1 site — 17/17, wss connected, 0 asset 404s.
+- 2-player co-op — 18/18: same room, both snapshots list both players, movement propagates, shared
+  weapon pickup syncs to the second player, both HUDs live, 0 page errors (`qa/coop/`).
+- QA harness now supports `--url <url>` (with `--expect-weapons` / `--expect-assets`) and `--coop`
+  (two Chrome profiles), plus full reconnect instrumentation (`scripts/smoke-browser.mjs`).
+- Not verified: real-GPU frame rate (SwiftShader runs 0.6–1.6 fps), swing-trail/stagger/decal
+  visuals, perceptual audio, physical controller, mobile HUD, full campaign playthrough.
 
 ### Remaining defects / next concrete tasks
 
-1. Ground/atmosphere is now a readable stylised night, but moonlit ground vs castle shadow still has
-   strong contrast and the road/scanned albedo remains light; further tonal art direction is a call.
-2. NPC/player bodies are readable but still dark in third-person distance; distant enemies rely on
-   markers.
-3. Combat hit reactions/animations, two-handed support-hand posing and custom-undead dismemberment
-   parity remain from earlier batches.
-4. Full campaign balance/formation playtest, controller test, real-GPU performance pass, mobile HUD
-   pass, and live Cloudflare smoke after deployment are outstanding.
-5. Sky/stars/moon are visible when looking up, but the default third-person framing only shows the
-   dark night limb; a star/moon elevation tweak would put them in frame if desired.
+1. Real-GPU visual/perf pass is the top remaining item: verify swing trails, stagger, decals, moon
+   framing and frame rate on hardware GPU (software rendering cannot catch the 0.22 s effects).
+2. First-person road is still fairly light grey; distant NPCs still dark; the tent reads as a flat
+   canopy rather than a pitched tent.
+3. Combat animation depth: dedicated polearm/hammer/cleave clips, hit reactions and custom-undead
+   dismemberment parity remain from earlier batches.
+4. Full campaign balance/formation playtest, controller test, mobile HUD, and live co-op verification
+   on the deployed bundle are outstanding.
+5. Pre-existing `gatehouse.glb.gz` uses `KHR_materials_pbrSpecularGlossiness` (GLTFLoader warning,
+   harmless); the Cloudflare-Insights analytics beacon fails cosmetically in headless Chrome.
+
+## Previous completed batch — 2026-10: objectives 1–5 battlefield overhaul
+
+Commits `c5d3d99` (phase 1) and `6576c37` (phase 2): scanned road/cobblestone PBR textures and
+terrain-surfaces pass; post-processing bloom; PMREM environment and pooled torch lighting; regional
+fog/moonlight grading; instanced combat particles; ruins/props/courtyard weapon-rack framework;
+modular fortress keeps/towers for all nine castles; three new weapons (rapier, halberd, dane axe);
+procedural ambience and layered combat audio; docs `docs/BATCH-2026-10-SPEC.md` /
+`docs/BATCH-2026-10-RESULTS.md` / `docs/ASSET-PIPELINE.md`.
 
 ## Hosting / deployment
 
 - Hosting repo: `C:\Users\neil\Desktop\AIprojects\neilandrew.dev` (branch `main`), pin in
   `game-source.json`; build via `scripts/build-game.mjs` (fetches the pinned commit, `npm ci`,
-  builds the client under `/games/swords-and-shrouds/`).
-- Cloudflare Workers Builds deploys on push; `worker.js` imports the pinned `.game-build` simulation
-  source, so the game-source pin controls both client and authoritative gameplay.
-- Hosting pin updated to `0ee662b` (the batch code/docs commit) in hosting commit `c98712c`;
-  Cloudflare Workers Builds deployed it successfully.
-- Live verification (2026-10-23 23:20 America/Chicago): `/games/swords-and-shrouds/health` returns
-  `{"ok":true,"backend":"cloudflare-durable-objects"}`; the served HTML references the new bundle
-  `index-K0lu3Xnn.js` and CSS `index-DSURmr1-.css`; the favicon data URI and updated
-  `assets/CREDITS.txt` are live; all 14 new `.glb.gz` assets and the four scanned road/cobblestone
-  textures return HTTP 200 from the live host.
-- Not yet re-verified live: an in-browser campaign run against the Cloudflare Durable Object
-  endpoint after this pin (the local headless run and the static/asset checks are green; the
-  WebSocket server code path is unchanged apart from the shared weapon-drop seed).
+  builds the client under `/games/swords-and-shrouds/`). Cloudflare Workers Builds deploys on push;
+  `worker.js` imports the pinned `.game-build` simulation source, so the pin controls both client
+  and authoritative gameplay.
+- Build locally with the bundled Node: prepend
+  `C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin` to PATH, then run
+  `& $node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build` in the hosting repo.
+- Live verification for batch 2026-10B: recorded in the hosting commit message / this session log;
+  after deploying, check `/games/swords-and-shrouds/health`, the new JS bundle hash, the four new
+  `.glb.gz` assets and `assets/CREDITS.txt` return 200.
 
 ## Continuity procedure
 

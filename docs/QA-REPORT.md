@@ -1,14 +1,17 @@
-# QA Report — Headless Browser Smoke (Batch 2026-10)
+# QA Report — Headless Browser Smoke (Batches 2026-10 / 2026-10B)
 
 Owner: **qa-verifier**. Harness: `scripts/smoke-browser.mjs`. Screenshots: `qa/<run>/`.
-Both the pre-batch baseline and the final integrated run are recorded below.
+Batch-1 baseline/final runs and the batch-2 local, live-URL and co-op runs are recorded below.
 
 ## TL;DR
 
 | Run | When (local) | Command | Result |
 | --- | --- | --- | --- |
-| Baseline (pre-batch HEAD) | 2026-10-23 22:17–22:18 | `node scripts/smoke-browser.mjs --out qa/baseline --skip-build` | **PASS 16/16**, 0 page errors, 0 console errors, 0 failed/4xx internal requests |
-| Final integration | 2026-10-23 22:38–22:39 | `& $node scripts/smoke-browser.mjs --out qa/final` (bundled Node 24, fresh build) | **PASS 16/16**, 0 page errors, 0 console errors, 0 asset 404s, WS opens=1/closes=0, 8 weapon cards |
+| Batch-1 baseline (pre-batch HEAD) | 2026-10-23 22:17–22:18 | `node scripts/smoke-browser.mjs --out qa/baseline --skip-build` | **PASS 16/16**, 0 page errors, 0 console errors, 0 failed/4xx internal requests |
+| Batch-1 final integration | 2026-10-23 22:38–22:39 | `& $node scripts/smoke-browser.mjs --out qa/final` (bundled Node 24, fresh build) | **PASS 16/16**, 0 page errors, 0 console errors, 0 asset 404s, WS opens=1/closes=0, 8 weapon cards |
+| Batch-2 final local (authoritative, Lead-run; QA-inspected) | 2026-10-24 01:06 | `& $node scripts/smoke-browser.mjs --out qa/final-batch2` | **PASS 16/16**, 10 weapon cards, 0 page/console errors, 0 asset 404s, WS opens=3/closes=2 (1006, auto-resumed) |
+| Batch-2 live URL (deployed batch-1) | 2026-10-24 01:15 | `& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --out qa/live-batch1 --expect-weapons 8` | **PASS 17/17**, 8 weapon cards, 0 page errors, 0 asset 404s, WS opens=1/closes=0 |
+| Batch-2 2-player co-op | 2026-10-24 01:10 | `& $node scripts/smoke-browser.mjs --coop --skip-build --out qa/coop` | **PASS 18/18**, shared armory unlock, both snapshots list both players, 0 page errors |
 
 ## Harness
 
@@ -306,3 +309,129 @@ Still worth a look (blunt):
 
 No missing models, no page errors, no asset 404s, HUD fully readable. **Green for the Lead's
 commit/deploy gate.**
+
+---
+
+## Batch 2026-10B — live-URL mode, 2-player co-op, reconnect investigation
+
+Harness additions (all in `scripts/smoke-browser.mjs`, still one reusable script):
+
+- `--url <url>` — deployed-site mode: skips build + local server, drives the live Cloudflare
+  site, runs the same campaign flow, gates page errors / internal 4xx / failed requests and can
+  assert `--expect-weapons <n>` and fetch any `--expect-assets a.glb.gz,b.jpg` directly (HTTP 200).
+- `--coop` — two independent Chrome instances/profiles against the local authoritative server;
+  A creates the room, B joins by room code; asserts both authoritative snapshots list both
+  player ids, B's movement reaches A, both HUDs are live, A's weapon-rack pickup unlocks in B's
+  shared armory, zero page errors on both pages; screenshots both pages.
+- Instrumentation (injected before app boot): per-WebSocket-connection `msgCount`, `maxGapMs`,
+  `statesBeforeClose`, `lastMessageAgoMs`, open/close timestamps; page navigation timeline;
+  local `/health` RTT sampler; per-page fps during co-op.
+
+```bat
+cd C:\Users\neil\Desktop\AIprojects\neilandrew.dev\.game-build
+$node = "C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+& $node scripts/smoke-browser.mjs --out qa/final-batch2                 :: local final (fresh build)
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch1 --expect-weapons 8                            :: deployed batch-1 baseline
+& $node scripts/smoke-browser.mjs --coop --skip-build --out qa/coop     :: 2-player co-op
+```
+
+### Results
+
+- **Local final (batch-2 tree, authoritative; run by the Lead, screenshots QA-inspected):**
+  **PASS 16/16**, `#weaponCards = 10`, 0 page/console/log errors, 0 bad responses, 0 asset
+  404s. WS: opens=3, closes=2 — both `1006`, `wasClean=false`, one after 30.15 s and one after
+  40.57 s, then auto-resumed (details below). Screenshots: `qa/final-batch2/`.
+- **Live URL (currently deployed batch-1):** **PASS 17/17**, 8 weapon cards as expected for the
+  deployed bundle, 0 page errors, 0 asset 404s (48 internal requests), WSS connected
+  (`wss://neilandrew.dev/games/swords-and-shrouds/ws`), canvas std 42–54 / 1.6–1.9 k colours.
+  One external `static.cloudflareinsights.com` beacon returns `ERR_CONNECTION_REFUSED` in
+  headless Chrome — third-party analytics, reported not gated. Screenshots: `qa/live-batch1/`.
+- **2-player co-op:** **PASS 18/18** (room `258E31`). A and B are in the same room; both
+  authoritative snapshots list both player ids (`Coop A`, `Coop B`, both connected); B's `W`
+  movement propagated to A (1.2 m); A reached the starter rack (prompt
+  `E / A / Interact · Recover Warhammer for the fellowship`) and recovered `hammer`; B's armory
+  became `["sword","hammer"]`, proving the shared rack-unlock rule; both HUDs live; 0 page
+  errors / 0 4xx / 0 failed requests on either page. Dual-SwiftShader fps 0.6/0.6.
+  Screenshots: `qa/coop/` (four: both pages before/after pickup).
+
+### WebSocket reconnect investigation — root cause
+
+Evidence collected across the local final, live-URL and co-op runs:
+
+1. **Symptom:** closes are `code 1006`, `wasClean=false` (no close frame), connections last
+   ~30–41 s, then the client auto-resumes to the same room; gameplay/HUD stay live throughout.
+2. **Not harness navigation:** `Page.frameNavigated` log shows exactly **1** main-frame
+   navigation for the whole run (the initial load).
+3. **Not server load / not a server event-loop stall:** `/health` sampled every second for the
+   whole local run — p50 **1 ms**, p95 **2 ms**, max **2 ms**, **0** stalls >2 s (co-op run:
+   242 samples, p95 2 ms, max 9 ms). The Node server's timers (including the 15 s WS heartbeat)
+   fire on schedule.
+4. **The renderer main thread really does stall for many seconds:** the client's reconnect
+   backoff after a close is `setTimeout(500 ms)` then `1000 ms`, but measured close→next-open
+   gaps were **9.54 s** and **6.21 s** — i.e. the renderer's own timers fired 6–10 s late. In
+   the live-URL run (no disconnect) the instrumented WebSocket recorded a **`maxGapMs = 10.36 s`**
+   between processed message events — the main thread went >10 s without processing WS messages.
+5. **Correlates with software-renderer frame rate:** batch-1 final (1.6 fps) ran 75 s with
+   `opens=1/closes=0`; the heavier batch-2 scene runs at **0.7 fps local** (2 frames in 3 s),
+   **0.6 fps** per co-op page, **0.8 fps** live — and only those runs reconnect. The screenshot
+   `qa/final-batch2/03-combat.png` literally captures the `Connection lost. Reconnecting…`
+   toast while the HUD stays fully live.
+
+**Mechanism:** server heartbeat (`src/server/index.ts`) runs every 15 s; if no pong arrived since
+the previous tick it calls `ws.terminate()` (no close handshake → client sees 1006). The client
+(`main.ts`) reacts with the toast and `connect('resume')` (500 ms × 2^attempt backoff, max 8
+attempts), which restores the full snapshot. Under SwiftShader software rendering (0.6–0.8 fps
+with multi-second main-thread stalls) WebSocket control-message/pong processing and the
+reconnect timer are delayed past that 15 s window → terminate → 1006 → auto-resume.
+
+**Conclusion:** not a harness artefact, not server load, and not a broken client reconnect path
+(recovery works and the HUD/state stay live). It is a **keepalive robustness issue under extreme
+software-renderer stalls** — essentially headless-QA-only today, but a very slow player GPU could
+see a brief reconnect. Recommendation for the Lead (no src changed by QA): relax the server
+heartbeat (tolerate e.g. 2 missed pongs / ~30–45 s window) and/or make the reconnect toast less
+intrusive; world-scene's adaptive quality already reduces the stall frequency. Not a batch-2
+blocker.
+
+### Visual checklist (inspected `qa/final-batch2/`, `qa/coop/`)
+
+- **(a) Survivor-camp tents:** present at The Old Mill camp — canopy-style shelter on poles with
+  hanging cloth panels beside the wagon/house/fire/cauldron, sitting on the ground, no visible
+  intersection with camp furniture. (3 per camp / 27 total can't be counted from 5 screenshots;
+  no missing/floating tents seen.)
+- **(b) Ruined stone walls:** low knee/waist-height grey stone segments flank the road on the
+  right of the third-person shots; ends sit flush/embedded in the ground as intended, they do
+  not block the road and do not float. Batch-1→2 road tone change is visible (grey stone, not
+  white concrete).
+- **(c) 10 weapon cards:** DOM `#weaponCards = 10` ✅.
+- **(d) New weapons on racks:** the authoritative snapshot's `weaponDrops` includes `flamberge`
+  at (37, −543) and `mace` at (−29, −611) — the nine-castle seed covers all 9 non-sword weapons
+  (incl. both new ones) exactly once ✅.
+- **(e) Readability:** moon + halo clearly visible in third person and on the landing page, moon
+  + halo + stars in first person; sky reads dark night (batch-1's washed overcast is gone);
+  ground cooler/darker, lit-grass vs shadow contrast reduced; actors are readable closer up but
+  still dark silhouettes at distance. **Swing trail not captured** — at 0.6–0.7 fps the combat
+  screenshot landed after the swing (it captured the reconnect toast instead), so trail visuals
+  are unverified by screenshot this pass.
+
+Remaining defects / notes (non-blocking):
+
+1. WS keepalive reconnects under software-renderer stalls (root cause above).
+2. First-person road still reads fairly light grey (texture detail visible; the scan ×0.42
+   tint could go a touch darker, world-scene's one-line dial).
+3. Distant NPCs are still dark silhouettes (improved vs batch-1, not fully solved).
+4. Tent asset reads as a flat canopy/awning rather than a classic pitched tent (asset choice).
+5. No mid-swing/trail screenshot due to 0.6–0.7 fps capture timing; combat itself exercised.
+6. External Cloudflare Insights beacon failure on the live site (third-party, not gated).
+7. Pre-existing: `gatehouse.glb.gz` spec-gloss warning + `/favicon.ico` 404 (cosmetic).
+
+### Artifacts
+
+- Screenshots: `qa/final-batch2/` (local final), `qa/live-batch1/` (live batch-1), `qa/coop/`
+  (both co-op pages).
+- Machine reports: `%TEMP%\ss-smoke-artifacts\final-batch2-*\report.json`,
+  `live-batch1-*\report.json`, `coop-*\report.json` (include `diagnostics.ws`, `conns`,
+  `maxGapMs`, `health`, `navigationLog`, `coop` details).
+- After the batch-2 deployment: re-run live mode with `--expect-weapons 10` and
+  `--expect-assets custom/flamberge.glb.gz,custom/mace.glb.gz,custom/camp_tent.glb.gz,custom/stone_wall.glb.gz`
+  to validate the new bundle on the live URL.

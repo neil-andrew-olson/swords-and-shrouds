@@ -18,9 +18,11 @@ const TEXTURES = path.join(GAME, 'public/assets/textures');
 
 const BUDGETS = {
   rapier: 3400, halberd: 3400, dane_axe: 1200,
+  flamberge: 3400, mace: 3400,
   chapel_ruin: 14000, aqueduct_ruin: 14000, bridge_ruin: 14000, courtyard_ruin: 14000,
   fortress_keep: 14000, castle_tower: 14000,
   well: 6000, chest: 6000, bench: 6000, rock_cluster: 6000, grass_tuft: 1500,
+  camp_tent: 6000, stone_wall: 8000,
 };
 const FORBIDDEN_EXT = ['KHR_draco_mesh_compression', 'KHR_texture_basisu', 'EXT_meshopt_compression', 'EXT_meshopt'];
 

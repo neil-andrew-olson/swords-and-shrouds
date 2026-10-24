@@ -113,3 +113,44 @@ Existing `texture_ground_cobblestone.png` / `texture_ground_mud_grass.png` were 
    13.8 k tris.
 6. **No Draco/KTX2/meshopt compression** anywhere: the client and tests parse with a plain
    `GLTFLoader`.
+
+## Batch 2026-10B additions (task-13)
+
+Four more GLBs for the arsenal/environment pass, same contract and pipeline. New helper scripts:
+`scripts/bake/extract_camp_tent.py` (connected-component prop isolation),
+`scripts/bake/render_glb_cycles.py` (true-PBR CPU preview checks),
+`scripts/bake/inspect_loose_parts.py` (source recon), and the batch-1 `bake-simple-glb.mjs`
+gained a `--length` scale mode and `bake_weapons_blender.py` an FBX import path, a sword
+"guard/blade" orientation mode and a texture-wiring helper.
+
+| Asset (`.glb.gz`) | Source | Author / collection | Licence | Changes |
+| --- | --- | --- | --- | --- |
+| `flamberge` (3,366 tris, 1,217.3 KB gz) | `flamberge.zip` → `source/Flamberg2.fbx` | source archive; licence recorded with the source archive | recorded with the source archive | FBX ships no material: wired the 5-PNG set (baseColor / Normal / Roughness / Metallic) into one Principled material, "crossguard = widest cross-section, blade = longer side" orientation (blade +Y), grip-at-origin (20 % below), decimated 15,998→3,366, textures 1024 JPEG, gzip-9 |
+| `mace` (3,366 tris, 246.3 KB gz) | `medieval-mace.zip` → `source/Mace.rar` (extracted with `tar -xf Mace.rar`, bsdtar/libarchive 3.8.9) → `Mace/Mace.fbx` | source archive; licence recorded with the source archive | recorded with the source archive | wired `DefaultMaterial_Base_Color` + `Normal_OpenGL` + Roughness/Metallic into one material, PCA orientation (flanged head = wider end, +Y), grip-at-origin (20 % below), decimated 12,762→3,366, textures 512 JPEG, gzip-9 |
+| `camp_tent` (5,940 tris, 1,401.9 KB gz) | `sketchlab/top_down_low_poly_medieval_camp.glb` — tent/shelter cluster only | rakutin (sketchfab.com/rakutin) — "Top down low poly medieval camp" | CC-BY-4.0 | joined the 3-mesh, 8,211-loose-part camp scene, isolated the shelter by connected components (footprint + "tops above the ground clutter") and dropped the boulder-pile material, removed vertex colours + emissive lantern glow, decimated 33,698→5,940, scaled to 3.0 m tall, ground-centre origin, texture 1024 JPEG |
+| `stone_wall` (7,907 tris, 789.0 KB gz) | `sketchlab/stone_wall_scan_2.glb` (377,798 tris, 4 index chunks) | JabRomich (sketchfab.com/JabRomich) — "stone wall scan 2" | SKETCHFAB Standard (per the source file's asset metadata) | merged the 4 chunk primitives into one mesh, meshopt-simplified 377,798→7,907, scaled so the wall is 6.0 m long (0.86 m tall, 1.0 m deep), ground-centre origin, baseColor/normal 1024 JPEG |
+
+Batch-2 new-asset total: **3.57 MB** (flamberge 1.19 + mace 0.24 + camp_tent 1.37 + stone_wall
+0.77), inside the per-file ≤ 3 MB and batch ≤ 30 MB budgets. Validated with
+`node scripts/validate-assets.mjs` (62/62 checks) and `node --import tsx --test tests/assets.test.ts`
+(5/5).
+
+Additional deviations / notes for batch 2:
+
+7. **flamberge material** — `Flamberg2.fbx` has no material or texture references at all, so the
+   five-PNG texture set from the same archive was wired manually (the exported glTF carries
+   baseColor + normal + a packed metallicRoughness map).
+8. **mace archive** — the spec's `source/Mace.rar` needed `tar -xf` (bsdtar); it expands to
+   `Mace/Mace.fbx` plus a `Mace/` texture folder. `DefaultMaterial_Normal.jpg` exists alongside
+   `DefaultMaterial_Normal_OpenGL.jpg`; the OpenGL variant was used because glTF/three.js expect
+   the OpenGL (+Y) tangent convention.
+9. **camp_tent isolation** — the source is one big top-down camp *scene*, not a tent prop. The
+   shelter is a tarp canopy on four poles sharing space with boulders, crates and barrels; it is
+   isolated by connected-component filtering on the joined mesh (keep components whose centre is
+   in the shelter footprint and whose top is above the ground clutter, minus the boulder-material
+   faces). A couple of supply barrels/crates under the canopy are deliberately kept — they read as
+   camp shelter equipment. Its colour comes from the shared camp texture atlas (mean sampled
+   tent albedo `#5c4b3a`); the source's emissive lantern flag was cleared so the tent does not glow.
+10. **stone_wall scale** — the scanned wall is 9.34 m long × 1.35 m tall natively; it is scaled to
+    the requested 6 m length (giving a waist-high ruined wall, 0.86 m), which keeps the scan's
+    broken ends intact instead of cropping open cross-sections.

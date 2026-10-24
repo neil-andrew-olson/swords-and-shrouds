@@ -23,6 +23,20 @@ const mats=new Map<string,THREE.MeshStandardMaterial>();
 function mat(color:number,tex=false){const key=color+':'+tex;if(!mats.has(key))mats.set(key,new THREE.MeshStandardMaterial({color,roughness:1,flatShading:true,...(tex?{map:texture('#b8b8b8',color)}:{})}));return mats.get(key)!;}
 function box(parent:THREE.Object3D,x:number,y:number,z:number,w:number,h:number,d:number,color:number,tex=false){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(color,tex));mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
 function tagSurface(mesh:THREE.Mesh,surface:'ground'|'road'|'cobble'){mesh.userData.surface=surface;return mesh;}
+type SwingStyle='thrust'|'cleave'|'crush'|'sweep';
+/** Weapon id -> first-person motion style (new ids degrade to a sensible default). */
+const SWING_STYLES:Record<string,SwingStyle>={sword:'thrust',rapier:'thrust',flamberge:'cleave',dane_axe:'cleave',zweihander:'cleave',mace:'crush',hammer:'crush',bastard:'crush',poleaxe:'sweep',halberd:'sweep'};
+const swingStyle=(id:string):SwingStyle=>SWING_STYLES[id]??'thrust';
+/** Additive HDR colour per style so third-person trails read in the dark. */
+const TRAIL_COLORS:Record<SwingStyle,[number,number,number]>={
+ thrust:[1.1,1.5,1.8],
+ cleave:[1.8,1.0,0.38],
+ crush:[1.35,1.35,1.55],
+ sweep:[0.75,1.55,1.15]
+};
+/** Characters catch the night IBL more strongly so distant actors don't go pure black. */
+const ACTOR_ENV_INTENSITY=1.7;
+function boostActorMaterials(root:THREE.Object3D){root.traverse(o=>{if(o instanceof THREE.Mesh)for(const material of Array.isArray(o.material)?o.material:[o.material]){const standard=material as THREE.MeshStandardMaterial;if(standard.isMeshStandardMaterial)standard.envMapIntensity=ACTOR_ENV_INTENSITY;}});}
 function createSkyAndMoon(scene:THREE.Scene){ const c=document.createElement('canvas');c.width=2;c.height=256;
  const ctx=c.getContext('2d')!;
  const grad=ctx.createLinearGradient(0,0,0,256);
@@ -34,11 +48,14 @@ function createSkyAndMoon(scene:THREE.Scene){ const c=document.createElement('ca
  const sky=new THREE.Group();
  const dome=new THREE.Mesh(new THREE.SphereGeometry(260,24,14,0,Math.PI*2,0,Math.PI*.5),new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide,depthWrite:false,fog:false}));
  dome.position.y=-15;sky.add(dome);
- const starCount=140,starPos=new Float32Array(starCount*3);let s=0;
- for(let i=0;i<starCount;i++){const th=Math.random()*Math.PI*2,phi=Math.random()*.52+.12,r=252;starPos[s++]=r*Math.sin(phi)*Math.cos(th);starPos[s++]=r*Math.cos(phi)-15;starPos[s++]=r*Math.sin(phi)*Math.sin(th);}
+ const starCount=340,starPos=new Float32Array(starCount*3);let s=0;
+ // phi is measured from the pole: extend down to ~66 deg so a rich star field sits low
+ // enough to be visible in the default third-person framing.
+ for(let i=0;i<starCount;i++){const th=Math.random()*Math.PI*2,phi=0.28+Math.random()*1.0,r=252;starPos[s++]=r*Math.sin(phi)*Math.cos(th);starPos[s++]=r*Math.cos(phi)-15;starPos[s++]=r*Math.sin(phi)*Math.sin(th);}
  const starGeo=new THREE.BufferGeometry();starGeo.setAttribute('position',new THREE.BufferAttribute(starPos,3));
- sky.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xdfe8f7,size:1.1,transparent:true,opacity:.65,sizeAttenuation:false,fog:false})));
- const moonDir=new THREE.Vector3(-40,70,-30).normalize(),moonGroup=new THREE.Group();
+ sky.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xdfe8f7,size:1.6,transparent:true,opacity:.9,sizeAttenuation:false,fog:false})));
+ // Low moon (≈26 deg elevation) so the disc + halo are inside the default camera frame.
+ const moonDir=new THREE.Vector3(-12,16,-42).normalize(),moonGroup=new THREE.Group();
  moonGroup.position.copy(moonDir.multiplyScalar(225));moonGroup.lookAt(0,0,0);
  const halo=new THREE.Mesh(new THREE.CircleGeometry(26,32),new THREE.MeshBasicMaterial({color:0x345672,transparent:true,opacity:.35,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}));
  moonGroup.add(halo);
@@ -79,14 +96,14 @@ export class WorldView{
  campRigs:{rig:ReturnType<typeof customCharacter>;actor:Actor;camp:THREE.Group}[]=[];
  weaponRacks=new Map<string,THREE.Group>();
  activeWeapon?:WeaponId;
- fpSerial=-1;fpAttack=0;fpDuration=.6;
+ fpSerial=-1;fpAttack=0;fpDuration=.6;trailSerial=-1;
  customProps=new Map<string,THREE.Group>();
  characterAssets=new CharacterAssets();animated=new Map<string,NonNullable<ReturnType<CharacterAssets['create']>>>();
  renderer:THREE.WebGLRenderer;scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(68,1,.1,320);actors=new Map<string,THREE.Group>();flags=new Map<string,THREE.Mesh>();gates=new Map<string,THREE.Mesh>();barriers=new Map<string,THREE.Group>();keeps=new Map<string,THREE.Group>();campMeshes=new Map<string,THREE.Group>();cacheMeshes=new Map<string,THREE.Group>();nest=new THREE.Group();weapon=new THREE.Group();shield=new THREE.Group();solid:THREE.Object3D[]=[];flames:{group:THREE.Group;seed:number;x:number;z:number}[]=[];flagMeshes:{mesh:THREE.Mesh;seed:number}[]=[];upgrades=new Map<string,THREE.Group[]>();previousHp=new Map<string,number>();effects:{mesh:THREE.Sprite;life:number}[]=[];projectiles=new Map<number,THREE.Mesh>();debris:{mesh:THREE.Mesh;life:number;velocity:THREE.Vector3}[]=[];artillery=new Map<string,THREE.Object3D>();
  /** New systems (batch 2026-10). */
  fx:CombatEffects;postfx:PostFX|null=null;
  ruinsUpdate:((game:Game|undefined,me:Actor|undefined,time:number)=>void)|null=null;
- fog!:THREE.FogExp2;moon!:THREE.DirectionalLight;hemi!:THREE.HemisphereLight;fill!:THREE.PointLight;sky!:THREE.Group;
+ fog!:THREE.FogExp2;moon!:THREE.DirectionalLight;hemi!:THREE.HemisphereLight;fill!:THREE.DirectionalLight;sky!:THREE.Group;
  torchSources:TorchSource[]=[];lightPool:THREE.PointLight[]=[];
  towerSlots:TowerSlot[]=[];legacyTowerTops:THREE.Object3D[]=[];modernTowers=false;newKeepsApplied=false;
  private nestTorch=-1;
@@ -97,15 +114,15 @@ export class WorldView{
  private readonly camTarget=new THREE.Vector3();private readonly camForward=new THREE.Vector3();private readonly camDesired=new THREE.Vector3();private readonly camDelta=new THREE.Vector3();
  private readonly camRay=new THREE.Raycaster();private readonly shieldTarget=new THREE.Vector3();
  constructor(canvas:HTMLCanvasElement){
-  this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFShadowMap;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.65;this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x1a2629);
+  this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFShadowMap;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.5;this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x1a2629);
   this.fog=new THREE.FogExp2(0x1c2a2e,0.015);this.scene.fog=this.fog;
-  this.hemi=new THREE.HemisphereLight(0xd0e0f0,0x2a3820,3.2);this.scene.add(this.hemi);
-  this.moon=new THREE.DirectionalLight(0xcadff5,2.7);this.moon.position.set(-40,74,-30);this.moon.castShadow=true;this.moon.shadow.mapSize.set(2048,2048);this.moon.shadow.camera.left=-46;this.moon.shadow.camera.right=46;this.moon.shadow.camera.top=46;this.moon.shadow.camera.bottom=-46;this.moon.shadow.camera.near=1;this.moon.shadow.camera.far=190;this.moon.shadow.bias=-0.001;this.moon.shadow.normalBias=0.06;this.moon.shadow.radius=1.5;this.scene.add(this.moon);this.scene.add(this.moon.target);this.moon.name="sun";this.sky=createSkyAndMoon(this.scene);
+  this.hemi=new THREE.HemisphereLight(0xc2d6ee,0x2e3a44,4.4);this.scene.add(this.hemi);this.scene.add(new THREE.AmbientLight(0x243442,0.5));
+  this.moon=new THREE.DirectionalLight(0xcadff5,2.4);this.moon.position.set(-40,64,-30);this.moon.castShadow=true;this.moon.shadow.mapSize.set(2048,2048);this.moon.shadow.camera.left=-46;this.moon.shadow.camera.right=46;this.moon.shadow.camera.top=46;this.moon.shadow.camera.bottom=-46;this.moon.shadow.camera.near=1;this.moon.shadow.camera.far=190;this.moon.shadow.bias=-0.001;this.moon.shadow.normalBias=0.06;this.moon.shadow.radius=1.5;this.scene.add(this.moon);this.scene.add(this.moon.target);this.moon.name="sun";this.sky=createSkyAndMoon(this.scene);
   // Dark night-sky IBL so the PBR armour/metal has something to reflect (single PMREM bake).
-  try{const environment=createNightEnvironment(this.renderer);if(environment){this.scene.environment=environment;this.scene.environmentIntensity=0.75;}}
+  try{const environment=createNightEnvironment(this.renderer);if(environment){this.scene.environment=environment;this.scene.environmentIntensity=1.0;}}
   catch(error){console.warn('Environment map unavailable',error);}
   // Local readable pool of light around the player (does not cast shadows).
-  this.fill=new THREE.PointLight(0x9fc0e0,5,16,1.6);this.fill.castShadow=false;this.scene.add(this.fill);
+  this.fill=new THREE.DirectionalLight(0xaec6e0,1.0);this.fill.castShadow=false;this.scene.add(this.fill);this.scene.add(this.fill.target);
   // Fixed pool of torch lights; sources are re-assigned to the nearest flames every frame.
   for(let i=0;i<MAX_TORCH_LIGHTS;i++){const light=new THREE.PointLight(0xff9d42,0,12,1.8);light.castShadow=false;this.scene.add(light);this.lightPool.push(light);}
   this.fx=new CombatEffects(this.scene);
@@ -139,14 +156,14 @@ export class WorldView{
    const surface=object.userData.surface;
    if(surface!=='road'&&surface!=='cobble')return;
    const materials=Array.isArray(object.material)?object.material:[object.material];
-   for(const material of materials){const standard=material as THREE.MeshStandardMaterial;if(standard.isMeshStandardMaterial&&standard.color)standard.color.multiplyScalar(surface==='road'?0.5:0.56);}
+   for(const material of materials){const standard=material as THREE.MeshStandardMaterial;if(standard.isMeshStandardMaterial&&standard.color)standard.color.multiplyScalar(surface==='road'?0.42:0.48);}
   });
  }
  async survivorAssets(){
   await this.characterAssets.customReady;const source=this.characterAssets.custom.get('survivor');if(!source)return;
   for(const camp of this.campMeshes.values())for(let i=0;i<3;i++){
    const actor={id:'survivor-'+i,kind:'soldier',hp:100,maxHp:100,attackSerial:0} as Actor;
-   const rig=customCharacter(source,actor,new Map(),true);rig.model.position.set(.7+i*1.15,0,i%2?1.1:0);rig.model.rotation.y=Math.PI+(i-1)*.45;camp.add(rig.model);this.campRigs.push({rig,actor,camp});rig.update(actor,false,i*.3);
+   const rig=customCharacter(source,actor,new Map(),true);rig.model.position.set(.7+i*1.15,0,i%2?1.1:0);rig.model.rotation.y=Math.PI+(i-1)*.45;boostActorMaterials(rig.model);camp.add(rig.model);this.campRigs.push({rig,actor,camp});rig.update(actor,false,i*.3);
   }
  }
  private async startEnvironment(){
@@ -311,12 +328,16 @@ export class WorldView{
    this.fog.density+=(targetDensity-this.fog.density)*(1-Math.exp(-Math.max(0,dt)*1.1));
    this.tmpColor2.setHex(0xcadff5).lerp(this.tmpColor3.setHex(0xd9d2c2),moor).lerp(this.tmpColor3.setHex(0xbcd6ff),crown);
    this.moon.color.lerp(this.tmpColor2,1-Math.exp(-Math.max(0,dt)*1.4));
-   this.moon.intensity=2.7-moor*0.2+crown*0.25;
-   this.hemi.intensity=4.0-moor*0.2+crown*0.2;
+   this.moon.intensity=2.4-moor*0.15+crown*0.2;
+   this.hemi.intensity=4.4-moor*0.2+crown*0.15;
    this.sky.position.set(this.camera.position.x,0,this.camera.position.z);
-   this.fill.position.set(focusX,Math.max(2.2,this.camera.position.y+0.6),focusZ);
-   this.fill.intensity=3.4+moor*0.7+crown*1.1;
-   this.moon.position.set(focusX-42,74,focusZ-32);this.moon.target.position.set(focusX,0,focusZ);
+   // Soft viewer-side directional fill: same direction for the whole scene, so no local
+   // ground hotspot, but actors/edges facing the camera catch the light at any distance.
+   this.camera.getWorldDirection(this.tmpV);
+   this.fill.position.set(this.camera.position.x,this.camera.position.y+2.5,this.camera.position.z);
+   this.fill.target.position.set(this.camera.position.x+this.tmpV.x*24,this.camera.position.y+this.tmpV.y*24,this.camera.position.z+this.tmpV.z*24);
+   this.fill.intensity=0.7+moor*0.15+crown*0.25;
+   this.moon.position.set(focusX-42,64,focusZ-30);this.moon.target.position.set(focusX,0,focusZ);
    this.updateTorchLights(focusX,focusZ,time);
   }
   /** Embers drift off nearby fires; pooled particles must keep streaming. */
@@ -374,7 +395,7 @@ export class WorldView{
    }
    if(this.postfx)this.postfx.render();else this.renderer.render(this.scene,this.camera);return;}
    const alive=new Set(g.actors.map(a=>a.id));for(const [id,mesh] of this.actors)if(!alive.has(id)){this.animated.get(id)?.dispose();this.animated.delete(id);this.previousHp.delete(id);this.scene.remove(mesh);mesh.traverse(o=>{if(o instanceof THREE.Mesh&&!o.userData.sharedAsset)o.geometry.dispose();});this.actors.delete(id);}
-   for(const a of g.actors){if(me&&dist(a,me)>55){const far=this.actors.get(a.id);if(far)far.visible=false;this.previousHp.set(a.id,a.hp);continue;}const mesh=this.actors.get(a.id)||this.knight(a);let rig=this.animated.get(a.id);if(rig&&(mesh.userData.weapon!==(a.weapon??'sword')||mesh.userData.appearance!==characterAsset(a))){mesh.remove(rig.model);rig.dispose();this.animated.delete(a.id);rig=undefined;}if(!rig){rig=this.characterAssets.create(a);if(rig){for(const child of mesh.children)if(!['hp','tell','marker'].includes(child.name))child.visible=false;rig.model.traverse(o=>o.userData.sharedAsset=true);mesh.add(rig.model);this.animated.set(a.id,rig);mesh.userData.weapon=a.weapon??'sword';mesh.userData.appearance=characterAsset(a);}}
+   for(const a of g.actors){if(me&&dist(a,me)>55){const far=this.actors.get(a.id);if(far)far.visible=false;this.previousHp.set(a.id,a.hp);continue;}const mesh=this.actors.get(a.id)||this.knight(a);let rig=this.animated.get(a.id);if(rig&&(mesh.userData.weapon!==(a.weapon??'sword')||mesh.userData.appearance!==characterAsset(a))){mesh.remove(rig.model);rig.dispose();this.animated.delete(a.id);rig=undefined;}if(!rig){rig=this.characterAssets.create(a);if(rig){for(const child of mesh.children)if(!['hp','tell','marker'].includes(child.name))child.visible=false;rig.model.traverse(o=>o.userData.sharedAsset=true);boostActorMaterials(rig.model);mesh.add(rig.model);this.animated.set(a.id,rig);mesh.userData.weapon=a.weapon??'sword';mesh.userData.appearance=characterAsset(a);}}
     const oldX=mesh.position.x,oldZ=mesh.position.z;if(Math.hypot(oldX-a.x,oldZ-a.z)>10)mesh.position.set(a.x,0,a.z);else mesh.position.lerp(this.tmpV.set(a.x,0,a.z),1-Math.exp(-dt*16));mesh.rotation.y=-a.yaw;mesh.visible=!(a.id===me?.id&&first)&&(!me||dist(a,me)<46);mesh.rotation.z=a.hp<=0&&!rig?Math.PI/2:0;
     mesh.getObjectByName('tell')!.visible=a.windup>0&&a.hp>0;mesh.getObjectByName('tell')!.scale.setScalar(1+a.windup);const moving=Math.abs(oldX-a.x)+Math.abs(oldZ-a.z)>.03;
     if(moving&&!me||moving&&dist(a,me!)<26){const speed=Math.hypot(oldX-a.x,oldZ-a.z)/Math.max(0.0001,dt);if(speed>4.2){const next=(mesh.userData.dustAt??0) as number;if(time>=next){mesh.userData.dustAt=time+0.18+Math.random()*0.14;this.fx.dust(this.tmpV2.set(a.x,0.05,a.z),Math.min(1,(speed-4)/5));}}}
@@ -382,12 +403,12 @@ export class WorldView{
      const evil=a.kind==='zombie'||a.kind==='corrupted';
      this.tmpV.set(a.x,1.35,a.z);
      this.fx.sparks(this.tmpV,evil?'undead':a.armor==='heavy'?'metal':'flesh');
-     this.fx.blood(this.tmpV,evil,a.maxHp>=200?1.6:1);
+     this.fx.blood(this.tmpV,evil,a.maxHp>=200?1.6:1);this.fx.splatter(this.tmpV2.set(a.x,0,a.z),evil,Math.min(2,0.6+(previous-a.hp)/40));mesh.userData.staggerUntil=time+.22;
      if(previous>0&&a.hp<=0){
       const isBoss=a.name?.includes('Champion')||a.name?.includes('Fallen')||a.id==='boss-plague'||a.maxHp>=200;
       this.tmpV.set(a.x,1.1,a.z);
       this.fx.blood(this.tmpV,evil,isBoss?2:1.15);
-      this.fx.sparks(this.tmpV,evil?'undead':'metal');
+      this.fx.sparks(this.tmpV,evil?'undead':'metal');this.fx.splatter(this.tmpV2.set(a.x,0,a.z),evil,1.8);
       this.fx.dust(this.tmpV2.set(a.x,.08,a.z),isBoss?1:0.55);
       if(isBoss){
        const ring=new THREE.Mesh(new THREE.RingGeometry(.8,1.6,32),new THREE.MeshBasicMaterial({color:0xdf2055,side:THREE.DoubleSide}));
@@ -399,7 +420,7 @@ export class WorldView{
      mesh.userData.flashUntil=time+.08;mesh.userData.recoilUntil=time+.16;if(a.id===me?.id)this.shake=Math.min(.35,this.shake+.2);}if(rig)rig.model.position.z=Math.max(0,(mesh.userData.recoilUntil??0)-time)*1.1;const flashing=(mesh.userData.flashUntil??0)>time;if(rig){
      if(flashing&&!mesh.userData.flashLit){mesh.userData.flashLit=true;const flashHex=(a.kind==='zombie'||a.kind==='corrupted')?0x5a1f22:0x2a3440;rig.model.traverse(o=>{if(o instanceof THREE.Mesh)for(const material of Array.isArray(o.material)?o.material:[o.material]){const m=material as THREE.MeshStandardMaterial;if(m.emissive){if(m.userData.originalEmissive===undefined){m.userData.originalEmissive=m.emissive.getHex();m.userData.originalEmissiveIntensity=m.emissiveIntensity;}m.emissive.setHex(flashHex);m.emissiveIntensity=1;}}});}
      else if(!flashing&&mesh.userData.flashLit){mesh.userData.flashLit=false;rig.model.traverse(o=>{if(o instanceof THREE.Mesh)for(const material of Array.isArray(o.material)?o.material:[o.material]){const m=material as THREE.MeshStandardMaterial;if(m.emissive&&m.userData.originalEmissive!==undefined){m.emissive.setHex(m.userData.originalEmissive);m.emissiveIntensity=m.userData.originalEmissiveIntensity??1;}}});}
-    }mesh.getObjectByName('marker')!.visible=a.hp>0||!!a.downed;this.previousHp.set(a.id,a.hp);const bar=mesh.getObjectByName('hp')!;bar.scale.x=Math.max(.001,a.hp/a.maxHp);bar.visible=a.hp<a.maxHp&&a.hp>0;mesh.scale.setScalar(a.kind==='corrupted'?(a.maxHp>=200?1.4:1.15):1);
+    }if(rig){const staggerK=Math.min(1,Math.max(0,((mesh.userData.staggerUntil??0)-time)/.22));rig.model.rotation.x=-(staggerK*staggerK)*.32;}mesh.getObjectByName('marker')!.visible=a.hp>0||!!a.downed;this.previousHp.set(a.id,a.hp);const bar=mesh.getObjectByName('hp')!;bar.scale.x=Math.max(.001,a.hp/a.maxHp);bar.visible=a.hp<a.maxHp&&a.hp>0;mesh.scale.setScalar(a.kind==='corrupted'?(a.maxHp>=200?1.4:1.15):1);
    }
    for(const effect of this.effects){effect.life-=dt;effect.mesh.position.y+=dt*1.5;effect.mesh.material.opacity=Math.max(0,effect.life/.8);if(effect.life<=0){this.scene.remove(effect.mesh);effect.mesh.material.map?.dispose();effect.mesh.material.dispose();}}this.effects=this.effects.filter(e=>e.life>0);
    for(const item of this.debris){item.life-=dt;item.velocity.y-=9*dt;item.mesh.position.addScaledVector(item.velocity,dt);item.mesh.rotation.x+=dt*3;if(item.mesh.position.y<.12){item.mesh.position.y=.12;item.velocity.set(0,0,0);}if(item.life<=0){this.scene.remove(item.mesh);item.mesh.geometry.dispose();for(const m of Array.isArray(item.mesh.material)?item.mesh.material:[item.mesh.material])m.dispose();}}this.debris=this.debris.filter(d=>d.life>0);while(this.debris.length>48){const d=this.debris.shift()!;this.scene.remove(d.mesh);d.mesh.geometry.dispose();for(const m of Array.isArray(d.mesh.material)?d.mesh.material:[d.mesh.material])m.dispose();}
@@ -425,8 +446,8 @@ export class WorldView{
    if(me){const model=this.actors.get(me.id);const pos=model?.position??this.tmpV2.set(me.x,0,me.z);const target=this.camTarget.set(pos.x,1.55,pos.z);const forward=this.camForward.set(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch));
     if(first){this.camera.position.copy(target);this.camera.rotation.set(pitch,-yaw,0,'YXZ');}
     else{const desired=this.camDesired.copy(target).addScaledVector(forward,-6);desired.y+=2;const delta=this.camDelta.copy(desired).sub(target);this.camRay.set(target,delta.clone().normalize());this.camRay.far=delta.length();const hits=this.camRay.intersectObjects(this.solid,false);if(hits.length)desired.copy(target).addScaledVector(delta.normalize(),Math.max(.45,hits[0].distance-.3));this.camera.position.copy(desired);this.camera.lookAt(this.tmpV.copy(target).addScaledVector(forward,4));}
-    const selected=me.weapon??'sword',stats=weaponStats(selected),source=this.characterAssets.custom.get(selected);if(source&&this.activeWeapon!==selected){this.weapon.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])if(this.activeWeapon)m.dispose();});this.weapon.clear();this.weapon.add(equipmentModel(source.scene,stats.length*.78,false,selected));this.weapon.traverse(o=>{o.castShadow=false;});this.activeWeapon=selected;}
-    this.weapon.visible=first&&me.hp>0;this.shield.visible=first&&me.hp>0&&stats.shield;this.weapon.position.set(.32,-.4,-.78);this.weapon.rotation.set(me.block&&!stats.shield?-.5:.1,0,me.block&&!stats.shield?-1.1:-.2);if(this.fpSerial!==(me.attackSerial??0)){if(this.fpSerial>=0){this.fpDuration=stats.cooldown*.85;this.fpAttack=this.fpDuration;}this.fpSerial=me.attackSerial??0;}this.fpAttack=Math.max(0,this.fpAttack-dt);if(this.fpAttack>0){const t=1-this.fpAttack/this.fpDuration,arc=Math.sin(Math.PI*t),strike=Math.sin(Math.PI*Math.min(1,t*1.6));this.weapon.rotation.z-=arc*(selected==='hammer'?1.1:1.65);this.weapon.rotation.x-=strike*(selected==='hammer'?1.3:.55);this.weapon.position.x-=arc*.3;this.weapon.position.z-=strike*.14;}this.shield.position.lerp(this.shieldTarget.set(me.block?-.12:-.38,me.block?-.12:-.38,-.82),1-Math.exp(-dt*16));
+    const selected=me.weapon??'sword',stats=weaponStats(selected),source=this.characterAssets.custom.get(selected);if(source&&this.activeWeapon!==selected){this.weapon.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])if(this.activeWeapon)m.dispose();});this.weapon.clear();this.weapon.add(equipmentModel(source.scene,stats.length*.78,false,selected));this.weapon.traverse(o=>{o.castShadow=false;});this.activeWeapon=selected;if(this.trailSerial!==(me.attackSerial??0)){if(this.trailSerial>=0&&!first&&me.hp>0){const trailStyle=swingStyle(selected),trailColor=TRAIL_COLORS[trailStyle];this.tmpV2.set(me.x,0,me.z);this.fx.trail(this.tmpV2,me.yaw??yaw,stats.reach,trailColor[0],trailColor[1],trailColor[2]);}this.trailSerial=me.attackSerial??0;}}
+    this.weapon.visible=first&&me.hp>0;this.shield.visible=first&&me.hp>0&&stats.shield;this.weapon.position.set(.32,-.4,-.78);this.weapon.rotation.set(me.block&&!stats.shield?-.5:.1,0,me.block&&!stats.shield?-1.1:-.2);if(this.fpSerial!==(me.attackSerial??0)){if(this.fpSerial>=0){this.fpDuration=stats.cooldown*.85;this.fpAttack=this.fpDuration;}this.fpSerial=me.attackSerial??0;}this.fpAttack=Math.max(0,this.fpAttack-dt);if(this.fpAttack>0){const t=1-this.fpAttack/this.fpDuration,arc=Math.sin(Math.PI*t),strike=Math.sin(Math.PI*Math.min(1,t*1.6)),style=swingStyle(selected);if(style==='thrust'){this.weapon.position.z-=strike*.6;this.weapon.position.y+=strike*.05;this.weapon.rotation.x-=strike*.18;this.weapon.rotation.z-=arc*.05;this.weapon.position.x+=arc*.05;}else if(style==='cleave'){this.weapon.rotation.z-=arc*1.9;this.weapon.rotation.x-=strike*.65;this.weapon.rotation.y+=arc*.35;this.weapon.position.x-=arc*.45;this.weapon.position.z-=strike*.18;}else if(style==='crush'){this.weapon.rotation.x-=strike*1.7;this.weapon.rotation.z+=arc*.35;this.weapon.position.y+=arc*.22-strike*.18;this.weapon.position.z-=strike*.24;this.weapon.position.x-=arc*.12;}else{this.weapon.rotation.z-=arc*2;this.weapon.rotation.y-=arc*.5;this.weapon.position.x-=arc*.5;this.weapon.position.z-=arc*.22;this.weapon.position.y+=strike*.08;}}this.shield.position.lerp(this.shieldTarget.set(me.block?-.12:-.38,me.block?-.12:-.38,-.82),1-Math.exp(-dt*16));
    }
    if(this.landscapeUpdate)this.landscapeUpdate(time);
    if(this.postfx)this.postfx.render();else this.renderer.render(this.scene,this.camera);

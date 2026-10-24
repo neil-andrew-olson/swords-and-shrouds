@@ -7,6 +7,8 @@ export const WEAPONS = {
  rapier: {name:'Rapier', asset:'rapier', damage:26, reach:3.8, cooldown:.42, stamina:12, arc:.12, length:1, shield:true, style:'Swift thrust · shield guard'},
  halberd: {name:'Halberd', asset:'halberd', damage:48, reach:5.2, cooldown:1.05, stamina:28, arc:.55, length:1.85, shield:false, style:'Longest reach · heavy hook · weapon parry'},
  dane_axe: {name:'Dane axe', asset:'dane_axe', damage:58, reach:3.2, cooldown:1.05, stamina:26, arc:-.1, length:1.5, shield:false, style:'Heavy cleave · weapon parry'},
+ flamberge: {name:'Flamberge', asset:'flamberge', damage:60, reach:4.2, cooldown:1.1, stamina:30, arc:-.08, length:1.7, shield:false, style:'Wavy greatsword · wide cleave'},
+ mace: {name:'Flanged mace', asset:'mace', damage:44, reach:2.9, cooldown:.95, stamina:22, arc:.35, length:.8, shield:true, style:'Crushing head · shield guard'},
 } as const;
 export type WeaponId=keyof typeof WEAPONS;
 export const WEAPON_IDS=Object.keys(WEAPONS) as WeaponId[];
