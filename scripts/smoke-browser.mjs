@@ -30,6 +30,9 @@
  *   --characters       Cycle-1 character readability mode: close-up screenshots of the player in
  *                      all 5 appearances + zombie/skeleton via window.__ssCharacterPreview, with
  *                      mean/p50/p90/black% body luminance before/after comparison.
+ *   --views            Cycle-3 QA-view mode: capture the 7 required + optional region/landmark/
+ *                      foliage/corruption/wind views right after joining (before the idle corruption
+ *                      timer kills the player), plus region-info/border/wind evidence.
  *   --expect-weapons <n> Gate `#weaponCards` to exactly n (default: report only)
  *   --expect-assets <list> Comma-separated asset paths (relative to assets/) to fetch and require 200
  *   --skip-build       Reuse the existing dist/client instead of running vite build
@@ -80,10 +83,33 @@ const CHAR_GATE = {
   closeupUniqueColorsMin: 400,
   specUniqueColorsTarget: 500,
 };
-// Performance acceptance for cycle 2 (Lead: <210 calls / <1.85M tris).
-const PERF_GATE = {maxCalls: 210, maxTris: 1_850_000};
-// Cycle-2 atmosphere/region audit views requested from world-scene via window.__ssQAView(name).
+// Performance acceptance for cycle 3 (SPEC: <230 calls / <1.9M tris).
+const PERF_GATE = {maxCalls: 230, maxTris: 1_900_000};
+// QA atmosphere/region audit views requested from world-scene via window.__ssQAView(name).
 const QA_VIEWS = ['treeline', 'fire', 'camp', 'courtyard', 'region-green', 'region-ashen', 'region-crown'];
+// Cycle-3 optional views: region landmarks, foliage/corruption close-ups and a wind frame. Each is
+// captured when the hook supports it; absence is reported (not a hard fail) so the required 7 stay
+// the gate while new evidence is collected where available.
+const QA_VIEWS_OPTIONAL = ['landmark-green', 'landmark-ashen', 'landmark-crown', 'foliage', 'corruption', 'wind'];
+// `__ssQAPose` fallbacks for landmark framing (updated with ruins-builder's final coordinates):
+// computed from cam -> lookTarget with world-scene's pose convention
+// {x,z,height,yaw=atan2(lookX-x, -(lookZ-z)), pitch=atan2(lookY-height, hypot(...))}.
+// Landmark anchors (ruins-builder FINAL after the Lead's visual-fix pass): green village_house_ruin
+// MOVED to (56,-6) h6.2 (65 m from spawn, 32.2 m off the road, 44.3 m from castle) + rebuilt 8-stone
+// circle r9.8 + 5 loose stones; ashen chapel_ruin (-36,-228) h10.0; crown watchtower_ruin (-34,-472)
+// h9.0 on a 3-rock outcrop (top ~11.8). Cam/target/yaw/pitch are ruins-builder's exact final
+// fallbacks; the green camera sits on the circle's collapsed-gap side.
+const LANDMARK_POSES = {
+  'landmark-green': {x: 69.2, z: -21, height: 2.8, yaw: -2.4199, pitch: 0.01},
+  'landmark-ashen': {x: -36, z: -190, height: 3.2, yaw: 0, pitch: 0.0473},
+  'landmark-crown': {x: -34, z: -432, height: 3.2, yaw: 0, pitch: 0.1021},
+};
+// Cycle-2 reference timings (SwiftShader, same machine) and the cycle-3 "meaningfully earlier" gate.
+const CYCLE2_TIMINGS = {landingMs: 3564, hudMs: 16308, stateMs: 17415, joinMs: 3698};
+const TIME_GATE = {maxHudMs: 15000, maxStateMs: 16200, maxJoinMs: 3800};
+// Regional-identity + wind gates.
+const REGION_GATE = {minPairwiseColorDistance: 4, minLuminanceSpread: 1.5};
+const WIND_GATE = {minMeanAbsDiff: 0.8};
 // BEFORE baseline measured from qa/final-batch3 (player body + companion crops, batch-3 pre-fix).
 const CHAR_BEFORE_BASELINE = {
   normalPlayerTorso: {mean: 54.9, p50: 28.5, p90: 132.0, blackPct: 44.5},
@@ -161,7 +187,11 @@ const WS_INSTRUMENT = `(()=>{
             if(key!==state.actorKey){
               state.actorKey=key;
               state.allActors=actors.map(a=>({id:a.id,name:a.name,kind:a.kind,character:a.character||null,
-                x:Math.round((a.x||0)*10)/10,z:Math.round((a.z||0)*10)/10}));
+                x:Math.round((a.x||0)*10)/10,z:Math.round((a.z||0)*10)/10,
+                // QA-only scalar copies so cycle-3 elite-undead identification works without src edits.
+                elite:a.elite===true||a.elite==='elite'?a.elite:null,tier:a.tier??a.rank??null,
+                variant:a.variant??null,role:a.role??null,type:a.type??null,level:a.level??null,
+                maxHp:a.maxHp??null,castle:a.castle??null}));
             }
           }
         }catch(e){}
@@ -266,6 +296,7 @@ function parseArgs(argv) {
     coop: false,
     perf: false,
     characters: false,
+    views: false,
     perfSettle: 4000,
     perfSampleMs: 4000,
     expectWeapons: null,
@@ -282,6 +313,7 @@ function parseArgs(argv) {
     else if (a === '--coop') opts.coop = true;
     else if (a === '--perf') opts.perf = true;
     else if (a === '--characters') opts.characters = true;
+    else if (a === '--views') opts.views = true;
     else if (a === '--perf-settle') opts.perfSettle = Number(argv[++i]) || opts.perfSettle;
     else if (a === '--perf-samples') opts.perfSampleMs = Number(argv[++i]) || opts.perfSampleMs;
     else if (a === '--expect-weapons') opts.expectWeapons = Number(argv[++i]);
@@ -298,6 +330,7 @@ function parseArgs(argv) {
   if (opts.coop && opts.url) throw new Error('--coop and --url are mutually exclusive');
   if (opts.coop && opts.perf) throw new Error('--perf captures a single page; do not combine with --coop');
   if (opts.coop && opts.characters) throw new Error('--characters captures a single page; do not combine with --coop');
+  if (opts.coop && opts.views) throw new Error('--views captures a single page; do not combine with --coop');
   if (opts.expectWeapons !== null && (!Number.isInteger(opts.expectWeapons) || opts.expectWeapons < 1)) {
     throw new Error('--expect-weapons requires a positive integer');
   }
@@ -578,13 +611,31 @@ async function createPageTarget(debugPort) {
   throw new Error(`could not create Chrome page target: ${lastError}`);
 }
 
-/** Cycle-2 QA view hook (world-scene): position camera at a named atmosphere/region viewpoint. */
+/** Cycle-2/3 QA camera hooks (world-scene): named viewpoint or explicit pose; null restores. */
 async function qaView(page, name) {
   const arg = name === null ? 'null' : JSON.stringify(name);
   return page.evaluate(
     `(()=>{const f=window.__ssQAView;if(typeof f!=='function')return {ok:false,reason:'__ssQAView not available'};try{const r=f(${arg});return r===undefined?{ok:true}:JSON.parse(JSON.stringify(r));}catch(e){return {ok:false,error:String((e&&e.message)||e)};}})()`,
     {timeoutMs: 15000},
   );
+}
+
+async function qaPose(page, pose) {
+  const arg = pose === null ? 'null' : JSON.stringify(pose);
+  return page.evaluate(
+    `(()=>{const f=window.__ssQAPose;if(typeof f!=='function')return {ok:false,reason:'__ssQAPose not available'};try{const r=f(${arg});return r===undefined?{ok:true}:JSON.parse(JSON.stringify(r));}catch(e){return {ok:false,error:String((e&&e.message)||e)};}})()`,
+    {timeoutMs: 15000},
+  );
+}
+
+/** Optional cycle-3 region/atmosphere debug hook (see world-scene request). */
+async function readRegionInfo(page) {
+  return page
+    .evaluate(
+      `(()=>{try{const f=window.__ssRegionInfo;if(typeof f!=='function')return null;const r=f();return r===undefined?null:JSON.parse(JSON.stringify(r));}catch(e){return {error:String((e&&e.message)||e)};}})()`,
+      {timeoutMs: 10000},
+    )
+    .catch(() => null);
 }
 
 /** Abort a local run early if the spawned server was killed mid-run (health sampler failures). */
@@ -595,33 +646,55 @@ function assertServerAlive(report, stage) {
   }
 }
 
+const QA_CAPTURE_SETTLE_MS = 1800;
+
 /** Capture the atmosphere/region audit views (tree line, fire, camp, courtyard, 3 regions). */
 async function captureQaViews(page, outDir, report, check) {
   const available = await page.evaluate(`typeof window.__ssQAView==='function'`);
-  report.views = {hook: available, captures: []};
+  report.views = {hook: available, captures: [], optionalCaptures: [], regionInfo: {}, wind: null, regionDistinctness: null};
   if (!available) {
     report.notes.push('perf: __ssQAView hook absent — atmosphere/region audit screenshots skipped');
     log('QA VIEWS: __ssQAView hook not present in this build');
     return;
   }
-  for (const name of QA_VIEWS) {
-    const result = await qaView(page, name);
+  const captureOne = async (name, pose = null) => {
+    const result = pose ? await qaPose(page, pose) : await qaView(page, name);
     if (!result || result.ok === false) {
-      report.notes.push(`perf: QA view '${name}' unavailable: ${JSON.stringify(result)}`);
-      continue;
+      report.notes.push(`perf: QA view '${name}'${pose ? ' (pose fallback)' : ''} unavailable: ${JSON.stringify(result)}`);
+      return null;
     }
     // 1.8 s lets the QA-camera landscape focus and one full SwiftShader frame settle (>=1 frame at
     // ~1.4 fps software rendering) before capture.
-    await sleep(1800);
+    await sleep(QA_CAPTURE_SETTLE_MS);
     const shot = await screenshotWithStats(page, outDir, `view-${name}.png`, null);
-    report.views.captures.push({name, result, file: shot.file, stats: shot.stats});
-    if (name === 'treeline') {
-      // Extra debug data: full/LOD instance counts + the treeline vantage, used to prove the
-      // near/far tree bands are live even if the screenshot vantage is awkward.
-      report.views.landscape = await page.evaluate(
-        `(()=>{try{const f=window.__ssPerf;if(typeof f!=='function')return null;const p=f();return p&&p.landscape?JSON.parse(JSON.stringify(p.landscape)):null;}catch(e){return {error:String((e&&e.message)||e)};}})()`,
-        {timeoutMs: 15000},
-      ).catch(() => null);
+    const entry = {name, result, via: pose ? 'pose' : 'view', file: shot.file, stats: shot.stats};
+    const regionInfo = await readRegionInfo(page);
+    if (regionInfo) entry.regionInfo = regionInfo;
+    return entry;
+  };
+  for (const name of QA_VIEWS) {
+    const entry = await captureOne(name);
+    if (entry) {
+      report.views.captures.push(entry);
+      if (name === 'treeline') {
+        // Extra debug data: full/LOD instance counts + the treeline vantage, used to prove the
+        // near/far tree bands are live even if the screenshot vantage is awkward.
+        report.views.landscape = await page
+          .evaluate(
+            `(()=>{try{const f=window.__ssPerf;if(typeof f!=='function')return null;const p=f();return p&&p.landscape?JSON.parse(JSON.stringify(p.landscape)):null;}catch(e){return {error:String((e&&e.message)||e)};}})()`,
+            {timeoutMs: 15000},
+          )
+          .catch(() => null);
+        // Cycle-3 fix: per-prim bark/leaf material debug (leaf prims + alphaTest) proves the card
+        // trees render bark AND leaf geometry, not just trunks.
+        report.views.treeDebug = await page
+          .evaluate(
+            `(()=>{try{const f=window.__ssPerf;if(typeof f!=='function')return null;const p=f();const l=p&&p.landscape;return l&&l.treeDebug?JSON.parse(JSON.stringify(l.treeDebug)):null;}catch(e){return {error:String((e&&e.message)||e)};}})()`,
+            {timeoutMs: 15000},
+          )
+          .catch(() => null);
+      }
+      if (name.startsWith('region-') && entry.regionInfo) report.views.regionInfo[name] = entry.regionInfo;
     }
     await qaView(page, null);
     await sleep(300);
@@ -631,6 +704,84 @@ async function captureQaViews(page, outDir, report, check) {
     report.views.captures.length === QA_VIEWS.length,
     `${report.views.captures.length}/${QA_VIEWS.length} (${report.views.captures.map(c => c.name).join(', ')})`,
   );
+  // Cycle-3 optional views: landmarks / foliage / corruption / wind; capture when supported, with an
+  // explicit-pose fallback for landmarks when ruins-builder supplies coordinates (LANDMARK_POSES).
+  // For landmark views, verify the named view's returned pose matches the expected anchor; a stale
+  // named view (e.g. the relocated Green landmark) is discarded in favour of __ssQAPose.
+  for (const name of QA_VIEWS_OPTIONAL) {
+    let entry = await captureOne(name);
+    const expected = LANDMARK_POSES[name];
+    if (entry && expected) {
+      const pose = entry.result && entry.result.pose;
+      const px = pose ? Number(pose.x ?? pose.camX) : NaN;
+      const pz = pose ? Number(pose.z ?? pose.camZ) : NaN;
+      const drift = Number.isFinite(px) && Number.isFinite(pz) ? Math.hypot(px - expected.x, pz - expected.z) : null;
+      if (drift == null || drift > 2) {
+        report.notes.push(
+          `perf: named view '${name}' pose (${JSON.stringify(pose)}) does not match the expected landmark pose (drift=${drift}); using __ssQAPose fallback`,
+        );
+        entry = null;
+        await qaView(page, null);
+      }
+    }
+    if (!entry && expected) entry = await captureOne(name, expected);
+    if (entry) report.views.optionalCaptures.push(entry);
+    await qaView(page, null);
+    await sleep(300);
+  }
+  // Wind check: two shots ~1 s apart of a foliage/grass view; a static scene would diff ~0.
+  const windViewName = report.views.optionalCaptures.some(o => o.name === 'wind') ? 'wind' : report.views.captures.some(c => c.name === 'treeline') ? 'treeline' : null;
+  if (windViewName) {
+    const applied = windViewName === 'wind' ? await qaView(page, 'wind') : await qaView(page, 'treeline');
+    if (applied && applied.ok !== false) {
+      await sleep(QA_CAPTURE_SETTLE_MS);
+      const a = await screenshot(page, outDir, 'view-wind-a.png');
+      await sleep(1100);
+      const b = await screenshot(page, outDir, 'view-wind-b.png');
+      const diff = await comparePngs(page, a, b);
+      report.views.wind = {view: windViewName, files: [a, b], diff};
+      log(`WIND: ${JSON.stringify(diff)} (view=${windViewName})`);
+      check(
+        'perf: foliage/grass wind motion detected (2 shots ~1s apart differ)',
+        diff.meanAbsLum >= WIND_GATE.minMeanAbsDiff || diff.changedPct >= 1.0,
+        `meanAbsLum=${diff.meanAbsLum} changed%=${diff.changedPct} (gate >=${WIND_GATE.minMeanAbsDiff})`,
+      );
+      await qaView(page, null);
+      await sleep(300);
+    }
+  } else {
+    report.notes.push('perf: wind check skipped (no wind/treeline view available)');
+  }
+  // Regional distinctness: pairwise mean-RGB distance + luminance spread across the 3 region shots.
+  const regions = report.views.captures.filter(c => c.name.startsWith('region-'));
+  if (regions.length >= 2) {
+    const pairs = [];
+    for (let i = 0; i < regions.length; i++) {
+      for (let j = i + 1; j < regions.length; j++) {
+        const a = regions[i].stats, b = regions[j].stats;
+        const dr = a.meanR - b.meanR, dg = a.meanG - b.meanG, db = a.meanB - b.meanB;
+        pairs.push({
+          a: regions[i].name,
+          b: regions[j].name,
+          colorDistance: +Math.sqrt(dr * dr + dg * dg + db * db).toFixed(2),
+          luminanceDiff: +Math.abs(a.mean - b.mean).toFixed(2),
+        });
+      }
+    }
+    const distinctness = {
+      regions: regions.map(c => ({name: c.name, mean: c.stats.mean, p50: c.stats.p50, meanR: c.stats.meanR, meanG: c.stats.meanG, meanB: c.stats.meanB, fog: c.regionInfo?.fog ?? null, region: c.regionInfo?.region ?? null})),
+      pairs,
+      maxColorDistance: +Math.max(...pairs.map(p => p.colorDistance)).toFixed(2),
+      maxLuminanceDiff: +Math.max(...pairs.map(p => p.luminanceDiff)).toFixed(2),
+      minColorDistance: +Math.min(...pairs.map(p => p.colorDistance)).toFixed(2),
+    };
+    report.views.regionDistinctness = distinctness;
+    check(
+      'perf: region captures visibly distinct (colour/luminance)',
+      distinctness.maxColorDistance >= REGION_GATE.minPairwiseColorDistance || distinctness.maxLuminanceDiff >= REGION_GATE.minLuminanceSpread,
+      JSON.stringify({maxColorDistance: distinctness.maxColorDistance, minColorDistance: distinctness.minColorDistance, maxLuminanceDiff: distinctness.maxLuminanceDiff, gate: REGION_GATE}),
+    );
+  }
 }
 
 /* ------------------------------------------------------------- CDP client */
@@ -826,12 +977,13 @@ async function analyzePng(page, base64, region = null) {
           const y1=region?Math.min(H,Math.ceil(H*region.y1)):H;
           const d=ctx.getImageData(0,0,W,H).data;
           const lums=[];let sum=0,sumSq=0,nonDark=0,black=0,clipped=0,min=255,max=0;
+          let sumR=0,sumG=0,sumB=0;
           const buckets=new Set();
           for(let y=y0;y<y1;y+=2){
             for(let x=x0;x<x1;x+=2){
               const i=(y*W+x)*4;const r=d[i],g=d[i+1],b=d[i+2];
               const lum=0.2126*r+0.7152*g+0.0722*b;
-              lums.push(lum);sum+=lum;sumSq+=lum*lum;
+              lums.push(lum);sum+=lum;sumSq+=lum*lum;sumR+=r;sumG+=g;sumB+=b;
               if(lum>10)nonDark++;
               if(lum<20)black++;
               if(lum>=250)clipped++;
@@ -844,6 +996,7 @@ async function analyzePng(page, base64, region = null) {
           const pick=p=>sorted[Math.min(sorted.length-1,Math.floor(sorted.length*p))];
           resolve({width:W,height:H,region:region||null,sampled:count,
             mean:+mean.toFixed(2),p50:+pick(0.5).toFixed(2),p90:+pick(0.9).toFixed(2),
+            meanR:+(sumR/count).toFixed(2),meanG:+(sumG/count).toFixed(2),meanB:+(sumB/count).toFixed(2),
             std:+Math.sqrt(Math.max(0,sumSq/count-mean*mean)).toFixed(2),
             blackPct:+(black/count*100).toFixed(2),
             clippedPct:+(clipped/count*100).toFixed(2),
@@ -865,6 +1018,48 @@ async function screenshotWithStats(page, outDir, name, region = null) {
   const stats = await analyzePng(page, base64, region);
   log(`REGION[${name}]: mean=${stats.mean} p50=${stats.p50} p90=${stats.p90} black=${stats.blackPct}%`);
   return {file, stats};
+}
+
+/**
+ * Compare two saved PNGs inside the page: mean absolute per-channel/luminance difference over a
+ * central region. Used for the cycle-3 wind check (two shots ~1 s apart must differ) and for
+ * elite-vs-normal undead silhouette comparison.
+ */
+async function comparePngs(page, fileA, fileB, region = {x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8}) {
+  const a = fs.readFileSync(fileA).toString('base64');
+  const b = fs.readFileSync(fileB).toString('base64');
+  return page.evaluate(
+    `(()=>new Promise((resolve,reject)=>{
+      const region=${JSON.stringify(region)};
+      const load=s=>new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('decode failed'));i.src='data:image/png;base64,'+s;});
+      Promise.all([load(${JSON.stringify(a)}),load(${JSON.stringify(b)})]).then(([ia,ib])=>{
+        try{
+          const W=ia.naturalWidth,H=ia.naturalHeight;
+          const ca=document.createElement('canvas');ca.width=W;ca.height=H;
+          const cb=document.createElement('canvas');cb.width=W;cb.height=H;
+          const xa=ca.getContext('2d',{willReadFrequently:true});xa.drawImage(ia,0,0);
+          const xb=cb.getContext('2d',{willReadFrequently:true});xb.drawImage(ib,0,0);
+          const da=xa.getImageData(0,0,W,H).data, db=xb.getImageData(0,0,W,H).data;
+          const x0=Math.max(0,Math.floor(W*region.x0)),x1=Math.min(W,Math.ceil(W*region.x1));
+          const y0=Math.max(0,Math.floor(H*region.y0)),y1=Math.min(H,Math.ceil(H*region.y1));
+          let n=0,sr=0,sg=0,sb=0,sl=0,changed=0;
+          for(let y=y0;y<y1;y+=2){
+            for(let x=x0;x<x1;x+=2){
+              const i=(y*W+x)*4;
+              const ar=da[i],ag=da[i+1],ab=da[i+2],br=db[i],bg=db[i+1],bb=db[i+2];
+              const al=0.2126*ar+0.7152*ag+0.0722*ab, bl=0.2126*br+0.7152*bg+0.0722*bb;
+              sr+=Math.abs(ar-br);sg+=Math.abs(ag-bg);sb+=Math.abs(ab-bb);sl+=Math.abs(al-bl);
+              if(Math.abs(ar-br)+Math.abs(ag-bg)+Math.abs(ab-bb)>24)changed++;
+              n++;
+            }
+          }
+          resolve({samples:n,meanAbsR:+(sr/n).toFixed(3),meanAbsG:+(sg/n).toFixed(3),
+            meanAbsB:+(sb/n).toFixed(3),meanAbsLum:+(sl/n).toFixed(3),changedPct:+(changed/n*100).toFixed(2)});
+        }catch(e){reject(new Error('compare: '+(e&&e.message)));}
+      });
+    }))()`,
+    {awaitPromise: true, timeoutMs: 60000},
+  );
 }
 
 /** Screenshot with HUD/scene overlays hidden so only the WebGL canvas is measured. */
@@ -1796,6 +1991,95 @@ async function captureCharacterReadability(page, {opts, report, check}) {
     undead.length >= 1 && undead.every(u => u.stats && u.stats.sampled > 1000),
     `${undead.length} captured (${undead.map(u => `${u.actor.kind}:${u.actor.name}`).join(', ')})`,
   );
+  // Cycle-3 elite-undead silhouette: identify elite actors via world-scene's hooks
+  // (__ssEliteUndeadInfo preferred for tier labels, __ssEliteUndeadIds fallback, then the snapshot
+  // rule), frame the highest-tier elite vs a tier-0 normal with __ssCharacterPreview and compare.
+  const eliteHooks = await page.evaluate(
+    `(()=>({info:typeof window.__ssEliteUndeadInfo==='function',ids:typeof window.__ssEliteUndeadIds==='function'}))()`,
+    {timeoutMs: 15000},
+  );
+  let eliteIds = [];
+  let eliteInfo = [];
+  if (eliteHooks.info) {
+    eliteInfo = await page.evaluate(
+      `(()=>{try{const r=window.__ssEliteUndeadInfo();return Array.isArray(r)?JSON.parse(JSON.stringify(r)):[];}catch(e){return [];}})()`,
+      {timeoutMs: 15000},
+    );
+    eliteIds = eliteInfo.map(e => String(e.id));
+  } else if (eliteHooks.ids) {
+    eliteIds = await page.evaluate(
+      `(()=>{try{const r=window.__ssEliteUndeadIds();return Array.isArray(r)?r.map(String):[];}catch(e){return [];}})()`,
+      {timeoutMs: 15000},
+    );
+  }
+  const eliteTierById = new Map(eliteInfo.map(e => [String(e.id), Number(e.tier) || 0]));
+  const allUndead = actors.filter(a => a.kind !== 'player' && a.kind !== 'soldier');
+  // Fallback identification matching weapons-armory's `undeadEliteTier(actor)` rule when neither
+  // hook is present: corrupted → 2 (3 if maxHp>=200); zombie → 3 if maxHp>=150, else 1 if
+  // castle==='keep' or within 70 m of the nest (0,-664), else 0.
+  const undeadEliteTier = a => {
+    if (!a || a.kind === 'player' || a.kind === 'soldier') return 0;
+    if (a.kind === 'corrupted') return (a.maxHp || 0) >= 200 ? 3 : 2;
+    if (a.kind === 'zombie') {
+      if ((a.maxHp || 0) >= 150) return 3;
+      if (a.castle === 'keep') return 1;
+      if (Math.hypot((a.x || 0) - 0, (a.z || 0) + 664) <= 70) return 1;
+    }
+    return 0;
+  };
+  const tierOf = a => (eliteTierById.has(String(a.id)) ? eliteTierById.get(String(a.id)) : undeadEliteTier(a));
+  // Sort by elite tier so the capture uses the highest-tier silhouette available (tier 3 crown +
+  // shoulder spikes > tier 2 crest > tier 1 bone crown), whether ids came from the hooks or the rule.
+  const eliteActors = (eliteIds.length
+    ? allUndead.filter(a => eliteIds.includes(String(a.id)))
+    : allUndead.filter(a => a.elite === true || a.elite === 'elite' || /elite|crown|crest/i.test(String(a.name || '')) || /elite/i.test(String(a.tier || '')) || undeadEliteTier(a) > 0)
+  ).sort((a, b) => tierOf(b) - tierOf(a));
+  report.characters.elite = {
+    hooks: eliteHooks,
+    ids: eliteIds,
+    info: eliteInfo,
+    matched: eliteActors.map(a => a.id),
+    tiers: eliteActors.map(a => ({id: a.id, name: a.name, kind: a.kind, tier: tierOf(a), x: a.x, z: a.z, maxHp: a.maxHp ?? null, castle: a.castle ?? null})),
+    rule: eliteHooks.info ? '__ssEliteUndeadInfo()' : eliteHooks.ids ? '__ssEliteUndeadIds()' : 'fallback undeadEliteTier(actor) matching weapons-armory rule',
+    captures: [],
+  };
+  const captureActorCloseup = async (actor, fileName) => {
+    const preview = await charPreview(page, actor.id);
+    if (!preview || preview.ok === false) return null;
+    await sleep(900);
+    const shot = await screenshotWithStats(page, outDir, fileName, CHAR_CLOSEUP_REGION);
+    await charPreview(page, null);
+    return {actor, preview, file: shot.file, stats: shot.stats};
+  };
+  if (eliteActors.length) {
+    const elite = eliteActors[0];
+    // Prefer a tier-0 normal of the same broad family (zombie vs corrupted) for an apples-to-apples
+    // silhouette comparison; fall back to any non-elite undead.
+    const normals = allUndead.filter(a => a.id !== elite.id && tierOf(a) === 0 && a.kind === elite.kind);
+    const anyNormals = allUndead.filter(a => a.id !== elite.id && tierOf(a) === 0);
+    const normalActor = normals[0] || anyNormals[0] || null;
+    const eliteShot = await captureActorCloseup(elite, 'char-undead-elite.png');
+    const normalShot = normalActor ? await captureActorCloseup(normalActor, 'char-undead-normal.png') : null;
+    if (eliteShot) report.characters.elite.captures.push({kind: 'elite', ...eliteShot});
+    if (normalShot) report.characters.elite.captures.push({kind: 'normal', ...normalShot});
+    if (eliteShot && normalShot) {
+      const diff = await comparePngs(page, eliteShot.file, normalShot.file, CHAR_CLOSEUP_REGION);
+      report.characters.elite.diff = diff;
+      check(
+        'char: elite-undead silhouette differs from normal (close-up pixel diff)',
+        diff.meanAbsLum >= 0.3 || diff.changedPct >= 0.5,
+        `meanAbsLum=${diff.meanAbsLum} changed%=${diff.changedPct}`,
+      );
+    } else {
+      report.notes.push('char: elite/normal close-up pair incomplete — see elite captures');
+    }
+  } else {
+    report.notes.push(
+      eliteHook
+        ? 'char: __ssEliteUndeadIds() returned no elite actor ids — silhouette check skipped'
+        : 'char: elite-undead identification unavailable (no __ssEliteUndeadIds hook / snapshot flag) — silhouette check skipped',
+    );
+  }
   const playerStats = appearances.map(a => a.stats).filter(Boolean);
   const avg = key => +(playerStats.reduce((sum, s) => sum + s[key], 0) / Math.max(1, playerStats.length)).toFixed(2);
   const max = key => +Math.max(...playerStats.map(s => s[key])).toFixed(2);
@@ -2083,6 +2367,13 @@ async function run() {
     if (opts.characters) {
       await captureCharacterReadability(page, {opts, report, check});
       await sleep(500);
+    }
+    // Cycle-3 short QA-view mode: capture region/atmosphere views immediately after join, before the
+    // idle corruption timer can kill the player mid-capture (the long perf pass otherwise shows a
+    // respawn overlay in region/landmark shots).
+    if (opts.views) {
+      await captureQaViews(page, opts.outDir, report, check);
+      await sleep(400);
     }
     report.fps = await measureFps(page, 1500);
     log(`FPS: ${JSON.stringify(report.fps)}`);
@@ -2386,6 +2677,25 @@ async function run() {
           loading?.maxFrameGapMs == null || loading.maxFrameGapMs <= 5000,
           `maxFrameGap=${loading?.maxFrameGapMs}ms`,
         );
+        // Cycle-3 time-to-HUD: must be meaningfully earlier than cycle-2 on the same SwiftShader box.
+        const loadTimes = perf?.load || {};
+        const hudMs = loadTimes.navigationToHudMs;
+        const stateMs = loadTimes.navigationToStateMs;
+        const landingMs = loadTimes.navigationToLandingMs;
+        const joinMs = loading?.joinEnabledAtMs ?? delayed?.joinEnabledAtMs ?? null;
+        report.perf.timeToHud = {landingMs, hudMs, stateMs, joinMs, cycle2: CYCLE2_TIMINGS};
+        check(
+          'perf: time-to-HUD meaningfully earlier than cycle-2 (SwiftShader)',
+          hudMs != null && stateMs != null && hudMs <= TIME_GATE.maxHudMs && stateMs <= TIME_GATE.maxStateMs,
+          `HUD=${hudMs}ms (cycle-2 ${CYCLE2_TIMINGS.hudMs}, gate <=${TIME_GATE.maxHudMs}); state=${stateMs}ms (cycle-2 ${CYCLE2_TIMINGS.stateMs}, gate <=${TIME_GATE.maxStateMs}); landing=${landingMs}ms (cycle-2 ${CYCLE2_TIMINGS.landingMs})`,
+        );
+        if (joinMs != null) {
+          check(
+            'perf: join enabled within cycle-2 reference',
+            joinMs <= TIME_GATE.maxJoinMs,
+            `join=${joinMs}ms (cycle-2 ${CYCLE2_TIMINGS.joinMs}, gate <=${TIME_GATE.maxJoinMs})`,
+          );
+        }
         log(`PERF SUMMARY: third=${JSON.stringify(perfSummary(perf?.thirdPerson?.snapshot, perf?.thirdPerson?.frames))} first=${JSON.stringify(perfSummary(perf?.firstPerson?.snapshot, perf?.firstPerson?.frames))} low=${JSON.stringify(perfSummary(perf?.qualities?.tiers?.low?.perf, perf?.qualities?.tiers?.low?.frames))} high=${JSON.stringify(perfSummary(perf?.qualities?.tiers?.high?.perf, perf?.qualities?.tiers?.high?.frames))}`);
       } else {
         check('perf: live reference captured (fps/load only, hook absent as expected)', !!perf?.thirdPerson?.frames, JSON.stringify(perfSummary(perf?.thirdPerson?.snapshot, perf?.thirdPerson?.frames)));
@@ -2494,12 +2804,21 @@ async function run() {
     console.log(`char before: ${JSON.stringify(c.baseline?.normalPlayerTorso)} (${c.baseline?.source})`);
     for (const a of c.appearances || []) console.log(`  char ${a.appearance}: ${JSON.stringify(a.stats)} -> ${path.relative(ROOT, a.file)}`);
     for (const u of c.undead || []) console.log(`  undead ${u.actor.kind}:${u.actor.name}: ${JSON.stringify(u.stats)} -> ${path.relative(ROOT, u.file)}`);
+    if (c.elite) {
+      console.log(`  elite: hooks=${JSON.stringify(c.elite.hooks || {hook: c.elite.hook})} matched=${(c.elite.matched || []).length} tiers=${JSON.stringify((c.elite.tiers || []).map(t => t.tier))} rule=${c.elite.rule} diff=${JSON.stringify(c.elite.diff || null)}`);
+      for (const e of c.elite.captures || []) console.log(`    ${e.kind}: ${e.actor.kind}:${e.actor.name} ${JSON.stringify(e.stats)} -> ${path.relative(ROOT, e.file)}`);
+    }
   }
   if (report.views) {
-    console.log(`views:     hook=${report.views.hook} captured=${report.views.captures.map(c => c.name).join(',') || '(none)'} landscape=${JSON.stringify(report.views.landscape)}`);
+    console.log(`views:     hook=${report.views.hook} captured=${report.views.captures.map(c => c.name).join(',') || '(none)'} optional=${(report.views.optionalCaptures || []).map(c => c.name).join(',') || '(none)'} landscape=${JSON.stringify(report.views.landscape)}`);
     for (const c of report.views.captures) {
-      console.log(`  view ${c.name}: ${JSON.stringify({mean: c.stats.mean, p50: c.stats.p50, p90: c.stats.p90, colors: c.stats.uniqueColors})} -> ${path.relative(ROOT, c.file)}`);
+      console.log(`  view ${c.name}: ${JSON.stringify({mean: c.stats.mean, p50: c.stats.p50, p90: c.stats.p90, colors: c.stats.uniqueColors, meanR: c.stats.meanR, meanG: c.stats.meanG, meanB: c.stats.meanB})} -> ${path.relative(ROOT, c.file)}`);
     }
+    for (const c of report.views.optionalCaptures || []) {
+      console.log(`  view(optional) ${c.name}: ${JSON.stringify({mean: c.stats.mean, p50: c.stats.p50, colors: c.stats.uniqueColors, region: c.regionInfo?.region ?? null})} -> ${path.relative(ROOT, c.file)}`);
+    }
+    if (report.views.regionDistinctness) console.log(`regions:   ${JSON.stringify(report.views.regionDistinctness)}`);
+    if (report.views.wind) console.log(`wind:      ${JSON.stringify(report.views.wind)}`);
   }
   if (report.perf) {
     const perf = report.perf;
@@ -2512,6 +2831,7 @@ async function run() {
     }
     if (perf.load) {
       console.log(`load:      ${JSON.stringify({toLandingMs: perf.load.navigationToLandingMs, toHudMs: perf.load.navigationToHudMs, toStateMs: perf.load.navigationToStateMs, assetBytes: perf.load.resources?.assetTransferBytes ?? null, responseBytes: perf.load.requests?.responseBytes ?? null})}`);
+      if (perf.timeToHud) console.log(`timeToHud: ${JSON.stringify(perf.timeToHud)}`);
     }
     if (report.loading) console.log(`loading:   ${JSON.stringify({joinEnabledAtMs: report.loading.joinEnabledAtMs, maxFrameGapMs: report.loading.maxFrameGapMs, texts: report.loading.distinctTexts})}`);
     if (perf.qualitySelector) console.log(`quality:   ${JSON.stringify(perf.qualitySelector)}`);

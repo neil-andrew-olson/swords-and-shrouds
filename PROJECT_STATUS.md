@@ -20,83 +20,74 @@ and verifies the live bundle.
 workspace-relative paths and/or use the `present` tool.
 
 **Process discipline:** teammates must kill only their own PIDs (`Stop-Process -Id` / `/PID`), never
-broad `taskkill /IM node.exe` — a broad cleanup killed QA's local server twice in cycle 2.
+broad `taskkill /IM node.exe`. One dist builder at a time; QA owns authoritative captures.
 
-## Latest completed cycle — 2026-10E cycle 2: character fidelity, restored ruins, atmosphere
+## Latest completed cycle — 2026-10F cycle 3: regional identity, new content, foliage/fire fixes
 
-Contract: `docs/BATCH-2026-10E-SPEC.md`; results: `docs/BATCH-2026-10E-RESULTS.md`; QA evidence in
-`docs/QA-REPORT.md`. Final bundle `dist/client/assets/index-BfnriryF.js` (815,540 B), reproduced by
-a fresh build.
+Contract: `docs/BATCH-2026-10F-SPEC.md`; results: `docs/BATCH-2026-10F-RESULTS.md`; QA evidence in
+`docs/QA-REPORT.md`. Final bundle `dist/client/assets/index-j2KTUVMP.js` (840,799 B), reproduced by a
+fresh build.
 
-### Characters (top priority)
+### Regional identity (QA's #1 gap)
 
-- Material v2: all 7 bodies re-baked with night tone (albedo 0.84× cycle 1, adaptive tint target 84
-  sRGB), procedural detail (plate seams/rivets, chainmail micro-relief, cloth weave, leather grain,
-  heraldic bands, wear) + embedded 512 normal and 512 packed ORM (AO/rough/metal) maps; geometry,
-  skin, bones and 12 clips hash-identical; 591–621 KB each, preload ≈6.0 MB.
-- Distinct silhouettes: pauldrons (hero/templar/ally/berserker), hood+cape (ranger/survivor),
-  crest+horns (fallen) as one rigid-skinned add-on primitive each in the same single skin;
-  8,653–8,873 tris per body.
-- Runtime: metalness ≤0.35 / roughness ≥0.65 / envMapIntensity ≥2 (scene 2.2), adaptive albedo tint,
-  cool-dusk Fresnel rim 0.28, dormant UV-black fallback. Transient `sampled` scope bug fixed before
-  the final build.
-- QA: torso mean **89.31** / p50 **95.98** / black **14.75 %** / clipping 0 %, close-up detail
-  visible (min 407 unique colours — cycle-3 target 500), 5 appearances + skeleton/zombie.
+Per-region atmosphere/grading with smooth border lerps and QA-camera-aware `__ssRegionInfo()`:
+- Green March fog `#1e4038` d 0.0122, moon 2.7, exposure 1.55, sat 1.05 (pine/oak/maple, stones)
+- Ashen Moor fog `#342d42` d 0.0208, moon 2.1, exposure 1.37, sat 0.82 (dead trees, chapel, ash)
+- Frozen Crown fog `#6f93b0` d 0.0172, moon 2.55, exposure 1.62, sat 1.12 (snow pines, patches,
+  watchtower)
+QA numeric distinctness: pairwise RGB colour distance 9.36 / 31.5 / 32.2, luminance spread 15.1.
+Ground decals (snow/ash/grass, feathered alpha, 72 m cull), region grass/tuft tint, snow flakes.
 
-### Critical bug fixed
+### New content
 
-Cycle-1's asset re-bake quantised ruin/tent/wall/prop assets; the old `ruins.ts` instancing baked
-`mesh.matrixWorld` into normalised Int16 position attributes and corrupted them — 12 ruins, 27
-tents, 10 walls and 54 small props rendered as ~2 m blobs in the deployed cycle-1 build. New
-quantisation-safe instancing folds transforms into instance matrices instead; verified against the
-real shipped GLBs and by QA screenshots (chapel 8.5 m, bridge 5 m, tent 2.21 m, wall 5.6 m).
+- Card foliage v2: `pine_v2` 1,272 tris, `snow_pine` 1,286, `oak_v2` 514, `maple` 514 (alpha-MASK
+  leaf cards; one band for all distances; no LOD seam). Two bugs fixed: leaf alpha was mostly below
+  the 0.42 MASK cutoff (re-baked near-binary alpha, 34–46 % coverage, pine +15 % brightness), and
+  the client filter dropped leaf prims (`__ssPerf().landscape.treeDebug` proves bark+leaves render).
+- Props: `dead_tree` 464 tris bark-only, `standing_stone` 63, `ice_shard` 108.
+- Landmarks: `chapel_ruin` 13,810 tris, `watchtower_ruin` 9,817, `village_house_ruin` 2,475 —
+  1 prim / 1 embedded 1024 night texture each, ground-centred. Placed one per region: Green village
+  house + 8-stone circle **(56, −6)** (65 m from spawn), Ashen chapel **(−36, −228)**, Frozen
+  watchtower **(−34, −472)** on an outcrop; scatter dead_tree ×12 / ice_shard ×12 / stones ×13.
+- Elite undead: procedural tiered crowns/crests/shoulder spikes + eye glow (one rigid-skinned add-on
+  per elite: 32/76/84 tris), eyes now render for shrouded undead; QA diff 31.1 luminance / 88.9 %.
+- Fire/smoke: additive sprite flames (soft+core), pale additive smoke plume, embers; corruption
+  decals feather-masked, nest-only.
+- Audio: region-specific ambience layers with hysteresis and crossfades (Frozen wind/ice, Ashen
+  ash/embers/bells, Green rustle/insects/birds) + per-region music tint; lazy build/teardown.
+- QA additions: `__ssRegionInfo`, `landmark-*`, `foliage`, `corruption`, `wind` views,
+  `__ssEliteUndeadIds/Info`, `landscape.treeDebug`, region-distinctness/wind/time-to-HUD gates.
 
-### World / atmosphere / audio
+### Verification (final build)
 
-- Near/far tree band: full-res 0–22 m, LODs 22–54 m, matrices reassigned only on >2 m camera moves;
-  `__ssPerf().landscape` proves both bands.
-- Tent + stone-wall cast shadows restored; casters = architecture, keeps, gatehouses, towers,
-  actors, ruins/tents/walls.
-- Pooled torch smoke, drifting ash, moon-dust motes (allocation-free, reduced/off at low tier).
-- Environment dressing (existing assets, +7 draws): gate brazier pairs + emissive flames (no new
-  lights), friendly-only courtyard banners, Castle 1→2 roadside stakes, camp barrel/cart clusters,
-  Fallen Keep graves.
-- `fortress_keep` 5 prims/5 trimsheets → 1 prim/1 material via baked 2048² atlas: **45 → 9 draws**
-  across nine keeps, tris/bbox unchanged.
-- QA camera hooks `__ssQAView(name)` / `__ssQAPose` (treeline/fire/camp/courtyard/region-*),
-  landscape culling follows the QA camera; treeline pose fixed to a verified grove.
-- Audio: quiet adaptive WebAudio music bed (D-minor pads + drone, nest tension, siege swell, capture
-  relief, combat ducking), fire crackle + ember rumble, rate-limited distant undead moans; lazy
-  build/teardown, Sound/pause gated.
+- `npm test` **58/58**; `tsc` 0; clean build reproduced `index-j2KTUVMP.js`; `validate-assets`
+  **74/74**.
+- Perf **195 calls / 1,666,828 tris** (gates <230 / <1.9 M); FP 153 / 1.55 M; low 153 / 1.36 M;
+  payload 15.06 MB. Fresh-build smoke **16/16** + hash proof; co-op **18/18**.
+- Visual re-verification: foliage canopies, soft moon, additive smoke, relocated landmark, decals,
+  regional identity all confirmed fixed (no giant planes, no opaque smoke domes, no grey moon disc).
+- **Debt (documented):** time-to-HUD still 18.5/17.1 s under SwiftShader (gate 15.0; landing improved
+  3.56→3.28 s, join 3.84 s; high sample variance); character torso p50 102.4 vs 100 (mean 91.5,
+  close-ups unchanged); green foliage reads bright/saturated; crown QA-view has a canopy over ~40 %
+  of frame.
 
-### Checks actually run (final state)
+### Cycle-4 (next) — from the cycle-3 audit
 
-- `npm test` **58/58**; `tsc` 0; `vite build` success; `validate-assets` **65/65**.
-- QA authoritative: characters **24/24**, perf **26/26** (**169 calls / 1,658,880 tris**; FP 131 /
-  1.55 M; low tier 130 / 1.35 M; gates <210 / <1.85 M), fresh-build smoke **16/16** with hash
-  reproduction, co-op **18/18**, live baseline **17/17**. Payload **13.69 MB**, nav→landing 3.56 s,
-  loading 0/20→13/20, join 3.70 s. 0 page/console/log errors/warnings, 0 404s, 10 cards.
-- **Not verified:** hardware-GPU fps/frame pacing/thermals, perceptual audio, controller, mobile.
-
-### Cycle-3 (next) — concrete backlog from QA's AAA audit
-
-1. **Regional identity:** the three regions look near-identical — add biome dressing, colour
-   grading/fog variation and distinct landmarks per region.
-2. **Tree foliage:** pale shard clumps and visible LOD band — better foliage cards/alpha, blend
-   near/far in fog; consider denser LOD instances.
-3. **Corruption decals:** magenta patches look flat/unblended on roads — blend into terrain, add
-   gradient/edge feathering.
-4. **Fire/moke:** replace flat emissive cone flames with sprite-based flame + embers; richer smoke.
-5. **Character identity:** add-on silhouettes are subtle at 10 m and close-up colour variety is
-   near the gate — deepen add-on shapes, enrich atlases toward the 500-colour target.
-6. **Time-to-HUD (SwiftShader 16.3 s):** profile main-thread/shader cost, defer or batch asset
-   decoding; verify on a real GPU.
-7. Minor: hard-edged moon halo, bright flat tents, no wind animation.
-- Carried: GLB prop clones ~30 draws, triangle budget tight with shadows, no real-GPU/perceptual
-  playtest, campaign/controller/mobile unverified.
+1. **Time-to-HUD / real-GPU profiling**: shader compile/warmup, code splitting, defer HUD-only work,
+   measure on a real GPU where possible; treat SwiftShader numbers with a variance band.
+2. **Regional tone refinement**: reduce green-pine/maple saturation for night (or tint maple), tune
+   crown QA camera framing.
+3. **New character/armour models** from the warehouse (character variety is the largest remaining
+   art gap), potentially one distinct armour set per archetype.
+4. **Weather systems** (rain/snowstorm/fog banks as regional events), more structures/content, and
+   richer combat/feedback polish.
+5. **Character torso p50** marginal gate re-baseline + smoke/flame close-up inspection.
 
 ## Previous cycles
 
+- **2026-10E cycle 2** (`docs/BATCH-2026-10E-RESULTS.md`): character material v2 (normal/ORM maps,
+  silhouettes), quantised-ruin geometry fix, near/far trees, tent/wall shadows, atmosphere, keep
+  atlas merge (45→9 draws), adaptive audio; 169 calls / 1.66 M tris.
 - **2026-10D cycle 1** (`docs/BATCH-2026-10D-RESULTS.md`): fixed blacked-out characters (UV0 rebuild
   + baked atlases + rim), restored shadows, 301→173 draw calls / 1.76 M→1.50 M tris, tree & tower
   LODs, doc-link fix.
@@ -122,8 +113,7 @@ real shipped GLBs and by QA screenshots (chapel 8.5 m, bridge 5 m, tent 2.21 m, 
 - Local play: `$env:PORT=3000; node --import tsx src/server/index.ts` from the game repo (serves
   `dist/client` at http://localhost:3000/). Because the hosting build can leave `.game-build` in
   detached HEAD, always `git checkout main` (and fast-forward `main`) before committing docs.
-- Cycle-2 deployment: game commit → hosting pin bump (`game-source.json`) → hosting build → commit
-  + push → Cloudflare deploy → poll live bundle/assets → QA final live pass.
+- Cycle-3 deployment: see commit history (`feat: AAA cycle 3 …` then hosting pin commit).
 
 ## Continuity procedure
 

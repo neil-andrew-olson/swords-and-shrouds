@@ -3,6 +3,7 @@ import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
 import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
 import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+import {ShaderPass} from 'three/addons/postprocessing/ShaderPass.js';
 
 /**
  * Post-processing chain for the night battlefield:
@@ -28,6 +29,8 @@ export interface PostFX {
   readonly pixelRatio: number;
   /** Quality tier hook: cap the composer pixel ratio and toggle bloom. */
   setQuality(pixelRatioCap: number, bloomEnabled: boolean): void;
+  /** Per-region grade: saturation multiplier and subtle tint (linear RGB multipliers). */
+  setGrade(saturation: number, tint: THREE.Vector3): void;
 }
 
 // Matches the renderer's own cap; keeps the composer from ballooning on 4K/retina.
@@ -45,6 +48,25 @@ const HEALTHY_WINDOW_MS = 3000;
 const STEP_DOWN = 0.15;
 const STEP_UP = 0.1;
 
+// Per-region grade: saturation lift/cut + a very subtle tint, applied on linear HDR before the
+// OutputPass tone-map. Kept to one cheap fullscreen pass so regional identity does not need
+// duplicate materials/lights (fog/moon/hemi do the heavy lifting).
+const ColorGradeShader = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    saturation: { value: 1 },
+    tint: { value: new THREE.Vector3(1, 1, 1) }
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float saturation; uniform vec3 tint; varying vec2 vUv;
+    void main(){
+      vec4 color = texture2D(tDiffuse, vUv);
+      float lum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+      color.rgb = mix(vec3(lum), color.rgb, saturation) * tint;
+      gl_FragColor = color;
+    }`
+};
+
 export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): PostFX {
   try {
     const composer = new EffectComposer(renderer);
@@ -57,8 +79,10 @@ export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
       BLOOM_THRESHOLD
     );
     const output = new OutputPass();
+    const grade = new ShaderPass(ColorGradeShader);
     composer.addPass(renderPass);
     composer.addPass(bloom);
+    composer.addPass(grade);
     composer.addPass(output);
 
     let baseCap = Math.min(renderer.getPixelRatio(), MAX_PIXEL_RATIO);
@@ -80,6 +104,11 @@ export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
     return {
       enabled: true,
       get pixelRatio() { return pixelRatio; },
+      setGrade: (saturation: number, tint: THREE.Vector3) => {
+        const uniforms = grade.uniforms;
+        uniforms.saturation.value = saturation;
+        (uniforms.tint.value as THREE.Vector3).copy(tint);
+      },
       render: () => {
         // Frame pacing from the render call rhythm; allocation-free.
         const now = performance.now();
@@ -136,6 +165,7 @@ export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
       enabled: false,
       pixelRatio: 1,
       setQuality: () => undefined,
+      setGrade: () => undefined,
       render: () => renderer.render(scene, camera),
       setSize: () => undefined,
       dispose: () => undefined

@@ -32,7 +32,7 @@ export function addLandscape(scene: THREE.Scene) {
 
   // Denser, more varied tree line.
   const treePositions: TreeInstance[] = [];
-  for (let i = 0; i < 480; i++) {
+  for (let i = 0; i < 780; i++) {
     const x = rand() * 152 - 65;
     const z = 35 - rand() * 710;
     if (!clear(x, z)) treePositions.push({ x, z, h: 3.5 + rand() * 5.5, isPine: rand() < 0.58, rot: rand() * Math.PI * 2, scale: 0.68 + rand() * 0.82 });
@@ -75,6 +75,10 @@ export function addLandscape(scene: THREE.Scene) {
   addWind(grassMat, 0.42, 1.3, 0);
   const grass = new THREE.InstancedMesh(grassGeo, grassMat, 5600);
   const dummy = new THREE.Object3D();
+  const tmpTintColor = new THREE.Color();
+  // Per-region ground-cover tint: Green March keeps its green, Ashen Moor dries to brown-grey,
+  // Frozen Crown fades under snow. Applied as instance colours so it costs no extra draws.
+  const regionTint = (z: number): [number, number, number] => z < -405 ? [0.72, 0.84, 1.02] : z < -245 ? [0.92, 0.78, 0.58] : [1, 1, 1];
   let count = 0;
   for (let i = 0; i < 7200 && count < 5600; i++) {
     const x = rand() * 152 - 65, z = 35 - rand() * 710;
@@ -84,9 +88,13 @@ export function addLandscape(scene: THREE.Scene) {
     const s = 0.65 + rand() * 0.7;
     dummy.scale.set(s, s * (0.8 + rand() * 0.4), s);
     dummy.updateMatrix();
-    grass.setMatrixAt(count++, dummy.matrix);
+    grass.setMatrixAt(count, dummy.matrix);
+    const tint = regionTint(z);
+    grass.setColorAt(count, tmpTintColor.setRGB(tint[0], tint[1], tint[2]));
+    count++;
   }
   grass.count = count;
+  if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
   grass.receiveShadow = true;
   grass.castShadow = false;
   grass.computeBoundingSphere();
@@ -146,11 +154,17 @@ export function addLandscape(scene: THREE.Scene) {
     root.traverse((o) => { if (o instanceof THREE.Mesh) list.push(o as THREE.Mesh); });
     return list;
   };
-  const tuneTreeMaterial = (mesh: THREE.Mesh, isLod: boolean): THREE.Material => {
+  const tuneTreeMaterial = (mesh: THREE.Mesh, isLod: boolean, card = false): THREE.Material => {
     const mat = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).clone() as THREE.MeshStandardMaterial;
     const name = (mat.name || '').toLowerCase();
     const foliage = /leaf|grass|groundcover|branch|foliage|needle|frond/.test(name);
-    if (foliage) { mat.color.multiplyScalar(0.32); mat.envMapIntensity = 0.22; mat.roughness = 1; mat.metalness = 0; addWind(mat, 0.12, 1.2, 0.8); }
+    if (card) {
+      // Card atlases are authored for the night palette: keep canopies readable (no 0.32 crush).
+      const leafMap = mat.map;
+      if (leafMap) { leafMap.anisotropy = 4; leafMap.needsUpdate = true; }
+      if (foliage) { mat.color.multiplyScalar(1.28); mat.envMapIntensity = 1.35; mat.metalness = 0; mat.alphaTest = Math.max(mat.alphaTest, 0.42); mat.side = THREE.DoubleSide; if (mat.emissive) mat.emissive.copy(mat.color).multiplyScalar(0.05); addWind(mat, 0.12, 1.2, 0.8); }
+      else { mat.color.multiplyScalar(0.9); mat.envMapIntensity = 0.7; }
+    } else if (foliage) { mat.color.multiplyScalar(0.32); mat.envMapIntensity = 0.22; mat.roughness = 1; mat.metalness = 0; mat.alphaTest = Math.max(mat.alphaTest, 0.42); const leafMap = mat.map; if (leafMap) { leafMap.anisotropy = 4; leafMap.needsUpdate = true; } addWind(mat, 0.12, 1.2, 0.8); }
     else { mat.color.multiplyScalar(0.72); mat.envMapIntensity = 0.45; mat.metalness = 0; }
     if (isLod) mat.envMapIntensity = Math.min(0.4, mat.envMapIntensity + 0.05);
     return mat;
@@ -169,6 +183,13 @@ export function addLandscape(scene: THREE.Scene) {
   let pineMatrices: Float32Array | null = null;
   let oakMatrices: Float32Array | null = null;
   let pineCount = 0, oakCount = 0;
+  // Cycle-3 region foliage variants: maple in the Green March, snow-tipped pines in the Frozen
+  // Crown. These use a single draw band (0..54 m) so there is no LOD swap seam inside the fog.
+  let mapleInsts: THREE.InstancedMesh[] = [];
+  let snowInsts: THREE.InstancedMesh[] = [];
+  let mapleMatrices: Float32Array | null = null;
+  let snowMatrices: Float32Array | null = null;
+  let mapleCount = 0, snowCount = 0;
   const tmpMatrix = new THREE.Matrix4();
 
   const cullIntoBand = (mesh: THREE.InstancedMesh, matrices: Float32Array, total: number, focusX: number, focusZ: number, minDist: number, maxDist: number) => {
@@ -186,10 +207,10 @@ export function addLandscape(scene: THREE.Scene) {
     mesh.instanceMatrix.needsUpdate = true;
   };
 
-  const buildTreeInsts = (parts: THREE.Mesh[], total: number, isLod: boolean) => {
+  const buildTreeInsts = (parts: THREE.Mesh[], total: number, isLod: boolean, card = false) => {
     const insts: THREE.InstancedMesh[] = [];
     for (const part of parts) {
-      const inst = new THREE.InstancedMesh(part.geometry, tuneTreeMaterial(part, isLod), total);
+      const inst = new THREE.InstancedMesh(part.geometry, tuneTreeMaterial(part, isLod, card), total);
       inst.castShadow = false; // foliage shadows are invisible at night and were a big shadow cost
       inst.receiveShadow = false;
       inst.frustumCulled = false;
@@ -201,37 +222,76 @@ export function addLandscape(scene: THREE.Scene) {
     return insts;
   };
 
-  const lodLoad = (name: string) => loadAsset('custom/' + name).catch(() => null);
-  Promise.all([loadAsset('custom/pine'), loadAsset('custom/oak'), lodLoad('pine_lod'), lodLoad('oak_lod')])
-    .then(([pineGltf, oakGltf, pineLodGltf, oakLodGltf]) => {
-      const pineParts = treeOnly(collectMeshes(pineGltf.scene));
-      const oakParts = treeOnly(collectMeshes(oakGltf.scene));
-      if (!pineParts.length || !oakParts.length) return;
-      pineCount = treePositions.filter((t) => t.isPine).length;
-      oakCount = treePositions.length - pineCount;
-      pineMatrices = new Float32Array(pineCount * 16);
-      oakMatrices = new Float32Array(oakCount * 16);
-      let pi = 0, oi = 0;
-      for (const t of treePositions) {
-        dummy.position.set(t.x, 0, t.z);
-        dummy.rotation.set(0, t.rot, 0);
-        dummy.scale.setScalar(t.scale * 1.35);
-        dummy.updateMatrix();
-        if (t.isPine) dummy.matrix.toArray(pineMatrices!, pi++ * 16);
-        else dummy.matrix.toArray(oakMatrices!, oi++ * 16);
-      }
-      pineInsts = buildTreeInsts(pineParts, pineCount, false);
-      oakInsts = buildTreeInsts(oakParts, oakCount, false);
-      if (pineLodGltf) {
-        const lodParts = treeOnly(collectMeshes(pineLodGltf.scene));
-        if (lodParts.length) pineLodInsts = buildTreeInsts(lodParts, pineCount, true);
-      }
-      if (oakLodGltf) {
-        const lodParts = treeOnly(collectMeshes(oakLodGltf.scene));
-        if (lodParts.length) oakLodInsts = buildTreeInsts(lodParts, oakCount, true);
-      }
-      scene.remove(placeholderGroup);
-    })
+  // Region variant per tree: Frozen Crown = snow pine, Ashen Moor = dark pine/oak, Green March =
+  // pine/oak/maple mix. Driven by world Z so the regions read differently at a glance.
+  const variantOf = (t: { x: number; z: number; isPine: boolean }): 'pine' | 'oak' | 'maple' | 'snow' => {
+    if (t.z < -405) return 'snow';
+    if (t.z < -245) return t.isPine ? 'pine' : 'oak';
+    if (!t.isPine && (Math.floor(Math.abs(t.x) * 7 + Math.abs(t.z) * 13) % 100) < 55) return 'maple';
+    return t.isPine ? 'pine' : 'oak';
+  };
+
+  const loadOpt = (name: string) => loadAsset('custom/' + name).catch(() => null);
+  Promise.all([
+    loadOpt('pine_v2'), loadOpt('oak_v2'), loadOpt('maple'), loadOpt('snow_pine'),
+    loadOpt('pine'), loadOpt('oak'), loadOpt('pine_lod'), loadOpt('oak_lod')
+  ]).then(([pineV2, oakV2, mapleGltf, snowGltf, legacyPine, legacyOak, pineLodGltf, oakLodGltf]) => {
+    // Cycle-3 canonical card trees (104/88 tris) replaced the heavy legacy pine/oak. One band on
+    // the card assets means no near/far swap seam at all; the legacy pair + LODs remain a fallback.
+    const pineGltf = pineV2 ?? legacyPine;
+    const oakGltf = oakV2 ?? legacyOak;
+    if (!pineGltf || !oakGltf) return;
+    // Card assets are already split into exactly bark + *_leaves prims, so keep every mesh: the
+    // name filter was silently dropping the leaf prims (leafless card trees).
+    const pineParts = pineV2 ? collectMeshes(pineV2.scene) : treeOnly(collectMeshes(pineGltf.scene));
+    const oakParts = oakV2 ? collectMeshes(oakV2.scene) : treeOnly(collectMeshes(oakGltf.scene));
+    const mapleParts = mapleGltf ? collectMeshes(mapleGltf.scene) : [];
+    const snowParts = snowGltf ? collectMeshes(snowGltf.scene) : [];
+    if (!pineParts.length || !oakParts.length) return;
+    const cardScale = pineV2 ? 1.0 : 1.35;
+    let mCount = 0, sCount = 0, pCount = 0, oCount = 0;
+    for (const t of treePositions) {
+      const v = variantOf(t);
+      if (v === 'maple') mCount++;
+      else if (v === 'snow') sCount++;
+      else if (t.isPine) pCount++;
+      else oCount++;
+    }
+    pineMatrices = new Float32Array(pCount * 16);
+    oakMatrices = new Float32Array(oCount * 16);
+    mapleMatrices = new Float32Array(mCount * 16);
+    snowMatrices = new Float32Array(sCount * 16);
+    let pi = 0, oi = 0, mi = 0, si = 0;
+    for (const t of treePositions) {
+      dummy.position.set(t.x, 0, t.z);
+      dummy.rotation.set(0, t.rot, 0);
+      dummy.scale.setScalar(t.scale * cardScale);
+      dummy.updateMatrix();
+      let v = variantOf(t);
+      if (v === 'maple' && !mapleParts.length) v = 'oak';
+      if (v === 'snow' && !snowParts.length) v = 'pine';
+      if (v === 'maple') dummy.matrix.toArray(mapleMatrices!, mi++ * 16);
+      else if (v === 'snow') dummy.matrix.toArray(snowMatrices!, si++ * 16);
+      else if (t.isPine) dummy.matrix.toArray(pineMatrices!, pi++ * 16);
+      else dummy.matrix.toArray(oakMatrices!, oi++ * 16);
+    }
+    pineCount = pi; oakCount = oi; mapleCount = mi; snowCount = si;
+    pineInsts = pineCount ? buildTreeInsts(pineParts, pineCount, false, !!pineV2) : [];
+    oakInsts = oakCount ? buildTreeInsts(oakParts, oakCount, false, !!oakV2) : [];
+    mapleInsts = mapleCount ? buildTreeInsts(mapleParts, mapleCount, false, true) : [];
+    snowInsts = snowCount ? buildTreeInsts(snowParts, snowCount, false, true) : [];
+    // Legacy fallback keeps the old near/far LOD bands working if the card assets ever go missing.
+    if (!pineV2 && pineLodGltf && pineCount) {
+      const lodParts = treeOnly(collectMeshes(pineLodGltf.scene));
+      if (lodParts.length) pineLodInsts = buildTreeInsts(lodParts, pineCount, true);
+    }
+    if (!oakV2 && oakLodGltf && oakCount) {
+      const lodParts = treeOnly(collectMeshes(oakLodGltf.scene));
+      if (lodParts.length) oakLodInsts = buildTreeInsts(lodParts, oakCount, true);
+    }
+    scene.userData.treeDebug={pineCard:!!pineV2,oakCard:!!oakV2,parts:pineParts.map(p=>{const m=(Array.isArray(p.material)?p.material[0]:p.material) as THREE.MeshStandardMaterial;const g=p.geometry;return {mat:m.name,tris:Math.round((g.index?g.index.count:g.attributes.position.count)/3),transparent:m.transparent,alphaTest:m.alphaTest,side:m.side,map:!!m.map,color:m.color?m.color.getHexString():null};}),snowParts:snowParts.map(p=>{const m=(Array.isArray(p.material)?p.material[0]:p.material) as THREE.MeshStandardMaterial;return m.name;})};
+    scene.remove(placeholderGroup);
+  })
     .catch((err) => console.warn('3D trees load error, keeping placeholders', err));
 
   // 5. Baked grass tufts + rock clusters (rock clusters are distance-culled; they are dense geometry).
@@ -267,7 +327,10 @@ export function addLandscape(scene: THREE.Scene) {
             const s = 0.7 + rand() * 0.8;
             dummy.scale.set(s, s * (0.85 + rand() * 0.4), s);
             dummy.updateMatrix();
-            tufts.setMatrixAt(ti++, dummy.matrix);
+            tufts.setMatrixAt(ti, dummy.matrix);
+            const tint = regionTint(z);
+            tufts.setColorAt(ti, tmpTintColor.setRGB(tint[0], tint[1], tint[2]));
+            ti++;
           }
         }
         for (let i = 0; i < tuftCount * 5 && ti < tuftCount; i++) {
@@ -278,9 +341,13 @@ export function addLandscape(scene: THREE.Scene) {
           const s = 0.75 + rand() * 0.95;
           dummy.scale.set(s, s * (0.85 + rand() * 0.45), s);
           dummy.updateMatrix();
-          tufts.setMatrixAt(ti++, dummy.matrix);
+          tufts.setMatrixAt(ti, dummy.matrix);
+          const tint = regionTint(z);
+          tufts.setColorAt(ti, tmpTintColor.setRGB(tint[0], tint[1], tint[2]));
+          ti++;
         }
         tufts.count = ti;
+        if (tufts.instanceColor) tufts.instanceColor.needsUpdate = true;
         tufts.castShadow = false;
         tufts.receiveShadow = true;
         tufts.frustumCulled = false;
@@ -324,6 +391,49 @@ export function addLandscape(scene: THREE.Scene) {
     })
     .catch((err) => console.warn('Scatter assets unavailable, keeping procedural grass/rocks', err));
 
+  // 6. Region ground decals (cycle 3): alpha-feathered snow/ash/grass patches that follow the
+  // terrain just above the ground plane, distance-culled with the same movement gate as trees.
+  const decalSets: {mesh: THREE.InstancedMesh; matrices: Float32Array; total: number}[] = [];
+  const decalTex = (file: string) => new Promise<THREE.Texture | null>((resolve) => {
+    new THREE.TextureLoader().load(import.meta.env.BASE_URL + 'assets/textures/' + file, (t) => { t.colorSpace = THREE.SRGBColorSpace; resolve(t); }, undefined, () => resolve(null));
+  });
+  Promise.all([decalTex('snow_patch.png'), decalTex('ash_patch.png'), decalTex('grass_patch.png')]).then(([snowTex, ashTex, grassTex]) => {
+    const specs = [
+      {tex: snowTex, z0: -710, z1: -440, count: 110, tint: 0xdce9f4, opacity: 0.55},
+      {tex: ashTex, z0: -440, z1: -205, count: 100, tint: 0x8f887c, opacity: 0.45},
+      {tex: grassTex, z0: -205, z1: 35, count: 90, tint: 0xa9c785, opacity: 0.35}
+    ];
+    let sv = 9001;
+    const rv = () => { sv = (sv * 16807) % 2147483647; return sv / 2147483647; };
+    const d = new THREE.Object3D();
+    for (const spec of specs) {
+      if (!spec.tex) continue;
+      const matrices = new Float32Array(spec.count * 16);
+      let n = 0;
+      for (let i = 0; i < spec.count * 4 && n < spec.count; i++) {
+        const x = rv() * 150 - 68, z = spec.z0 + rv() * (spec.z1 - spec.z0);
+        if (Math.abs(x) < 4.5 || clear(x, z) || castleFootprint(x, z)) continue;
+        d.position.set(x, 0.025, z);
+        d.rotation.set(-Math.PI / 2, 0, rv() * Math.PI * 2);
+        const sc = 5 + rv() * 7;
+        d.scale.set(sc, sc, 1);
+        d.updateMatrix();
+        d.matrix.toArray(matrices, n++ * 16);
+      }
+      if (!n) continue;
+      const geo = new THREE.PlaneGeometry(1, 1);
+      const mat = new THREE.MeshStandardMaterial({map: spec.tex, transparent: true, opacity: spec.opacity, depthWrite: false, roughness: 1, metalness: 0, color: spec.tint, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2});
+      const mesh = new THREE.InstancedMesh(geo, mat, n);
+      mesh.count = 0;
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      scene.add(mesh);
+      decalSets.push({mesh, matrices, total: n});
+    }
+  }).catch(() => undefined);
+
   let lastCullX = Infinity, lastCullZ = Infinity, lastCullTime = -Infinity;
   // QA treeline vantage: pick the best tree as a near-band camera anchor (maximising full-res
   // trees within ~22 m), then look toward the local cluster centroid so both the full-res (<20 m)
@@ -362,12 +472,13 @@ export function addLandscape(scene: THREE.Scene) {
       // Full-res pines/oaks within 20 m (2 m overlap so there is no visible gap), LOD instances from
       // 20 m out to the fog-limited 54 m band.
       const NEAR = 20, OVERLAP = 22, FAR = 54;
+      // Card trees: a single 0..FAR band (no LOD swap). Legacy fallback keeps the near/far split.
       if (pineMatrices) {
         if (pineLodInsts.length) {
           for (const inst of pineInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, 0, OVERLAP);
           for (const inst of pineLodInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, NEAR, FAR);
         } else {
-          for (const inst of pineInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, 0, 48);
+          for (const inst of pineInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, 0, FAR);
         }
       }
       if (oakMatrices) {
@@ -375,11 +486,14 @@ export function addLandscape(scene: THREE.Scene) {
           for (const inst of oakInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, 0, OVERLAP);
           for (const inst of oakLodInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, NEAR, FAR);
         } else {
-          for (const inst of oakInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, 0, 48);
+          for (const inst of oakInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, 0, FAR);
         }
       }
+      if (mapleMatrices) for (const inst of mapleInsts) cullIntoBand(inst, mapleMatrices, mapleCount, focusX, focusZ, 0, FAR);
+      if (snowMatrices) for (const inst of snowInsts) cullIntoBand(inst, snowMatrices, snowCount, focusX, focusZ, 0, FAR);
       if (rockInst && rockMatrices) cullIntoBand(rockInst, rockMatrices, rockTotal, focusX, focusZ, 0, 30);
-      scene.userData.landscapeDebug={pine:pineInsts.map(i=>i.count),pineLod:pineLodInsts.map(i=>i.count),oak:oakInsts.map(i=>i.count),oakLod:oakLodInsts.map(i=>i.count),pineCount,oakCount,hasMatrices:!!pineMatrices,treeline:treelineVantage};
+      for (const set of decalSets) cullIntoBand(set.mesh, set.matrices, set.total, focusX, focusZ, 0, 72);
+      scene.userData.landscapeDebug={pine:pineInsts.map(i=>i.count),pineLod:pineLodInsts.map(i=>i.count),oak:oakInsts.map(i=>i.count),oakLod:oakLodInsts.map(i=>i.count),maple:mapleInsts.map(i=>i.count),snow:snowInsts.map(i=>i.count),pineCount,oakCount,mapleCount,snowCount,hasMatrices:!!pineMatrices,treeDebug:scene.userData.treeDebug??null,treeline:treelineVantage};
     }
   };
 }

@@ -31,17 +31,23 @@ export class CharacterAssets {
  coreReady:Promise<void>;
  customReady:Promise<void>;
  constructor(){
-  const core:string[]=[...WEAPON_IDS,'shield','hero','ally','survivor'];
-  // Heavier/rarer bodies stream in the background after joining.
-  const extras:string[]=['fallen','berserker','ranger','templar','skeleton-soldier','zombie'];
-  this.progress.total=core.length+extras.length;
-  const load=async(name:string)=>{
-   try{this.custom.set(name,await loadAsset('custom/'+name));}
-   catch(error){this.loadError=error;console.warn('Character asset failed',name,error);}
-   finally{this.progress.loaded++;}
-  };
-  this.coreReady=Promise.all(core.map(load)).then(()=>{this.customLoaded=true;});
-  this.customReady=this.coreReady.then(()=>Promise.all(extras.map(load))).then(()=>undefined);
+   // Cycle-3 time-to-HUD: only the bodies that must exist at the first playable frame are in the
+   // blocking core set. Everything else (other weapons, rare enemy bodies) streams in the background
+   // after the player is already in-world, one asset at a time with a task yield between loads so the
+   // join/first-frame work never competes with a 15-fetch burst.
+   const starterWeapon=WEAPON_IDS[0]??'sword';
+   const core:string[]=['hero','ally','survivor',starterWeapon,'shield'];
+   const extras:string[]=[...WEAPON_IDS.filter(id=>id!==starterWeapon),'fallen','berserker','ranger','templar','skeleton-soldier','zombie'];
+   this.progress.total=core.length+extras.length;
+   const load=async(name:string)=>{
+    try{this.custom.set(name,await loadAsset('custom/'+name));}
+    catch(error){this.loadError=error;console.warn('Character asset failed',name,error);}
+    finally{this.progress.loaded++;}
+   };
+   this.coreReady=Promise.all(core.map(load)).then(()=>{this.customLoaded=true;});
+   this.customReady=this.coreReady.then(async()=>{
+    for(const name of extras){await load(name);await new Promise<void>(resolve=>setTimeout(resolve,0));}
+   }).then(()=>undefined);
  }
  create(a:Actor) {
   if(!this.customLoaded) return;

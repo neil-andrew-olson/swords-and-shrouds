@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {weaponStats,type WeaponId} from '../shared/weapons';
 // Measured in the supplied GLBs' scene coordinates: handle center and tip direction.
 // rapier/halberd/dane_axe/flamberge/mace are baked canonically (grip at origin, blade +Y), so no re-fit.
 export const WEAPON_GRIPS:Record<string,{grip:number[];blade:number[]}>= {
@@ -43,3 +44,24 @@ export function shieldBacking(parent:THREE.Object3D){
  const back=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshStandardMaterial({color:0x49372a,roughness:.95,side:THREE.DoubleSide}));back.position.z=.075;parent.add(back);
  for(const y of [-.08,.13]){const strap=new THREE.Mesh(new THREE.TorusGeometry(.085,.018,6,16,Math.PI),new THREE.MeshStandardMaterial({color:0x21170f,roughness:.85}));strap.rotation.x=Math.PI/2;strap.position.set(0,y,.09);parent.add(strap);}
 }
+/**
+ * Combat-feedback palette (cycle 2026-10F): weapon type + tier data for third-person swing trails
+ * and impact/block sparks. Data only — the pooled particle/ribbon systems in scene.ts/effects.ts
+ * consume it (owned by world-scene), so no allocation or per-frame work happens here.
+ * `trail` is HDR-ish additive RGB scaled by weapon weight; `impact` is the spark colour.
+ */
+export type CombatSwingStyle='thrust'|'cleave'|'crush'|'sweep';
+export type WeaponCombatProfile={style:CombatSwingStyle;weight:number;trail:[number,number,number];impact:[number,number,number]};
+const SWING_BY_ASSET:Record<string,CombatSwingStyle>={sword:'thrust',rapier:'thrust',flamberge:'cleave',dane_axe:'cleave',zweihander:'cleave',mace:'crush',hammer:'crush',bastard:'crush',poleaxe:'sweep',halberd:'sweep'};
+const TRAIL_BASE:Record<CombatSwingStyle,[number,number,number]>={thrust:[1.1,1.5,1.8],cleave:[1.8,1.0,.38],crush:[1.35,1.35,1.55],sweep:[.75,1.55,1.15]};
+const IMPACT_BASE:Record<CombatSwingStyle,[number,number,number]>={thrust:[.9,1.4,1.9],cleave:[1.9,.9,.35],crush:[1.6,1.4,1.1],sweep:[.8,1.6,1.2]};
+/** Deterministic per-weapon combat profile: type from the asset, weight from damage (0.8–1.6). */
+export function weaponCombatProfile(id?:WeaponId):WeaponCombatProfile{
+ const weapon=weaponStats(id),style=SWING_BY_ASSET[weapon.asset]??'thrust';
+ const weight=Math.max(.8,Math.min(1.6,weapon.damage/45));
+ const scale=(base:[number,number,number]):[number,number,number]=>[+(base[0]*weight).toFixed(3),+(base[1]*weight).toFixed(3),+(base[2]*weight).toFixed(3)];
+ return {style,weight,trail:scale(TRAIL_BASE[style]),impact:scale(IMPACT_BASE[style])};
+}
+/** Cold steel spark for a successful block (kept brighter/additive than a flesh hit). */
+export function blockSparkColor():[number,number,number]{return [1.5,1.7,2.1];}
+

@@ -468,3 +468,60 @@ origin is the **top-left** of the image and `GLTFLoader` uses `flipY=false`, so 
 `v * height` (an earlier `1 - v` mapping is what produced a black keep during development).
 Validation: staged mirror 65/65 (fortress_keep PASS 10,923/14,000 tris) → atomic install → live
 65/65; `tests/assets` 5/5, `tests/equipment` 5/5, `tests/armory` 5/5. Custom payload 11.06 → 11.13 MB.
+
+## Batch 2026-10F — region identity assets (effects, foliage v2, props, landmarks)
+
+### Phase A — effects/corruption/decals + foliage v2 + region props (installed)
+
+Textures (`public/assets/textures/`, PNG, procedural, no external refs, night-toned):
+`flame_soft.png` 256 (soft additive tongue), `flame_core.png` 128 (bright core), `smoke_puff.png` 128,
+`ember_dot.png` 128, `corruption_feather.png` 256 (feathered noisy-edge plague mask), and ground
+decals with soft/feathered alpha edges: `snow_patch.png` 512, `ash_patch.png` 512 (ember specks),
+`grass_patch.png` 512 (blade strokes). Generator: `scripts/bake/bake-effects-textures.py`.
+
+Foliage v2 + props (`public/assets/custom/`, ground-centred origin y = 0, trunk at x = z = 0, identity
+node transforms, geometry in world units, embedded textures, gzip-9):
+| asset | tris | prims | gz | native size |
+| --- | --- | --- | --- | --- |
+| `pine_v2` | 1,272 | 2 | 119.6 KB | 4.55 × 9.08 × 4.43 |
+| `snow_pine` | 1,286 | 2 | 115.5 KB | 4.54 × 9.16 × 4.27 |
+| `oak_v2` | 514 | 2 | 93.4 KB | 5.89 × 7.26 × 5.98 |
+| `maple` | 514 | 2 | 104.7 KB | 6.03 × 7.24 × 5.94 |
+| `dead_tree` | 464 | 1 | 91.4 KB | 5.26 × 7.72 × 5.63 |
+| `standing_stone` | 63 | 1 | 83.4 KB | 2.99 × 3.25 × 2.90 |
+| `ice_shard` | 108 | 1 | 82.0 KB | 1.39 × 1.95 × 0.92 |
+Trees use alpha-cut needle/leaf card atlases (`alphaMode: MASK`, cutoff 0.42, doubleSided, bark +
+`*_leaves` materials so the landscape foliage regex/wind picks them up). Builder:
+`scripts/bake/bake-foliage-props.mjs`. Quality gate: headless three.js renders at 5/10/20 m
+(`temp_sketchlab/cycle3_tex/distance_sheet2.png`) show oak_v2/maple holding up at every distance and
+pine_v2/snow_pine reading clearly as conifers from 10 m (better than the shipped pine_lod at close
+range), so **one card asset per tree serves all distances** and no `_near` LOD variant is needed.
+
+### Phase B — landmark ruins (installed)
+
+Baked from the sketchlab warehouse: `collapsed-gothic-chapel-ruin.zip` (inner FBX scan + 4096
+base colour), `vashlovani_tower.glb` (1 M-tri scan, unlit material) and
+`medieval-village-house-low-polygame-ready.zip` (FBX). Pipeline:
+`scripts/bake/bake-landmark.py` (Blender: import/join, night-toned single material, ground-centre,
+full-res GLB export) then `scripts/bake/bake-landmark.mjs` (merge primitives + bake node transforms
+into vertices, meshoptimizer simplify to budget, uniform scale to a game height, 1024 night-toned
+embedded base colour, quantise). All are 1 prim / 1 material / 1 texture, `KHR_mesh_quantization`,
+ground-centred, gzip-9, atomically installed (chapel_ruin replaced under the same name; village
+house and watchtower are new).
+
+| asset | tris | budget | gz | size (x × y × z) | note |
+| --- | --- | --- | --- | --- | --- |
+| `chapel_ruin` | 13,810 | 14,000 | 433.9 KB | 6.90 × 7.00 × 6.44 | replaced; bbox matches the old set-piece asset (6.91 × 7.00 × 6.43) |
+| `watchtower_ruin` | 9,817 | 10,000 | 466.7 KB | 6.08 × 10.00 × 6.67 | new; photogrammetry-derived weathered stone |
+| `village_house_ruin` | 2,475 | 8,000 | 144.3 KB | 13.81 × 6.50 × 7.66 | new; medieval village house, scale-matched to the ruin set |
+
+Preview: `temp_sketchlab/landmarks/landmarks_sheet2.png` (chapel arches/windows read clearly, house
+roof/beams read, tower weathered stone). Note: an early bake produced world-invisible assets because
+the exporter had left the original empty scene as the glTF default scene — the Node baker now reuses
+scene[0] and sets it as default; worth remembering for any Blender-exported GLB stage.
+
+### Verification
+
+Staged mirrored set validated before every install (72/72 after Phase A, 74/74 after Phase B), atomic
+install (copy-to-.tmp + single rename), live `validate-assets.mjs` 74/74, `tests/assets` 5/5,
+`tests/equipment` 5/5, `tests/armory` 5/5. Custom payload 11.13 → 12.46 MB (70 files).

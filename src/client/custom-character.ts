@@ -3,8 +3,160 @@ import {weaponStats} from '../shared/weapons';
 import {meshBounds,grounder} from './grounding';
 import {equipmentModel} from './equipment';
 import {clone} from 'three/addons/utils/SkeletonUtils.js';
+import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
+import {NEST} from '../shared/world';
 import type {GLTF} from 'three/addons/loaders/GLTFLoader.js';
 import type {Actor} from '../shared/types';
+/**
+ * Elite undead rule (cycle 2026-10F) — deterministic, derived only from authoritative actor state,
+ * so the renderer, tests and QA can all identify elites without new assets or net fields:
+ *  - corrupted knights are armoured elites (tier 2); HP>=200 bosses are tier 3
+ *  - shrouded undead (zombie/skeleton): HP>=150 bosses tier 3; plague-nest guards (<=70 m) and
+ *    The Fallen Keep garrison (castle id 'keep') are tier 1
+ *  - players and soldiers are never elite
+ */
+export type UndeadEliteTier=0|1|2|3;
+export function undeadEliteTier(a:Actor):UndeadEliteTier{
+ if(a.kind==='corrupted')return a.maxHp>=200?3:2;
+ if(a.kind!=='zombie')return 0;
+ if(a.maxHp>=150)return 3;
+ const dx=a.x-NEST.x,dz=a.z-NEST.z;
+ if(dx*dx+dz*dz<=70*70)return 1;
+ if(a.castle==='keep')return 1;
+ return 0;
+}
+const UP=new THREE.Vector3(0,1,0);
+/** Two low-poly eye spheres merged into one geometry (one draw call instead of two). */
+function eyePairGeometry(radius:number,dx:number):THREE.BufferGeometry{
+ const left=new THREE.SphereGeometry(radius,6,4).translate(-dx,0,0);
+ const right=new THREE.SphereGeometry(radius,6,4).translate(dx,0,0);
+ return mergeGeometries([left,right])??left;
+}
+type BoneRef={bone:THREE.Object3D;index:number;name:string};
+/** Find a joint by candidate names on the actual skeleton (handles mixamorig:, Bip01_* and UE-style names). */
+function skeletonBone(skeleton:THREE.Skeleton,names:string[]):BoneRef|undefined{
+ // three sanitises glTF node names for property binding (dots/spaces are stripped: 'neck.x' -> 'neckx').
+ const simple=(value:string)=>value.replace(/^mixamorig:?/,'').replace(/[^a-z0-9_]/gi,'').toLowerCase();
+ for(const name of names){
+  const wanted=simple(name);
+  for(let i=0;i<skeleton.bones.length;i++){
+   const bone=skeleton.bones[i],bare=simple(bone.name);
+   if(bone.name===name||bare===wanted)return {bone,index:i,name:bone.name};
+  }
+ }
+ return undefined;
+}
+type AddOnPayload={pos:number[];nrm:number[];skinIndex:number[];skinWeight:number[];tris:number};
+/** Four triangular sides of a pyramid spike (no base), flat-shaded. */
+function pushSpike(payload:AddOnPayload,boneIndex:number,toBind:(v:THREE.Vector3)=>THREE.Vector3,base:THREE.Vector3,dir:THREE.Vector3,length:number,width:number){
+ const d=dir.clone().normalize();if(d.lengthSq()<1e-8)return;
+ const helper=Math.abs(d.y)>.9?new THREE.Vector3(1,0,0):UP;
+ const u=new THREE.Vector3().crossVectors(d,helper).normalize(),v=new THREE.Vector3().crossVectors(d,u).normalize();
+ const corners=[
+  base.clone().addScaledVector(u,width).addScaledVector(v,width),
+  base.clone().addScaledVector(u,-width).addScaledVector(v,width),
+  base.clone().addScaledVector(u,-width).addScaledVector(v,-width),
+  base.clone().addScaledVector(u,width).addScaledVector(v,-width)
+ ];
+ const tip=base.clone().addScaledVector(d,length);
+ for(let i=0;i<4;i++){
+  const a=corners[i],b=corners[(i+1)%4];
+  const normal=new THREE.Vector3().crossVectors(b.clone().sub(a),tip.clone().sub(a));
+  if(normal.lengthSq()<1e-12)continue;
+  normal.normalize();
+  for(const p of [a,b,tip]){
+   const q=toBind(p);
+   payload.pos.push(q.x,q.y,q.z);
+   payload.nrm.push(normal.x,normal.y,normal.z);
+   payload.skinIndex.push(boneIndex,0,0,0);
+   payload.skinWeight.push(1,0,0,0);
+  }
+  payload.tris++;
+ }
+}
+/**
+ * Procedural elite-undead silhouette: one extra rigid-weighted SkinnedMesh sharing the body's
+ * skeleton (one skin), attached as a child of the body in bind space. Tier 1 = jagged bone crown;
+ * tier 2 = helmet crest + shoulder spikes; tier 3 = taller crown + shoulder spikes. <=64 triangles.
+ */
+function buildEliteUndeadAddOn(model:THREE.Object3D,a:Actor):THREE.SkinnedMesh|undefined{
+ const tier=undeadEliteTier(a);if(!tier)return undefined;
+ let body:THREE.SkinnedMesh|undefined;
+ model.traverse(o=>{if(!body&&o instanceof THREE.SkinnedMesh)body=o as THREE.SkinnedMesh;});
+ if(!body)return undefined;
+ const skeleton=body.skeleton;
+ const head=skeletonBone(skeleton,['mixamorigHead','Head','Bip01_Head1','head.x','c_subneck_1.x','neck.x','mixamorigNeck','Neck']);
+ if(!head)return undefined;
+ model.updateMatrixWorld(true);
+ const bindInv=body.bindMatrixInverse,bind=body.bindMatrix;
+ const invRestCache=new Map<number,THREE.Matrix4>();
+ const toBindFor=(boneIndex:number)=>(world:THREE.Vector3)=>{
+  let inv=invRestCache.get(boneIndex);
+  if(!inv){const bone=skeleton.bones[boneIndex];inv=new THREE.Matrix4().copy(bindInv).multiply(bone.matrixWorld).multiply(skeleton.boneInverses[boneIndex]).multiply(bind).invert();invRestCache.set(boneIndex,inv);}
+  return body!.worldToLocal(world.clone()).applyMatrix4(inv);
+ };
+ const payload:AddOnPayload={pos:[],nrm:[],skinIndex:[],skinWeight:[],tris:0};
+ const headPos=head.bone.getWorldPosition(new THREE.Vector3());
+ const headName=head.name.toLowerCase();
+ const headRise=headName.includes('subneck')?.22:headName.includes('neck')?.26:.10;
+ const crownBase=headPos.clone().addScaledVector(UP,headRise);
+ const crownCount=tier===3?10:8,crownRadius=tier===3?.088:.075;
+ const crownBind=toBindFor(head.index);
+ for(let i=0;i<crownCount;i++){
+  const angle=(i/crownCount)*Math.PI*2,radial=new THREE.Vector3(Math.cos(angle),0,Math.sin(angle));
+  const base=crownBase.clone().addScaledVector(radial,crownRadius);
+  const dir=radial.clone().multiplyScalar(.45).add(UP).normalize();
+  pushSpike(payload,head.index,crownBind,base,dir,tier===3?.115:.09,.02);
+ }
+ if(tier>=2){
+  // Helmet crest ridge running front-to-back over the skull.
+  for(let i=0;i<5;i++){
+   const offset=(i/4-.5);
+   const base=crownBase.clone().addScaledVector(UP,.015).addScaledVector(new THREE.Vector3(0,0,1),offset*.13);
+   const dir=new THREE.Vector3(0,1,offset*.25).normalize();
+   pushSpike(payload,head.index,crownBind,base,dir,tier===3?.135:.105,.021);
+  }
+  // Shoulder spikes on the armoured variants.
+  const hips=skeletonBone(skeleton,['mixamorigHips','Hips','Bip01_Pelvis','root.x','spine_01.x']);
+  const hipsPos=hips?hips.bone.getWorldPosition(new THREE.Vector3()):null;
+  for(const [armNames,side] of [[['mixamorigLeftArm','LeftArm','Bip01_L_UpperArm','arm_stretch.l','shoulder.l'],-1],[['mixamorigRightArm','RightArm','Bip01_R_UpperArm','arm_stretch.r','shoulder.r'],1]] as [string[],number][]){
+   const arm=skeletonBone(skeleton,armNames);if(!arm)continue;
+   const armPos=arm.bone.getWorldPosition(new THREE.Vector3());
+   const outward=hipsPos?new THREE.Vector3().subVectors(armPos,hipsPos):new THREE.Vector3(side,0,0);
+   outward.y=0;if(outward.lengthSq()<1e-8)outward.set(side,0,0);outward.normalize();
+   const armBind=toBindFor(arm.index);
+   for(let s=0;s<3;s++){
+    const base=armPos.clone().addScaledVector(outward,.05+s*.012).addScaledVector(UP,.02+s*.022).addScaledVector(new THREE.Vector3(0,0,1),(s-1)*.05);
+    const dir=new THREE.Vector3().addScaledVector(outward,.55).addScaledVector(UP,1).normalize();
+    pushSpike(payload,arm.index,armBind,base,dir,tier===3?.15:.12,.025);
+   }
+  }
+ }
+ if(!payload.tris)return undefined;
+ const geometry=new THREE.BufferGeometry();
+ geometry.setAttribute('position',new THREE.Float32BufferAttribute(payload.pos,3));
+ geometry.setAttribute('normal',new THREE.Float32BufferAttribute(payload.nrm,3));
+ geometry.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(payload.skinIndex,4));
+ geometry.setAttribute('skinWeight',new THREE.Float32BufferAttribute(payload.skinWeight,4));
+ const material=new THREE.MeshStandardMaterial({color:0x4a4152,metalness:.15,roughness:.8,flatShading:true,envMapIntensity:1.6});
+ // Same cool dusk rim as the body so the crest/spikes read as silhouette at distance.
+ material.onBeforeCompile=shader=>{
+  shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>','float ssRim=pow(1.0-clamp(dot(normalize(normal),normalize(vViewPosition)),0.0,1.0),2.5);\noutgoingLight+=vec3(.30,.38,.50)*(ssRim*.3);\n#include <opaque_fragment>');
+ };
+ material.customProgramCacheKey=()=>RIM_CACHE_KEY+'-addon';
+ const mesh=new THREE.SkinnedMesh(geometry,material);
+ mesh.name='undead-elite-addon';
+ mesh.castShadow=mesh.receiveShadow=true;
+ mesh.frustumCulled=false;
+ mesh.userData.sharedAsset=false;
+ mesh.userData.eliteTier=tier;
+ mesh.userData.triangles=payload.tris;
+ body.add(mesh);
+ mesh.bind(skeleton,bind);
+ mesh.updateMatrixWorld(true);
+ return mesh;
+}
+
 /**
  * Character readability (cycle 2026-10D). All bodies get a sane PBR response plus a cheap
  * scene-independent Fresnel rim so night silhouettes stay readable. A non-destructive fallback
@@ -148,19 +300,29 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
   // Fingers (hand bone local +Y) aim at the shaft so the palm reads as closing on it.
   leftHand!.getWorldPosition(wrist);fingersDir.set(0,1,0).transformDirection(leftHand!.matrixWorld);wantFore.subVectors(aimPoint,wrist);turn(leftHand!,fingersDir,wantFore);
  };
- const head=getBone('mixamorigHead');
+ const proceduralGeometries:THREE.BufferGeometry[]=[];
+ const skinBody:(THREE.SkinnedMesh|undefined)=(()=>{let found:THREE.SkinnedMesh|undefined;model.traverse(o=>{if(!found&&o instanceof THREE.SkinnedMesh)found=o as THREE.SkinnedMesh;});return found;})();
+ const headRef=skinBody?skeletonBone(skinBody.skeleton,['mixamorigHead','Head','Bip01_Head1','head.x','c_subneck_1.x','neck.x','mixamorigNeck','Neck']):undefined;
+ const head=headRef?.bone??getBone('mixamorigHead');
  if(head&&(a.kind==='corrupted'||a.kind==='zombie')){
-  const eyeColor=a.kind==='corrupted'?0xff253a:0x9ae640;
+  const tier=undeadEliteTier(a);
+  const eyeColor=a.kind==='corrupted'?(tier>=3?0xff3a7a:0xff253a):(tier>0?0xff5533:0x9ae640);
   const eyeMat=new THREE.MeshBasicMaterial({color:eyeColor});
-  const eyeGeo=new THREE.SphereGeometry(.025,6,6);
-  for(const dx of [-.05,.05]){
-   const eye=new THREE.Mesh(eyeGeo,eyeMat);
-   eye.position.set(dx,.07,.11);
-   eye.name='undead-eye';
-   head.add(eye);
+  const eyeGeo=eyePairGeometry(.025,.05);
+  const eyes=new THREE.Mesh(eyeGeo,eyeMat);
+  eyes.name='undead-eye';eyes.position.set(0,.07,.11);
+  head.add(eyes);proceduralGeometries.push(eyeGeo);
+  if(tier>0){
+   // Subtle additive glow (violet-red) so elites read at range without blowing out the face.
+   const haloGeo=new THREE.SphereGeometry(.075,8,4);
+   const halo=new THREE.Mesh(haloGeo,new THREE.MeshBasicMaterial({color:a.kind==='corrupted'?0xb46cff:0xff4433,transparent:true,opacity:.3,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}));
+   halo.name='undead-eye-glow';halo.position.set(0,.07,.13);halo.scale.set(1,.5,.45);
+   head.add(halo);proceduralGeometries.push(haloGeo);
   }
  }
  repairCharacterMaterials(model);
+ const eliteAddOn=buildEliteUndeadAddOn(model,a);
+ if(eliteAddOn)proceduralGeometries.push(eliteAddOn.geometry);
  const mixer=new THREE.AnimationMixer(model),actions=new Map<string,THREE.AnimationAction>();
  for(const clip of source.animations){
   const c=clip.clone();
@@ -179,5 +341,5 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
   ground(actor.hp<=0);pivot.updateMatrixWorld(true);
   if(actor.hp>0&&next!=='block_idle')poseSupportHand();
   for(const {bone,grip} of attachments){const sc=bone.getWorldScale(new THREE.Vector3());grip.scale.set(1/Math.max(.00001,sc.x),1/Math.max(.00001,sc.y),1/Math.max(.00001,sc.z));}
- },dispose:()=>{mixer.stopAllAction();mixer.uncacheRoot(model);model.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])m.dispose();});}};
+ },dispose:()=>{mixer.stopAllAction();mixer.uncacheRoot(model);for(const geometry of proceduralGeometries)geometry.dispose();model.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])m.dispose();});}};
 }

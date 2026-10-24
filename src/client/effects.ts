@@ -356,6 +356,7 @@ export class CombatEffects {
   private readonly decals: GroundDecals;
   private readonly smokePool: ParticlePool;
   private readonly motePool: ParticlePool;
+  private readonly snowPool: ParticlePool;
   /** Per-tier spawn multiplier (low tier spawns fewer particles). */
   private particleScale = 1;
 
@@ -391,6 +392,9 @@ export class CombatEffects {
     const moteGeo = new THREE.IcosahedronGeometry(0.5, 0);
     const moteMat = new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false});
     this.motePool = new ParticlePool(scene, moteGeo, moteMat, 120, new THREE.Vector3(1, 1, 1), true);
+    const snowGeo = new THREE.IcosahedronGeometry(0.5, 0);
+    const snowMat = new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false});
+    this.snowPool = new ParticlePool(scene, snowGeo, snowMat, 140, new THREE.Vector3(1, 1, 1), true);
   }
 
   /** Quality tier hook: <1 reduces particle spawn counts. */
@@ -410,7 +414,7 @@ export class CombatEffects {
   }
 
   /** Metallic ring-off / blood spray / spectral wisps on every landed hit. */
-  sparks(position: THREE.Vector3, kind: SparkKind = 'metal') {
+  sparks(position: THREE.Vector3, kind: SparkKind = 'metal', tint?: [number, number, number]) {
     const {x, y, z} = position;
     const count = Math.max(2, Math.round((kind === 'undead' ? 15 : 13) * this.particleScale));
     for (let i = 0; i < count; i++) {
@@ -426,6 +430,7 @@ export class CombatEffects {
       } else {
         r = 0.44 + Math.random() * 0.25; g = 1.15 + Math.random() * 0.3; b = 0.6 + Math.random() * 0.4;
       }
+      if (tint) { r = tint[0] * (0.85 + Math.random() * 0.3); g = tint[1] * (0.85 + Math.random() * 0.3); b = tint[2] * (0.85 + Math.random() * 0.3); }
       this.sparksPool.emit(
         x + (Math.random() - 0.5) * 0.35,
         y + (Math.random() - 0.5) * 0.4,
@@ -528,6 +533,7 @@ export class CombatEffects {
     this.decals.update(step);
     this.smokePool.update(step);
     this.motePool.update(step);
+    this.snowPool.update(step);
     this.smokePool.update(step);
     this.motePool.update(step);
   }
@@ -584,6 +590,23 @@ export class CombatEffects {
         0.42, 0.52, 0.72
       );
     }
+  }
+  /** Region precipitation: snow flake (Frozen Crown) or drifting ash fleck (Ashen Moor). */
+  flake(position: THREE.Vector3, r: number, g: number, b: number, scale: number) {
+    if (this.particleScale < 0.6) return;
+    this.snowPool.emit(
+      position.x + (Math.random() - 0.5) * 18,
+      position.y + Math.random() * 5,
+      position.z + (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 0.5,
+      -0.35 - Math.random() * 0.5,
+      (Math.random() - 0.5) * 0.5,
+      3.5 + Math.random() * 3.5,
+      0.028 * scale, 0.024 * scale,
+      0.02,
+      0.25,
+      r, g, b
+    );
   }
   /** Live particle count, exposed for the perf HUD / QA reporting. */
   get active() {

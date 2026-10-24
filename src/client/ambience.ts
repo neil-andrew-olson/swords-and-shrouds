@@ -1,21 +1,36 @@
 import type {Actor, Game} from '../shared/types';
-import {dist} from '../shared/world';
+import {REGIONS,dist} from '../shared/world';
 const clamp01=(v:number)=>(v<0?0:v>1?1:v);
+/** Region audio profiles derived from shared/world. Region centres use the same offset-80 mapping
+ * the HUD uses to pick the player's region, so the audio regions match the visible region zones. */
+const REGION_CENTERS=REGIONS.map(region=>region.offset-80);
+const REGION_VOLUMES=[.05,.055,.06];
+const REGION_MUSIC=[
+ {level:1,filter:1.08,detune:5},   // Green March: warmer/clearer bed
+ {level:.9,filter:.82,detune:-7},  // Ashen Moor: darker mode
+ {level:.78,filter:.72,detune:-12},// Frozen Crown: muted, thin bed
+];
+/** Border hysteresis band (metres around the region midpoint) so wind/foley doesn't flip-flop at seams. */
+const REGION_HYSTERESIS=14;
 /**
  * Procedural WebAudio ambience + adaptive music. Every layer is synthesised at runtime — no audio
  * files: wind, a horde drone that rises with nearby undead, a plague-nest hum/pad (and a dissonant
  * tension pair near the nest), fire crackle + ember bed near castle braziers and camp fires, a
- * low-health heartbeat, footstep cadence, rate-limited distant undead moans/creaks, and a very
- * quiet minor-mode music bed (low drone + detuned string-like pads).
+ * low-health heartbeat, footstep cadence, rate-limited distant undead moans/creaks, a very quiet
+ * minor-mode music bed (low drone + detuned string-like pads), and per-region ambience layers:
+ * Frozen Crown cold gusting wind/whistle/howl/ice cracks, Ashen Moor ash hiss/rumble/ember pops/
+ * distant bells/groans, Green March leaf rustle/insect bed/bird chirps.
  *
  * The music bed is adaptive: it fades in during exploration, swells near the plague nest and during
- * an active siege, eases down for a while after a castle capture, and ducks under combat via
- * duck() (called from main.ts's authoritative cue stream). Silent before unlock() (user gesture)
- * and while Sound is unchecked; the whole graph is context-suspended while paused/hidden.
+ * an active siege, eases down for a while after a castle capture, ducks under combat via duck()
+ * (called from main.ts's authoritative cue stream), and is tinted by the current region (level,
+ * filter cutoff and pad detune crossfade smoothly). Silent before unlock() (user gesture) and while
+ * Sound is unchecked; the whole graph is context-suspended while paused/hidden.
  *
  * update() is deliberately allocation-light: it loops existing game arrays with plain for-loops,
- * schedules at most one short envelope per step/beat/moan, only re-targets AudioParams a few times
- * per second, and lazily builds/stops the music graph so it costs nothing when inaudible.
+ * schedules at most one short envelope per step/beat/moan/regional one-shot, only re-targets
+ * AudioParams a few times per second, and lazily builds/stops both the music graph and each region
+ * bed so they cost nothing when inaudible.
  */
 export class Ambience{
  private context?:AudioContext;
@@ -49,6 +64,21 @@ export class Ambience{
  private capturesSeen=false;
  private nearbyUndead=0;
  private moanTimer=3;
+ // Region beds: lazily built per region, crossfaded by weight, torn down when inaudible.
+ private regionGain:(GainNode|undefined)[]=[undefined,undefined,undefined];
+ private regionSources:AudioScheduledSourceNode[][]=[[],[],[]];
+ private regionNodes:AudioNode[][]=[[],[],[]];
+ private regionBuilt=[false,false,false];
+ private regionIdle=[0,0,0];
+ private regionIndex=0;
+ private regionSeen=false;
+ private regionWeights=[0,0,0];
+ private musicDetune:OscillatorNode[]=[];
+ private musicDetuneApplied=0;
+ private iceTimer=6;
+ private emberTimer=4;
+ private bellTimer=14;
+ private birdTimer=4;
  private stepTimer=0;
  private beatTimer=0;
  private slowTimer=0;
@@ -170,18 +200,19 @@ export class Ambience{
   const toneFilter=c.createBiquadFilter();toneFilter.type='lowpass';toneFilter.frequency.value=900;toneFilter.Q.value=.6;
   toneFilter.connect(bus);
   const sources:OscillatorNode[]=[];
+  const detunable:OscillatorNode[]=[];
   // Low drone: D1 + D2 + A2 fifth, mix levels kept tiny.
   const drone=c.createGain();drone.gain.value=.012;drone.connect(toneFilter);
   for(const [freq,type,level] of [[36.71,'sine',.5],[73.42,'triangle',.3],[110,'sine',.16]] as const){
    const osc=c.createOscillator();osc.type=type;osc.frequency.value=freq;
-   const g=c.createGain();g.gain.value=level;osc.connect(g);g.connect(drone);osc.start();sources.push(osc);
+   const g=c.createGain();g.gain.value=level;osc.connect(g);g.connect(drone);osc.start();sources.push(osc);detunable.push(osc);
   }
   // String-like pads: D minor (D3, F3, A3, D4), two detuned triangles per note for chorus width.
   const padFilter=c.createBiquadFilter();padFilter.type='lowpass';padFilter.frequency.value=1100;padFilter.Q.value=.5;
   const pad=c.createGain();pad.gain.value=.013;padFilter.connect(pad);pad.connect(toneFilter);
   for(const freq of [146.83,174.61,220,293.66])for(const cents of [-7,7]){
    const osc=c.createOscillator();osc.type='triangle';osc.frequency.value=freq*Math.pow(2,cents/1200);
-   const g=c.createGain();g.gain.value=.14;osc.connect(g);g.connect(padFilter);osc.start();sources.push(osc);
+   const g=c.createGain();g.gain.value=.14;osc.connect(g);g.connect(padFilter);osc.start();sources.push(osc);detunable.push(osc);
   }
   // Slow filter breathing + gain shimmer so the pads drift like bowed strings.
   const breathe=c.createOscillator();breathe.type='sine';breathe.frequency.value=.05;
@@ -198,7 +229,7 @@ export class Ambience{
    const osc=c.createOscillator();osc.type='sine';osc.frequency.value=freq;
    const g=c.createGain();g.gain.value=.22;osc.connect(g);g.connect(tensionFilter);osc.start();sources.push(osc);
   }
-  this.musicBus=bus;this.musicFilter=toneFilter;this.musicDrone=drone;this.musicPad=pad;this.tensionGain=tension;this.musicSources=sources;this.musicBuilt=true;
+  this.musicBus=bus;this.musicFilter=toneFilter;this.musicDrone=drone;this.musicPad=pad;this.tensionGain=tension;this.musicSources=sources;this.musicDetune=detunable;this.musicDetuneApplied=0;this.musicBuilt=true;
  }
  /** Tear the music graph down when the bed has been inaudible for a while (CPU win). */
  private stopMusic(){
@@ -207,7 +238,129 @@ export class Ambience{
   this.musicSources=[];
   for(const node of [this.musicBus,this.musicDrone,this.musicPad,this.tensionGain]){try{node?.disconnect();}catch{}}
   this.musicBus=undefined;this.musicFilter=undefined;this.musicDrone=undefined;this.musicPad=undefined;this.tensionGain=undefined;
+  this.musicDetune=[];this.musicDetuneApplied=0;
   this.musicBuilt=false;this.musicIdle=0;
+ }
+ /** Nearest shared/world region index for a world z coordinate (0 march, 1 moor, 2 crown). */
+ private nearestRegion(z:number){
+  let best=0,bestDistance=Infinity;
+  for(let i=0;i<REGION_CENTERS.length;i++){const distance=Math.abs(z-REGION_CENTERS[i]);if(distance<bestDistance){bestDistance=distance;best=i;}}
+  return best;
+ }
+ /** One looped-noise bed source with its own filter/gain, registered for teardown. */
+ private noiseLoop(c:AudioContext,type:BiquadFilterType,frequency:number,q:number,level:number,out:AudioNode,sources:AudioScheduledSourceNode[],nodes:AudioNode[]){
+  const noise=this.noise;if(!noise)return undefined;
+  const source=c.createBufferSource();source.buffer=noise;source.loop=true;
+  const filter=c.createBiquadFilter();filter.type=type;filter.frequency.value=frequency;filter.Q.value=q;
+  const gain=c.createGain();gain.gain.value=level;
+  source.connect(filter);filter.connect(gain);gain.connect(out);
+  source.start();sources.push(source);nodes.push(filter,gain);
+  return {filter,gain};
+ }
+ /** Build one region's continuous ambience beds lazily (only while that region is audible). */
+ private ensureRegion(index:number){
+  const c=this.context,master=this.master;
+  if(!c||!master||this.regionBuilt[index])return;
+  const gain=c.createGain();gain.gain.value=0;gain.connect(master);
+  const sources:AudioScheduledSourceNode[]=[];const nodes:AudioNode[]=[gain];
+  if(index===2){
+   // Frozen Crown: cold gusting band-passed wind, a thin high whistle drift, and a low howl.
+   const wind=this.noiseLoop(c,'bandpass',620,.8,.55,gain,sources,nodes);
+   if(wind){
+    const gust=c.createOscillator();gust.type='sine';gust.frequency.value=.07;
+    const gustGain=c.createGain();gustGain.gain.value=170;
+    gust.connect(gustGain);gustGain.connect(wind.filter.frequency);gust.start();sources.push(gust);nodes.push(gustGain);
+   }
+   const whistle=this.noiseLoop(c,'bandpass',1500,7,.12,gain,sources,nodes);
+   if(whistle){
+    const drift=c.createOscillator();drift.type='sine';drift.frequency.value=.043;
+    const driftGain=c.createGain();driftGain.gain.value=90;
+    drift.connect(driftGain);driftGain.connect(whistle.filter.frequency);drift.start();sources.push(drift);nodes.push(driftGain);
+   }
+   const howl=c.createOscillator();howl.type='triangle';howl.frequency.value=84;
+   const howlGain=c.createGain();howlGain.gain.value=.035;
+   const howlLfo=c.createOscillator();howlLfo.type='sine';howlLfo.frequency.value=.05;
+   const howlLfoGain=c.createGain();howlLfoGain.gain.value=6;
+   howl.connect(howlGain);howlGain.connect(gain);howlLfo.connect(howlLfoGain);howlLfoGain.connect(howl.detune);
+   howl.start();howlLfo.start();sources.push(howl,howlLfo);nodes.push(howlGain,howlLfoGain);
+  }else if(index===1){
+   // Ashen Moor: ash/sand wind hiss over a low ash rumble that slowly breathes.
+   this.noiseLoop(c,'highpass',1800,.7,.32,gain,sources,nodes);
+   const rumble=this.noiseLoop(c,'lowpass',170,.8,.5,gain,sources,nodes);
+   if(rumble){
+    const drift=c.createOscillator();drift.type='sine';drift.frequency.value=.06;
+    const driftGain=c.createGain();driftGain.gain.value=45;
+    drift.connect(driftGain);driftGain.connect(rumble.filter.frequency);drift.start();sources.push(drift);nodes.push(driftGain);
+   }
+  }else{
+   // Green March: leaf rustle with a slow flutter, plus a quiet cricket-like insect bed.
+   const rustle=this.noiseLoop(c,'bandpass',1600,.7,.4,gain,sources,nodes);
+   if(rustle){
+    const flutter=c.createOscillator();flutter.type='sine';flutter.frequency.value=.19;
+    const flutterGain=c.createGain();flutterGain.gain.value=220;
+    flutter.connect(flutterGain);flutterGain.connect(rustle.filter.frequency);flutter.start();sources.push(flutter);nodes.push(flutterGain);
+   }
+   const insects=this.noiseLoop(c,'bandpass',3600,7,.16,gain,sources,nodes);
+   if(insects){
+    const chirp=c.createOscillator();chirp.type='sine';chirp.frequency.value=7.2;
+    const chirpGain=c.createGain();chirpGain.gain.value=.12;
+    chirp.connect(chirpGain);chirpGain.connect(insects.gain.gain);chirp.start();sources.push(chirp);nodes.push(chirpGain);
+   }
+  }
+  this.regionGain[index]=gain;this.regionSources[index]=sources;this.regionNodes[index]=nodes;this.regionBuilt[index]=true;
+ }
+ /** Tear one region bed down when it has been inaudible for a while (CPU win). */
+ private stopRegion(index:number){
+  if(!this.regionBuilt[index])return;
+  for(const source of this.regionSources[index]){try{source.stop();}catch{}try{source.disconnect();}catch{}}
+  for(const node of this.regionNodes[index]){try{node.disconnect();}catch{}}
+  this.regionSources[index]=[];this.regionNodes[index]=[];this.regionGain[index]=undefined;
+  this.regionBuilt[index]=false;this.regionIdle[index]=0;
+ }
+ /** Sparse, rate-limited regional one-shots (ice cracks, ember pops, distant bells, bird chirps,
+  * groans), always very quiet and panned into the distance. */
+ private oneShot(kind:'ice'|'ember'|'bell'|'bird'|'groan'){
+  const c=this.context,master=this.master;
+  if(!c||!master||!this.enabled()||this.paused)return;
+  const now=c.currentTime;
+  const voice=c.createGain();voice.gain.value=1;
+  const nodes:AudioNode[]=[voice];
+  if(typeof c.createStereoPanner==='function'){
+   const panner=c.createStereoPanner();panner.pan.value=Math.random()*1.6-.8;
+   voice.connect(panner);panner.connect(master);nodes.push(panner);
+  }else voice.connect(master);
+  let pending=0;
+  const cleanup=()=>{if(--pending<=0)for(const node of nodes){try{node.disconnect();}catch{}}};
+  const tone=(type:OscillatorType,f0:number,f1:number,duration:number,peak:number,delay=0)=>{
+   const start=now+delay,osc=c.createOscillator(),gain=c.createGain();
+   osc.type=type;osc.frequency.setValueAtTime(Math.max(20,f0),start);
+   osc.frequency.exponentialRampToValueAtTime(Math.max(20,f1),start+duration);
+   gain.gain.setValueAtTime(.0001,start);
+   gain.gain.exponentialRampToValueAtTime(Math.max(.0002,peak),start+.01);
+   gain.gain.exponentialRampToValueAtTime(.0001,start+duration);
+   osc.connect(gain);gain.connect(voice);nodes.push(gain);
+   pending++;osc.onended=cleanup;osc.start(start);osc.stop(start+duration+.02);
+  };
+  const burst=(type:BiquadFilterType,f0:number,f1:number,q:number,duration:number,peak:number,delay=0)=>{
+   const noise=this.noise;if(!noise)return;
+   const start=now+delay,source=c.createBufferSource(),filter=c.createBiquadFilter(),gain=c.createGain();
+   source.buffer=noise;filter.type=type;filter.Q.value=q;
+   filter.frequency.setValueAtTime(Math.max(40,f0),start);
+   filter.frequency.exponentialRampToValueAtTime(Math.max(40,f1),start+duration);
+   gain.gain.setValueAtTime(.0001,start);
+   gain.gain.exponentialRampToValueAtTime(Math.max(.0002,peak),start+.008);
+   gain.gain.exponentialRampToValueAtTime(.0001,start+duration);
+   source.connect(filter);filter.connect(gain);gain.connect(voice);nodes.push(filter,gain);
+   pending++;source.onended=cleanup;source.start(start,Math.random()*.4);source.stop(start+duration+.02);
+  };
+  switch(kind){
+   case 'ice':burst('bandpass',2000,1450,5,.24,.014);tone('sine',2600,1650,.3,.006);break;
+   case 'ember':burst('bandpass',1100,600,2,.16,.012);tone('sine',120,58,.2,.007);break;
+   case 'bell':{const f=520+Math.random()*260;tone('sine',f,f*.998,1.6,.0045);tone('sine',f*1.5,f*1.497,1.3,.0025);break;}
+   case 'bird':{const base=2600+Math.random()*900;for(let k=0;k<3;k++)tone('sine',base+k*220,base*.92+k*200,.075,.006,k*.11);break;}
+   case 'groan':tone('sawtooth',82,54,.9,.006);burst('lowpass',400,180,1,.8,.004,.05);break;
+  }
+  if(!pending)for(const node of nodes){try{node.disconnect();}catch{}}
  }
  private footstep(){
   const c=this.context,step=this.stepGain;if(!c||!step)return;
@@ -307,6 +460,32 @@ export class Ambience{
     if(!this.capturesSeen){this.prevCaptures=game.stats.captures;this.capturesSeen=true;}
     else if(game.stats.captures>this.prevCaptures){this.prevCaptures=game.stats.captures;this.captureRelief=1;}
    }
+   // ---- region state: nearest shared/world region, border hysteresis, then a smooth weight crossfade ----
+   if(me){
+    const nearest=this.nearestRegion(me.z);
+    if(!this.regionSeen){this.regionSeen=true;this.regionIndex=nearest;this.regionWeights=[0,0,0];this.regionWeights[nearest]=1;}
+    else if(nearest!==this.regionIndex){
+     const current=REGION_CENTERS[this.regionIndex],target=REGION_CENTERS[nearest];
+     const boundary=(current+target)/2,direction=target>current?1:-1;
+     if((me.z-boundary)*direction>REGION_HYSTERESIS)this.regionIndex=nearest;
+    }
+   }
+   let target0=0,target1=0,target2=0;
+   if(this.regionIndex===0)target0=1;else if(this.regionIndex===1)target1=1;else target2=1;
+   this.regionWeights[0]+=(target0-this.regionWeights[0])*.055;
+   this.regionWeights[1]+=(target1-this.regionWeights[1])*.055;
+   this.regionWeights[2]+=(target2-this.regionWeights[2])*.055;
+   const regionActive=playing&&!!me;
+   for(let i=0;i<3;i++){
+    const target=regionActive&&enabled?this.regionWeights[i]*REGION_VOLUMES[i]:0;
+    if(target>.0008){
+     this.ensureRegion(i);this.regionIdle[i]=0;
+     const regionGain=this.regionGain[i];if(regionGain)regionGain.gain.setTargetAtTime(target,now,.55);
+    }else if(this.regionBuilt[i]){
+     const regionGain=this.regionGain[i];if(regionGain)regionGain.gain.setTargetAtTime(0,now,.4);
+     this.regionIdle[i]+=.08;if(this.regionIdle[i]>2.5)this.stopRegion(i);
+    }
+   }
    const wind=this.windGain,windFilter=this.windFilter;
    if(wind){
     const base=me?me.z<-360?.034:.024:.018;
@@ -323,7 +502,13 @@ export class Ambience{
    const nestPad=this.nestPadGain;if(nestPad)nestPad.gain.setTargetAtTime(enabled?nestPadLevel:0,now,.6);
    const fire=this.fireGain;if(fire)fire.gain.setTargetAtTime(enabled?fireLevel*.062:0,now,.08);
    const fireLow=this.fireLowGain;if(fireLow)fireLow.gain.setTargetAtTime(enabled?fireLevel*.014:0,now,.15);
-   // ---- adaptive music bed ----
+   // ---- adaptive music bed, tinted by the (crossfading) region profile ----
+   let musicLevel=0,musicFilterMul=0,musicDetuneCents=0;
+   for(let i=0;i<3;i++){
+    const weight=this.regionWeights[i],profile=REGION_MUSIC[i];
+    musicLevel+=weight*profile.level;musicFilterMul+=weight*profile.filter;musicDetuneCents+=weight*profile.detune;
+   }
+   if(musicLevel<.05){musicLevel=1;musicFilterMul=1;musicDetuneCents=0;}
    let bedTarget=0;
    if(enabled&&game&&game.status==='playing'){
     const siege=game.siege?.active?1:0;
@@ -335,8 +520,12 @@ export class Ambience{
    else if(this.musicBuilt){this.musicIdle+=.08;if(this.musicIdle>2.5)this.stopMusic();}
    const bus=this.musicBus;
    if(this.musicBuilt&&bus){
-    bus.gain.setTargetAtTime(enabled?this.bedLevel*.8*(1-.85*this.duckLevel):0,now,.09);
-    if(this.musicFilter)this.musicFilter.frequency.setTargetAtTime(760+520*nestSwell+(game?.siege?.active?220:0),now,.5);
+    bus.gain.setTargetAtTime(enabled?this.bedLevel*.8*(1-.85*this.duckLevel)*musicLevel:0,now,.09);
+    if(this.musicFilter)this.musicFilter.frequency.setTargetAtTime((760+520*nestSwell+(game?.siege?.active?220:0))*musicFilterMul,now,.5);
+    if(this.musicDetune.length&&Math.abs(musicDetuneCents-this.musicDetuneApplied)>.4){
+     this.musicDetuneApplied=musicDetuneCents;
+     for(const osc of this.musicDetune)osc.detune.setTargetAtTime(musicDetuneCents,now,.8);
+    }
     const tension=this.tensionGain;if(tension)tension.gain.setTargetAtTime(enabled?nestSwell*.06*(1-.85*this.duckLevel):0,now,.4);
    }
   }
@@ -353,6 +542,15 @@ export class Ambience{
     this.moanTimer=Math.max(1.8,6.5-this.nearbyUndead*.85)*(.75+Math.random()*.5);
    }
   }else if(this.moanTimer<1.5)this.moanTimer=1.5+Math.random();
+  // Region one-shots: timers run always, but a shot only sounds while its region layer is audible.
+  if(enabled&&playing){
+   const marchWeight=this.regionWeights[0],moorWeight=this.regionWeights[1],crownWeight=this.regionWeights[2];
+   this.birdTimer-=dt;this.iceTimer-=dt;this.emberTimer-=dt;this.bellTimer-=dt;
+   if(this.birdTimer<=0){this.birdTimer=3+Math.random()*5;if(marchWeight>.35)this.oneShot('bird');}
+   if(this.iceTimer<=0){this.iceTimer=5+Math.random()*6;if(crownWeight>.35)this.oneShot('ice');}
+   if(this.emberTimer<=0){this.emberTimer=3+Math.random()*4;if(moorWeight>.35)this.oneShot(Math.random()<.7?'ember':'groan');}
+   if(this.bellTimer<=0){this.bellTimer=11+Math.random()*11;if(moorWeight>.35)this.oneShot('bell');}
+  }
   if(me){
    if(this.hasPrev){
     const speed=Math.hypot(me.x-this.prevX,me.z-this.prevZ)/dt;

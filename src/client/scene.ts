@@ -1,7 +1,8 @@
 import {characterAsset} from '../shared/characters';
 import * as THREE from 'three';
 import {customCharacter} from './custom-character';
-import {equipmentModel} from './equipment';
+import {equipmentModel,weaponCombatProfile,blockSparkColor} from './equipment';
+import {undeadEliteTier} from './custom-character';
 import {weaponStats,WEAPONS,type WeaponId} from '../shared/weapons';
 import {addLandscape} from './landscape';
 import {CharacterAssets,loadAsset} from './assets';
@@ -92,16 +93,15 @@ function createSkyAndMoon(scene:THREE.Scene){ const c=document.createElement('ca
  // enough to be visible in the default third-person framing.
  for(let i=0;i<starCount;i++){const th=Math.random()*Math.PI*2,phi=0.28+Math.random()*1.0,r=252;starPos[s++]=r*Math.sin(phi)*Math.cos(th);starPos[s++]=r*Math.cos(phi)-15;starPos[s++]=r*Math.sin(phi)*Math.sin(th);}
  const starGeo=new THREE.BufferGeometry();starGeo.setAttribute('position',new THREE.BufferAttribute(starPos,3));
- sky.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xdfe8f7,size:1.6,transparent:true,opacity:.9,sizeAttenuation:false,fog:false})));
+ const stars=new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xdfe8f7,size:1.6,transparent:true,opacity:.9,sizeAttenuation:false,fog:false}));sky.add(stars);
  // Low moon (≈26 deg elevation) so the disc + halo are inside the default camera frame.
  const moonDir=new THREE.Vector3(-12,16,-42).normalize(),moonGroup=new THREE.Group();
  moonGroup.position.copy(moonDir.multiplyScalar(225));moonGroup.lookAt(0,0,0);
- const halo=new THREE.Mesh(new THREE.CircleGeometry(26,32),new THREE.MeshBasicMaterial({color:0x345672,transparent:true,opacity:.35,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}));
- moonGroup.add(halo);
- const outerHalo=new THREE.Mesh(new THREE.CircleGeometry(52,32),new THREE.MeshBasicMaterial({color:0x162c3e,transparent:true,opacity:.2,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}));
- moonGroup.add(outerHalo);
+ const hc=document.createElement('canvas');hc.width=hc.height=128;const hctx=hc.getContext('2d')!;const hgrad=hctx.createRadialGradient(64,64,0,64,64,64);hgrad.addColorStop(0,'rgba(190,215,240,0.30)');hgrad.addColorStop(.32,'rgba(130,165,205,0.10)');hgrad.addColorStop(1,'rgba(90,120,160,0)');hctx.fillStyle=hgrad;hctx.fillRect(0,0,128,128);const haloTex=new THREE.CanvasTexture(hc);haloTex.colorSpace=THREE.SRGBColorSpace;
+ const halo=new THREE.Sprite(new THREE.SpriteMaterial({map:haloTex,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,fog:false}));halo.scale.set(78,78,1);halo.position.z=-.02;moonGroup.add(halo);
  const disc=new THREE.Mesh(new THREE.CircleGeometry(8.5,32),new THREE.MeshBasicMaterial({color:0xf2f6ff,depthWrite:false,fog:false}));
  disc.position.z=.08;moonGroup.add(disc);sky.add(moonGroup);
+ sky.userData.parts={dome,halo,outerHalo:halo,stars,moonDisc:disc};
  scene.add(sky);
  return sky;
 }
@@ -143,6 +143,16 @@ export class WorldView{
  fx:CombatEffects;postfx:PostFX|null=null;
  ruinsUpdate:((game:Game|undefined,me:Actor|undefined,time:number)=>void)|null=null;
  fog!:THREE.FogExp2;moon!:THREE.DirectionalLight;hemi!:THREE.HemisphereLight;fill!:THREE.DirectionalLight;sky!:THREE.Group;
+  /** Smooth region weights (0..1) computed from player Z + nest distance; read by grading/particles. */
+  regionWeights:{march:number;moor:number;crown:number;corruption:number}={march:1,moor:0,crown:0,corruption:0};
+  ambient!:THREE.AmbientLight;
+  private exposureTarget=1.5;
+  private lastSkyTint=new THREE.Color(0xffffff);private lastMoonTint=new THREE.Color(0xffffff);
+  private lastAmbientTint=new THREE.Color(0xffffff);private lastSaturation=1;
+  /** Landmark coordinates per region for the QA landmark views (ruins-builder placements). */
+  private landmarkCoords:{green:{x:number;z:number};ashen:{x:number;z:number};crown:{x:number;z:number}}={
+   green:{x:56,z:-6},ashen:{x:-36,z:-228},crown:{x:-34,z:-472}
+  };
  torchSources:TorchSource[]=[];lightPool:THREE.PointLight[]=[];
  towerSlots:TowerSlot[]=[];legacyTowerTops:THREE.Object3D[]=[];modernTowers=false;newKeepsApplied=false;
  private nestTorch=-1;
@@ -156,7 +166,8 @@ export class WorldView{
   private readonly legacyTowerGroup=new THREE.Group();
   /** True only after the modern tower/keep loaders failed: legacy art is hidden until then. */
   private legacyFortressRevealed=false;
-  private readonly flameDummy=new THREE.Object3D();
+  private readonly flameDummy=new THREE.Object3D();private readonly camQuat=new THREE.Quaternion();
+  private corruptionDecals:THREE.InstancedMesh|null=null;private corruptionMat:THREE.MeshBasicMaterial|null=null;
   private flameCore!:THREE.InstancedMesh;private flameOuter!:THREE.InstancedMesh;private flameEmber!:THREE.InstancedMesh;
   private readonly damageLabels:{sprite:THREE.Sprite;ctx:CanvasRenderingContext2D;texture:THREE.CanvasTexture}[]=[];
   private damageLabelIndex=0;
@@ -178,7 +189,7 @@ export class WorldView{
  constructor(canvas:HTMLCanvasElement){
   this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});this.renderer.info.autoReset=false;this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFShadowMap;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.5;this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x1a2629);
   this.fog=new THREE.FogExp2(0x1c2a2e,0.015);this.scene.fog=this.fog;
-  this.hemi=new THREE.HemisphereLight(0xc2d6ee,0x2e3a44,4.4);this.scene.add(this.hemi);this.scene.add(new THREE.AmbientLight(0x243442,0.5));
+  this.hemi=new THREE.HemisphereLight(0xc2d6ee,0x2e3a44,4.4);this.scene.add(this.hemi);this.ambient=new THREE.AmbientLight(0x243442,0.5);this.scene.add(this.ambient);
   this.moon=new THREE.DirectionalLight(0xcadff5,2.4);this.moon.position.set(-40,64,-30);this.moon.castShadow=true;this.moon.shadow.mapSize.set(2048,2048);this.moon.shadow.camera.left=-34;this.moon.shadow.camera.right=34;this.moon.shadow.camera.top=34;this.moon.shadow.camera.bottom=-34;this.moon.shadow.camera.near=1;this.moon.shadow.camera.far=150;this.moon.shadow.bias=-0.001;this.moon.shadow.normalBias=0.06;this.moon.shadow.radius=1.5;this.scene.add(this.moon);this.scene.add(this.moon.target);this.moon.name="sun";this.sky=createSkyAndMoon(this.scene);
   // Dark night-sky IBL so the PBR armour/metal has something to reflect (single PMREM bake).
   try{const environment=createNightEnvironment(this.renderer);if(environment){this.scene.environment=environment;this.scene.environmentIntensity=1.0;}}
@@ -223,7 +234,14 @@ export class WorldView{
   this.scene.add(this.camera);box(this.weapon,0,0,0,.08,.95,.12,palette.iron);box(this.weapon,0,-.5,0,.45,.08,.15,palette.gold);box(this.weapon,0,-.67,0,.1,.3,.1,palette.wood);this.camera.add(this.weapon);box(this.shield,0,0,0,.55,.7,.1,0x576b73);box(this.shield,0,0,-.06,.06,.65,.03,palette.gold);this.camera.add(this.shield);this.weapon.visible=this.shield.visible=false;
   this.postfx=createPostFX(this.renderer,this.scene,this.camera);this.installPerfHooks();
   window.addEventListener('resize',()=>this.resize());this.resize();
-  void this.environmentAssets();void this.startEnvironment();void this.survivorAssets();void this.applySurfaces();
+  void this.survivorAssets();
+  // Time-to-HUD: nothing world-size starts before the join-critical core player set is resident.
+  // Fortress/terrain/surfaces/props/landmark streaming then runs in one ordered background queue.
+  void this.characterAssets.coreReady.then(()=>{
+   void this.startEnvironment();
+   void this.applySurfaces();
+   void this.environmentAssets();
+  });
  }
  /** Scanned road/cobblestone/dirt maps owned by terrain-surfaces.ts; never throws. */
  private async applySurfaces(){
@@ -244,7 +262,7 @@ export class WorldView{
   if(this.roadMesh){const mats=Array.isArray(this.roadMesh.material)?this.roadMesh.material:[this.roadMesh.material];for(const material of mats){const standard=material as THREE.MeshStandardMaterial;for(const map of [standard.map,standard.normalMap]){if(map){map.repeat.set(1,1);map.needsUpdate=true;}}}}
  }
  async survivorAssets(){
-  await this.characterAssets.customReady;const source=this.characterAssets.custom.get('survivor');if(!source)return;
+  await this.characterAssets.coreReady;const source=this.characterAssets.custom.get('survivor');if(!source)return;
   for(const camp of this.campMeshes.values())for(let i=0;i<2;i++){
    const actor={id:'survivor-'+i,kind:'soldier',hp:100,maxHp:100,attackSerial:0} as Actor;
    const rig=customCharacter(source,actor,new Map(),true);rig.model.userData.actorRig=false;rig.model.position.set(.7+i*1.15,0,i%2?1.1:0);rig.model.rotation.y=Math.PI+(i-1)*.45;boostActorMaterials(rig.model);camp.add(rig.model);this.campRigs.push({rig,actor,camp});rig.update(actor,false,i*.3);
@@ -465,14 +483,19 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    texture.needsUpdate=true;sprite.position.set(x,y,z);sprite.scale.set(scaleX,scaleY,1);sprite.visible=true;
    this.effects.push({mesh:sprite,life,pooled:true});
   }
+  /** Cycle-3 fire: three additive/normal sprite-card InstancedMeshes (soft tongue, hot core, puff). */
   private initFlameInstances(){
-   const coreGeo=new THREE.ConeGeometry(.22,.85,5);coreGeo.translate(0,.42,0);
-   const outerGeo=new THREE.ConeGeometry(.35,1.1,6);outerGeo.translate(0,.55,0);
-   const emberGeo=new THREE.ConeGeometry(.45,1.35,6);emberGeo.translate(0,.65,0);
-   this.flameCore=new THREE.InstancedMesh(coreGeo,new THREE.MeshBasicMaterial({color:0xfff0aa}),96);
-   this.flameOuter=new THREE.InstancedMesh(outerGeo,new THREE.MeshBasicMaterial({color:0xff7528,transparent:true,opacity:.85}),96);
-   this.flameEmber=new THREE.InstancedMesh(emberGeo,new THREE.MeshBasicMaterial({color:0xe63914,transparent:true,opacity:.5}),96);
-   for(const mesh of [this.flameCore,this.flameOuter,this.flameEmber]){mesh.count=0;mesh.frustumCulled=false;mesh.castShadow=false;this.scene.add(mesh);}
+   const card=new THREE.PlaneGeometry(1,1,1,1);card.translate(0,.5,0);
+   const base={transparent:true,depthWrite:false,side:THREE.DoubleSide};
+   this.flameCore=new THREE.InstancedMesh(card,new THREE.MeshBasicMaterial({...base,color:0xfff2c0,blending:THREE.AdditiveBlending,opacity:1}),96);
+   this.flameOuter=new THREE.InstancedMesh(card,new THREE.MeshBasicMaterial({...base,color:0xff8a3c,blending:THREE.AdditiveBlending,opacity:.8}),96);
+   this.flameEmber=new THREE.InstancedMesh(card,new THREE.MeshBasicMaterial({...base,color:0x8f9aa8,blending:THREE.AdditiveBlending,opacity:.22}),96);
+   for(const mesh of [this.flameCore,this.flameOuter,this.flameEmber]){mesh.count=0;mesh.frustumCulled=false;mesh.castShadow=false;mesh.renderOrder=3;this.scene.add(mesh);}
+   // Texture cards stream in without blocking construction (flat-colour fallback until they arrive).
+   const loader=new THREE.TextureLoader();const baseUrl=import.meta.env.BASE_URL;
+   loader.load(baseUrl+'assets/textures/flame_soft.png',(t:THREE.Texture)=>{t.colorSpace=THREE.SRGBColorSpace;const m=this.flameOuter.material as THREE.MeshBasicMaterial;m.map=t;m.needsUpdate=true;},undefined,()=>undefined);
+   loader.load(baseUrl+'assets/textures/flame_core.png',(t:THREE.Texture)=>{t.colorSpace=THREE.SRGBColorSpace;const m=this.flameCore.material as THREE.MeshBasicMaterial;m.map=t;m.needsUpdate=true;},undefined,()=>undefined);
+   loader.load(baseUrl+'assets/textures/smoke_puff.png',(t:THREE.Texture)=>{t.colorSpace=THREE.SRGBColorSpace;const m=this.flameEmber.material as THREE.MeshBasicMaterial;m.map=t;m.needsUpdate=true;},undefined,()=>undefined);
   }
   private initDamageLabels(){
    for(let i=0;i<10;i++){
@@ -483,7 +506,30 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    }
   }
 
-  /** Named read-only QA camera viewpoints (cycle-2 visual audit); null restores normal play. */
+  /** Which region a world Z falls into (used by QA region views/info). */
+  private regionAt(z:number):'march'|'moor'|'crown'{return z<-405?'crown':z<-165?'moor':'march';}
+  /** window.__ssEliteUndeadIds(): ids whose cycle-3 undead silhouette tier is > 0.
+   *  Mirrors weapons-armory's `undeadEliteTier` rule exactly (kind/maxHp/castle/NEST distance). */
+  eliteUndeadIds(){
+   const g=this.lastGame;if(!g)return [];
+   return g.actors.filter(a=>undeadEliteTier(a)>0).map(a=>a.id);
+  }
+  eliteUndeadInfo(){const g=this.lastGame;if(!g)return [];return g.actors.map(a=>({id:a.id,name:a.name??'',tier:undeadEliteTier(a)})).filter(x=>x.tier>0);}
+  /** window.__ssRegionInfo(): numeric regional-identity snapshot for QA (read-only). */
+  regionInfo(){
+   const w=this.regionWeights;
+   const qa=this.qaView;
+   const region=w.crown>=w.moor&&w.crown>=w.march?'crown':w.moor>=w.march?'moor':'march';
+   return {region,weights:{march:+w.march.toFixed(3),moor:+w.moor.toFixed(3),crown:+w.crown.toFixed(3),corruption:+w.corruption.toFixed(3)},
+    fog:{color:'#'+this.fog.color.getHexString(),density:+this.fog.density.toFixed(5)},
+    skyTint:'#'+this.lastSkyTint.getHexString(),ambientTint:'#'+this.lastAmbientTint.getHexString(),
+    moonTint:'#'+this.lastMoonTint.getHexString(),moonIntensity:+this.moon.intensity.toFixed(2),
+    hemiIntensity:+this.hemi.intensity.toFixed(2),exposure:+this.renderer.toneMappingExposure.toFixed(3),
+    saturation:+this.lastSaturation.toFixed(3),landmark:this.landmarkCoords[region==='march'?'green':region==='moor'?'ashen':'crown']??null,qa:!!qa,at:{x:+(qa?qa.x:0).toFixed(2),z:+(qa?qa.z:0).toFixed(2)}};
+  }
+  /** Landmark coordinates hook so other owners (ruins) don't need to edit scene.ts. */
+  setLandmarkCoords(region:'green'|'ashen'|'crown',x:number|null,z?:number){const defaults:{green:{x:number;z:number};ashen:{x:number;z:number};crown:{x:number;z:number}}={green:{x:56,z:-6},ashen:{x:-36,z:-228},crown:{x:-34,z:-472}};this.landmarkCoords[region]=x===null?defaults[region]:{x,z:z??0};return this.landmarkCoords[region];}
+  /** Named read-only QA camera viewpoints (cycle-2/3 visual audit); null restores normal play. */
   qaViewpoint(name:string|null, custom?:{x:number;z:number;yaw:number;pitch:number;height:number}){
    if(name===null){this.qaView=null;return {ok:true,name:null,pose:null};}
    const look=(x:number,y:number,z:number,tx:number,ty:number,tz:number)=>{const dx=tx-x,dz=tz-z,dy=ty-y;return {x,z,yaw:Math.atan2(dx,-dz),pitch:Math.atan2(dy,Math.max(.01,Math.hypot(dx,dz))),height:y};};
@@ -507,9 +553,25 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    }else if(name==='region-crown'){
     const c=CASTLES.find(x=>x.region==='crown')??CASTLES[6];pose=look(c.x+14,3.2,c.z+34,c.x,2,c.z);
    }
+   else if(name==='foliage'){
+    pose=look(-58.4,2.1,-40.2,-57.3,1.6,-46.7);
+   }else if(name==='corruption'){
+    pose=look(NEST.x,2.2,NEST.z+7,NEST.x,1.6,NEST.z);
+   }else if(name==='wind'){
+    pose=look(10,2.1,20,0,.7,5);
+   }else if(name==='landmark-green'){
+    // ruins-builder/QA verified clear pose for village_house_ruin (56,-6), h≈6.2 + 8-stone circle r9.8.
+    const c=this.landmarkCoords.green;pose=look(c.x+13.2,2.8,c.z-15,c.x,3.0,c.z);
+   }else if(name==='landmark-ashen'){
+    // Straight-on over the region road to chapel_ruin (-36,-228), h≈10.
+    const c=this.landmarkCoords.ashen;pose=look(c.x,3.2,c.z+38,c.x,5.0,c.z);
+   }else if(name==='landmark-crown'){
+    // Straight-on to watchtower_ruin (-34,-472) on its outcrop; top ≈11.8 m.
+    const c=this.landmarkCoords.crown;pose=look(c.x,3.2,c.z+40,c.x,7.3,c.z);
+   }
    if(!pose)return {ok:false,name:null,pose:null};
    this.qaView={name,x:pose.x,z:pose.z,yaw:pose.yaw,pitch:pose.pitch,height:pose.height};
-   return {ok:true,name,pose:{x:pose.x,z:pose.z,yaw:pose.yaw,pitch:pose.pitch,height:pose.height}};
+   return {ok:true,name,region:this.regionAt(pose.z),pose:{x:pose.x,z:pose.z,yaw:pose.yaw,pitch:pose.pitch,height:pose.height}};
   }
   /** Frame the nearest/selected actor close-up for subsequent renders (debug/QA only). */
   characterPreview(actorId?:string|null){
@@ -552,6 +614,10 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    // grass, flames, particles and small furniture are receive-only to stay inside the triangle budget.
    const ruinLayer = /(ruin|tent|wall)/i;
    this.scene.traverse(o=>{
+    if(o instanceof THREE.Mesh&&/^tents:/i.test(o.name)){
+     const mats=Array.isArray(o.material)?o.material:[o.material];
+     for(const m of mats){const std=m as THREE.MeshStandardMaterial;if(std.isMeshStandardMaterial&&!std.userData.ssTentTone){std.userData.ssTentTone=true;std.color.multiplyScalar(.78);std.roughness=Math.min(1,std.roughness+.15);std.envMapIntensity=Math.min(std.envMapIntensity??1,.35);}}
+    }
     if(o instanceof THREE.SkinnedMesh){
      let root:THREE.Object3D|null=o.parent,isActor=false;
      while(root){if(root.userData.actorRig===true){isActor=true;break;}root=root.parent;}
@@ -574,11 +640,15 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    return {calls:info.render.calls,triangles:info.render.triangles,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
    win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
    win.__ssQAPose=(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{return view.qaViewpoint(pose?'custom':null,pose??undefined);};
+   win.__ssRegionInfo=()=>view.regionInfo();
+   win.__ssEliteUndeadIds=()=>view.eliteUndeadIds();
+   win.__ssEliteUndeadInfo=()=>view.eliteUndeadInfo();
+   win.__ssSetLandmark=(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>view.setLandmarkCoords(region,x,z);
    win.__ssQuality=(tier?:string)=>{if(typeof tier==='string'&&tier)return {tier:view.quality,applied:view.setQuality(tier,true)};return {tier:view.quality};};
    let initial:QualityTier='high';try{const stored=localStorage.getItem('ss-quality');if(stored==='low'||stored==='medium'||stored==='high')initial=stored;}catch{}
    this.setQuality(initial);
@@ -610,23 +680,59 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
   }
   /** Region fog/light grading, moonlight follow + pooled torch flicker. */
   private atmosphere(me:Actor|undefined,time:number,dt:number){
-   const focusX=me?.x??this.camera.position.x,focusZ=me?.z??this.camera.position.z;
+   const qa=this.qaView;
+   const focusX=qa?qa.x:(me?.x??this.camera.position.x),focusZ=qa?qa.z:(me?.z??this.camera.position.z);
    if(this.landscapeUpdate)this.landscapeUpdate(time,this.qaView?this.qaView.x:focusX,this.qaView?this.qaView.z:focusZ);
    const march=smoothstep(-245,-165,focusZ),crown=1-smoothstep(-485,-405,focusZ),moor=Math.max(0,1-march-crown);
    const corruption=1-smoothstep(20,95,dist({x:focusX,z:focusZ},NEST));
+   this.regionWeights.march=march;this.regionWeights.moor=moor;this.regionWeights.crown=crown;this.regionWeights.corruption=corruption;
+   // Regional identity: Green March = deep green-teal clear night, Ashen Moor = grey-violet ash
+   // haze, Frozen Crown = cold blue-white clarity. All targets blend smoothly by the weights above.
    this.fogTarget.setHex(0x162126);
-   this.fogTarget.lerp(this.tmpColor.setHex(REGIONS[0].color),march*0.4);
-   this.fogTarget.lerp(this.tmpColor.setHex(REGIONS[1].color),moor*0.4);
-   this.fogTarget.lerp(this.tmpColor.setHex(REGIONS[2].color),crown*0.4);
-   this.fogTarget.lerp(this.tmpColor.setHex(0x3a1a2e),corruption*0.55);
-   const targetDensity=0.0150*march+0.0170*moor+0.0190*crown+corruption*0.002;
+   this.fogTarget.lerp(this.tmpColor.setHex(0x1e4038),march);
+   this.fogTarget.lerp(this.tmpColor.setHex(0x342d42),moor);
+   this.fogTarget.lerp(this.tmpColor.setHex(0x6f93b0),crown);
+   this.fogTarget.lerp(this.tmpColor.setHex(0x3a1a2e),corruption*0.45);
+   const targetDensity=0.0122*march+0.0208*moor+0.0172*crown+corruption*0.003;
    const colorBlend=1-Math.exp(-Math.max(0,dt)*1.6);
    this.fogCurrent.lerp(this.fogTarget,colorBlend);this.fog.color.copy(this.fogCurrent);
    this.fog.density+=(targetDensity-this.fog.density)*(1-Math.exp(-Math.max(0,dt)*1.1));
-   this.tmpColor2.setHex(0xcadff5).lerp(this.tmpColor3.setHex(0xd9d2c2),moor).lerp(this.tmpColor3.setHex(0xbcd6ff),crown);
+   // Moon tint + strength and hemisphere sky/ground tint per region.
+   this.tmpColor2.setHex(0xd2ecdf).lerp(this.tmpColor3.setHex(0xd9cde9),moor).lerp(this.tmpColor3.setHex(0xcfe6ff),crown);
    this.moon.color.lerp(this.tmpColor2,1-Math.exp(-Math.max(0,dt)*1.4));
-   this.moon.intensity=2.4-moor*0.15+crown*0.2;
-   this.hemi.intensity=4.4-moor*0.2+crown*0.15;
+   this.moon.intensity=2.7*march+2.1*moor+2.55*crown+0.0001;
+   this.tmpColor2.setHex(0xa9d6c6).lerp(this.tmpColor3.setHex(0xaaa2c8),moor).lerp(this.tmpColor3.setHex(0xc3dcf2),crown);
+   this.hemi.color.lerp(this.tmpColor2,1-Math.exp(-Math.max(0,dt)*1.2));
+   this.tmpColor2.setHex(0x2b3b34).lerp(this.tmpColor3.setHex(0x38323f),moor).lerp(this.tmpColor3.setHex(0x2c3a46),crown);
+   this.hemi.groundColor.lerp(this.tmpColor2,1-Math.exp(-Math.max(0,dt)*1.2));
+   this.hemi.intensity=4.7*march+4.0*moor+4.5*crown;
+   this.tmpColor2.setHex(0x2a4b40).lerp(this.tmpColor3.setHex(0x3a3446),moor).lerp(this.tmpColor3.setHex(0x334a5c),crown);
+   this.ambient.color.lerp(this.tmpColor2,1-Math.exp(-Math.max(0,dt)*1.2));
+   this.ambient.intensity=0.55*march+0.5*moor+0.6*crown;
+   // Exposure + saturation grade (one cheap postfx pass): crisp March, flatter/desaturated Moor,
+   // cooler high-contrast Crown.
+   this.exposureTarget=1.55*march+1.37*moor+1.62*crown;
+   this.renderer.toneMappingExposure+=(this.exposureTarget-this.renderer.toneMappingExposure)*(1-Math.exp(-Math.max(0,dt)*1.0));
+   const grade=1-Math.exp(-Math.max(0,dt)*1.2);
+   this.tmpColor2.setRGB(1.03,1.05,1.0);this.tmpColor3.setRGB(0.94,0.9,1.05);
+   const tintR=1.03*march+0.94*moor+0.97*crown, tintG=1.05*march+0.9*moor+1.0*crown, tintB=1.0*march+1.05*moor+1.08*crown;
+   this.tmpColor.setRGB(tintR,tintG,tintB);
+   this.lastSaturation=1.05*march+0.82*moor+1.12*crown;
+   this.lastSkyTint.copy(this.tmpColor2);
+   this.lastMoonTint.copy(this.moon.color);this.lastAmbientTint.copy(this.ambient.color);
+   this.tmpV2.set(this.tmpColor.r,this.tmpColor.g,this.tmpColor.b);
+   this.postfx?.setGrade(1.05*march+0.82*moor+1.12*crown, this.tmpV2);
+   // Sky tint: dome/stars/moon disc follow the region palette (kept close to white so stars stay).
+   const parts=this.sky.userData.parts as {dome?:THREE.Mesh;halo?:THREE.Mesh;outerHalo?:THREE.Mesh;stars?:THREE.Points;moonDisc?:THREE.Mesh}|undefined;
+   if(parts){
+    this.tmpColor2.setRGB(0.82,1.0,0.9).lerp(this.tmpColor3.setRGB(0.9,0.84,1.0),moor).lerp(this.tmpColor3.setRGB(0.82,0.92,1.08),crown);
+    if(parts.dome){const m=parts.dome.material as THREE.MeshBasicMaterial;m.color.lerp(this.tmpColor2,grade);}
+    if(parts.stars){const m=parts.stars.material as THREE.PointsMaterial;m.color.lerp(this.tmpColor2,grade);}
+    if(parts.halo){const m=parts.halo.material as THREE.MeshBasicMaterial;m.color.lerp(this.tmpColor2,grade);}
+    if(parts.outerHalo){const m=parts.outerHalo.material as THREE.MeshBasicMaterial;m.color.lerp(this.tmpColor2,grade);}
+    if(parts.moonDisc){const m=parts.moonDisc.material as THREE.MeshBasicMaterial;m.color.lerp(this.tmpColor2,grade);}
+    this.lastSkyTint.copy(this.tmpColor2);
+   }
    this.sky.position.set(this.camera.position.x,0,this.camera.position.z);
    // Soft viewer-side directional fill: same direction for the whole scene, so no local
    // ground hotspot, but actors/edges facing the camera catch the light at any distance.
@@ -654,6 +760,16 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     const angle=Math.random()*Math.PI*2,radius=4+Math.random()*10;
     this.tmpV.set(focusX+Math.cos(angle)*radius,0.6+Math.random()*2.6,focusZ+Math.sin(angle)*radius);
     this.fx.motes(this.tmpV);
+   }
+   // Frozen Crown snow + Ashen Moor ash drift (pooled, tier-scaled).
+   const crownRate=this.regionWeights.crown;
+   if(crownRate>0.02&&Math.random()<localDt*(2.2+crownRate*6)){
+    this.tmpV.set(focusX,2.5+Math.random()*2,focusZ);
+    this.fx.flake(this.tmpV,0.86,0.92,1.0,1.0+crownRate*0.5);
+   }
+   if(this.regionWeights.moor>0.05&&Math.random()<localDt*1.6){
+    this.tmpV.set(focusX,1.6+Math.random()*1.6,focusZ);
+    this.fx.flake(this.tmpV,0.62,0.58,0.56,0.8);
    }
    let budget=4;
    for(let i=0;i<this.torchSources.length&&budget>0;i++){
@@ -713,9 +829,23 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    for(const {rig,actor,camp} of this.campRigs)if(camp.visible)rig.update(actor,false,dt);
    this.atmosphere(me,time,dt);
    const focusX=me?.x??this.camera.position.x,focusZ=me?.z??this.camera.position.z;
+   // Billboarded additive flame cards (soft tongue + hot core) + a soft smoke puff card above;
+   // per-fire variation, same three draw calls as the old flat cones.
    let flameCount=0;
-   for(let fi=0;fi<this.flames.length;fi++){const f=this.flames[fi];const fdx=f.x-focusX,fdz=f.z-focusZ;if(fdx*fdx+fdz*fdz>=3600)continue;const wobble=Math.sin(time*11+f.seed)*.14+Math.sin(time*27+f.seed*2)*.07;this.flameDummy.position.set(f.x,f.isCamp?.3:1.2,f.z);this.flameDummy.rotation.set(0,time*2.2+f.seed,0);this.flameDummy.scale.set(1+wobble*.5,1+wobble,1+wobble*.5);this.flameDummy.updateMatrix();this.flameCore.setMatrixAt(flameCount,this.flameDummy.matrix);this.flameOuter.setMatrixAt(flameCount,this.flameDummy.matrix);this.flameEmber.setMatrixAt(flameCount,this.flameDummy.matrix);flameCount++;}
+   this.camera.getWorldQuaternion(this.camQuat);
+   for(let fi=0;fi<this.flames.length;fi++){
+    const f=this.flames[fi];const fdx=f.x-focusX,fdz=f.z-focusZ;if(fdx*fdx+fdz*fdz>=3600)continue;
+    const wobble=Math.sin(time*11+f.seed)*.14+Math.sin(time*27+f.seed*2)*.07;
+    const variation=.85+Math.sin(f.seed*3.1)*.18;
+    const by=f.isCamp?.25:1.15;
+    this.flameDummy.quaternion.copy(this.camQuat);
+    this.flameDummy.position.set(f.x,by,f.z);this.flameDummy.scale.set((.85+wobble*.6)*variation,1.35*((.85+wobble*.4)*variation),1);this.flameDummy.updateMatrix();this.flameOuter.setMatrixAt(flameCount,this.flameDummy.matrix);
+    this.flameDummy.position.set(f.x,by+.18+Math.sin(time*9+f.seed)*.05,f.z);this.flameDummy.scale.set(.36,.72,1);this.flameDummy.updateMatrix();this.flameCore.setMatrixAt(flameCount,this.flameDummy.matrix);
+    this.flameDummy.position.set(f.x,by+.95+Math.sin(time*2.2+f.seed)*.12,f.z);this.flameDummy.scale.set(1.15,1.6,1);this.flameDummy.updateMatrix();this.flameEmber.setMatrixAt(flameCount,this.flameDummy.matrix);
+    flameCount++;
+   }
    this.flameCore.count=flameCount;this.flameOuter.count=flameCount;this.flameEmber.count=flameCount;if(flameCount){this.flameCore.instanceMatrix.needsUpdate=true;this.flameOuter.instanceMatrix.needsUpdate=true;this.flameEmber.instanceMatrix.needsUpdate=true;}
+   if(this.corruptionMat)this.corruptionMat.opacity=.42+Math.sin(time*.8)*.07;
    for(const f of this.flagMeshes){const pos=f.mesh.geometry.attributes.position;for(let i=0;i<pos.count;i++){const px=pos.getX(i);pos.setZ(i,Math.sin(time*5.5+px*3+f.seed)*(px/1.8)*.22);}pos.needsUpdate=true;}
    this.updateEffects(dt,time,me);
    this.ruinsUpdate?.(g,me,time);
@@ -750,7 +880,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
       const isBoss=a.name?.includes('Champion')||a.name?.includes('Fallen')||a.id==='boss-plague'||a.maxHp>=200;
       this.tmpV.set(a.x,1.1,a.z);
       this.fx.blood(this.tmpV,evil,isBoss?2:1.15);
-      this.fx.sparks(this.tmpV,evil?'undead':'metal');this.fx.splatter(this.tmpV2.set(a.x,0,a.z),evil,1.8);
+      const hitProfile=me?.weapon?weaponCombatProfile(me.weapon):undefined;const sparkTint=a.block?blockSparkColor():(hitProfile?hitProfile.impact:undefined);this.fx.sparks(this.tmpV,evil?'undead':'metal',sparkTint);this.fx.splatter(this.tmpV2.set(a.x,0,a.z),evil,1.8);
       this.fx.dust(this.tmpV2.set(a.x,.08,a.z),isBoss?1:0.55);
       if(isBoss){
        const ring=new THREE.Mesh(new THREE.RingGeometry(.8,1.6,32),new THREE.MeshBasicMaterial({color:0xdf2055,side:THREE.DoubleSide}));
@@ -786,7 +916,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    if(me){const model=this.actors.get(me.id);const pos=model?.position??this.tmpV2.set(me.x,0,me.z);const target=this.camTarget.set(pos.x,1.55,pos.z);const forward=this.camForward.set(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch));
     if(first){this.camera.position.copy(target);this.camera.rotation.set(pitch,-yaw,0,'YXZ');}
     else{const desired=this.camDesired.copy(target).addScaledVector(forward,-6);desired.y+=2;const delta=this.camDelta.copy(desired).sub(target);this.camRay.set(target,delta.clone().normalize());this.camRay.far=delta.length();const hits=this.camRay.intersectObjects(this.solid,false);if(hits.length)desired.copy(target).addScaledVector(delta.normalize(),Math.max(.45,hits[0].distance-.3));this.camera.position.copy(desired);this.camera.lookAt(this.tmpV.copy(target).addScaledVector(forward,4));}
-    const selected=me.weapon??'sword',stats=weaponStats(selected),source=this.characterAssets.custom.get(selected);if(source&&this.activeWeapon!==selected){this.weapon.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])if(this.activeWeapon)m.dispose();});this.weapon.clear();this.weapon.add(equipmentModel(source.scene,stats.length*.78,false,selected));this.weapon.traverse(o=>{o.castShadow=false;});this.activeWeapon=selected;if(this.trailSerial!==(me.attackSerial??0)){if(this.trailSerial>=0&&!first&&me.hp>0){const trailStyle=swingStyle(selected),trailColor=TRAIL_COLORS[trailStyle];this.tmpV2.set(me.x,0,me.z);this.fx.trail(this.tmpV2,me.yaw??yaw,stats.reach,trailColor[0],trailColor[1],trailColor[2]);}this.trailSerial=me.attackSerial??0;}}
+    const selected=me.weapon??'sword',stats=weaponStats(selected),source=this.characterAssets.custom.get(selected);if(source&&this.activeWeapon!==selected){this.weapon.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])if(this.activeWeapon)m.dispose();});this.weapon.clear();this.weapon.add(equipmentModel(source.scene,stats.length*.78,false,selected));this.weapon.traverse(o=>{o.castShadow=false;});this.activeWeapon=selected;if(this.trailSerial!==(me.attackSerial??0)){if(this.trailSerial>=0&&!first&&me.hp>0){const trailColor=weaponCombatProfile(selected).trail;this.tmpV2.set(me.x,0,me.z);this.fx.trail(this.tmpV2,me.yaw??yaw,stats.reach,trailColor[0],trailColor[1],trailColor[2]);}this.trailSerial=me.attackSerial??0;}}
     this.weapon.visible=first&&me.hp>0;this.shield.visible=first&&me.hp>0&&stats.shield;this.weapon.position.set(.32,-.4,-.78);this.weapon.rotation.set(me.block&&!stats.shield?-.5:.1,0,me.block&&!stats.shield?-1.1:-.2);if(this.fpSerial!==(me.attackSerial??0)){if(this.fpSerial>=0){this.fpDuration=stats.cooldown*.85;this.fpAttack=this.fpDuration;}this.fpSerial=me.attackSerial??0;}this.fpAttack=Math.max(0,this.fpAttack-dt);if(this.fpAttack>0){const t=1-this.fpAttack/this.fpDuration,arc=Math.sin(Math.PI*t),strike=Math.sin(Math.PI*Math.min(1,t*1.6)),style=swingStyle(selected);if(style==='thrust'){this.weapon.position.z-=strike*.6;this.weapon.position.y+=strike*.05;this.weapon.rotation.x-=strike*.18;this.weapon.rotation.z-=arc*.05;this.weapon.position.x+=arc*.05;}else if(style==='cleave'){this.weapon.rotation.z-=arc*1.9;this.weapon.rotation.x-=strike*.65;this.weapon.rotation.y+=arc*.35;this.weapon.position.x-=arc*.45;this.weapon.position.z-=strike*.18;}else if(style==='crush'){this.weapon.rotation.x-=strike*1.7;this.weapon.rotation.z+=arc*.35;this.weapon.position.y+=arc*.22-strike*.18;this.weapon.position.z-=strike*.24;this.weapon.position.x-=arc*.12;}else{this.weapon.rotation.z-=arc*2;this.weapon.rotation.y-=arc*.5;this.weapon.position.x-=arc*.5;this.weapon.position.z-=arc*.22;this.weapon.position.y+=strike*.08;}}this.shield.position.lerp(this.shieldTarget.set(me.block?-.12:-.38,me.block?-.12:-.38,-.82),1-Math.exp(-dt*16));
    }
    if(this.previewActorId){

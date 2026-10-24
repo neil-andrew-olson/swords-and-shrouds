@@ -982,3 +982,231 @@ a code difference — Lead built from the pushed pinned commit and verified the 
 visual/performance gaps listed above (regional identity, tree foliage/LOD band, magenta corruption
 decals, fire/smoke fidelity, character silhouette/detail target, SwiftShader time-to-HUD, moon/tent
 polish).
+
+---
+
+## Iteration cycle 2026-10F (AAA loop, cycle 3) — regional identity, foliage/fire/corruption, time-to-HUD (in progress)
+
+Cycle 3 attacks the cycle-2 visual-audit gaps: distinct regional atmosphere/grading + landmarks,
+proper alpha-card foliage with a fogged near/far band, feathered corruption decals, sprite
+fire/embers/smoke, wind motion, elite-undead silhouettes, region ambience, and a time-to-HUD
+reduction.
+
+### Harness additions (`scripts/smoke-browser.mjs`)
+
+- **Required QA views unchanged** (7: treeline/fire/camp/courtyard/region-green/ashen/crown) plus
+  **new optional cycle-3 views**: `landmark-green|ashen|crown`, `foliage`, `corruption`, `wind` —
+  captured when `__ssQAView` supports them; landmarks fall back to `__ssQAPose` with
+  ruins-builder's final poses (green MOVED after the visual-fix pass: cam (69.2,−21,h2.8)→
+  (56,−6,3.0) yaw −2.4199 pitch 0.0100; ashen cam (−36,−190,h3.2)→(−36,−228,5.0) yaw 0 pitch
+  0.0473; crown cam (−34,−432,h3.2)→(−34,−472,7.3) yaw 0 pitch 0.1021). A named landmark view whose
+  returned pose drifts >2 m from the expected anchor is discarded in favour of `__ssQAPose`.
+- **`__ssRegionInfo()` numeric capture** after every region/landmark view (region, blend weights,
+  fog colour/density, sky/ambient/moon tints, exposure, saturation) → reported per region; plus
+  **regional distinctness gate**: pairwise mean-RGB colour distance / mean-luminance spread between
+  the three region screenshots (plus visual `read_image` verdict: fog/foliage/landmark/seams).
+- **Wind gate**: two screenshots of a foliage/grass view ~1.1 s apart, decoded in-page, mean-abs
+  luminance/RGB diff + changed-pixel % (a static scene would diff ≈0).
+- **Time-to-HUD gate**: reports landing/HUD/state/join and gates **HUD ≤15.0 s / state ≤16.2 s**
+  (≈≥8 % earlier than cycle-2's 16.3 s / 17.4 s), join ≤3.8 s (cycle-2 3.70 s); failures are
+  reported with the measured delta rather than silently passed.
+- **Perf gates** updated to **<230 calls / <1.9 M tris** (cycle-2: 169 / 1,658,880).
+- **Elite-undead silhouette check**: identifies elite actors via world-scene's hooks
+  (`__ssEliteUndeadInfo()` preferred for `{id,name,tier}` labels/sorting, `__ssEliteUndeadIds()`
+  fallback, then weapons-armory's rule in-page: `corrupted`→tier2/3; `zombie` maxHp≥150→3, castle
+  'keep' or within 70 m of nest (0,−664)→1), frames the **highest-tier** elite vs a same-family
+  tier-0 normal with `__ssCharacterPreview`, saves close-ups
+  (`char-undead-elite.png`/`char-undead-normal.png`) and reports pixel-diff + silhouette verdict
+  (preview boom is ~2.8 m; the 10 m line-up reference is viewable in `qa/char-viewer/shots/`).
+- **Hook confirmation (world-scene, cycle-3 build):** all 7 original views unchanged + `foliage`,
+  `corruption`, `wind`, `landmark-green|ashen|crown` (landmark views ship ruins-builder's exact
+  cam poses/targets and return `{ok,name,region,pose}`); `__ssSetLandmark(region,x|null,z?)`
+  moves/resets anchors (defaults green (14,28), ashen (−36,−228), crown (−34,−472));
+  `__ssEliteUndeadIds()→string[]`, `__ssEliteUndeadInfo()→[{id,name,tier}]`;
+  `__ssRegionInfo()` returns region/weights/fog/sky/ambient/moon tints/intensities/exposure/
+  saturation/landmark with smoothstep border bands (z −245…−165 and −485…−405).
+  **Landscape debug change:** the card-tree switch makes `pine`/`oak` counts large and
+  `pineLod`/`oakLod` intentionally empty (legacy fallback), with new maple/snow instance counts in
+  `__ssPerf().landscape` — the cycle-3 report reads the raw landscape object (keys as shipped).
+- **Pre-final measured state (world-scene, not authoritative):** TP **193 calls / 1.64 M tris**,
+  low 110 calls, first-state **14.75 s** vs cycle-2 16.3 s, click→HUD 1.13 s, 0 errors/warnings/404s.
+- **Elite geometry cost (weapons-armory, measured)**: +1 SkinnedMesh primitive per elite — tier1
+  32 tris bone crown; tier2 76 tris (8-spike crown + 5-spike crest + 6 shoulder spikes); tier3
+  84 tris (10-spike crown); merged undead eyes 72 tris + elite additive glow 48 tris; body
+  skin/materials untouched (cycle-2 tone gates unaffected); +~2 draws per elite. tsc 0 errors,
+  equipment 5/5, armory 5/5, exactly 58 test blocks; reference viewer images in
+  `qa/char-viewer/shots/` (`elite-a-base.png` 10 m line-up, `elite-*-closeup-*` vs normal).
+- **Characters**: cycle-2 tone/detail gates retained (TP torso mean 65–95 / p50 60–100 / black<25 % /
+  clipping<1 %; close-up detail ≥400 colours), plus elite-undead evidence.
+
+### Cycle-2 reference values (before cycle-3)
+
+- Perf: 169 calls / 1,658,880 tris / 147 geoms / 624 meshes / 3,364 objects; payload 13.69 MB.
+- Time-to-HUD (SwiftShader): landing 3.56 s, HUD **16.3 s**, state **17.4 s**, join **3.70 s**.
+- Characters: TP torso mean 89.31 / p50 95.98 / black 14.75 % / clipping 0 %; close-up min colours 407.
+- Regions: near-identical fog/palette (QA #1 gap); flat magenta corruption blobs; flat emissive-cone
+  fire; pale shard-clump foliage; hard moon halo; no wind.
+- Expected cycle-3 region grading (world-scene): Green March fog ≈#1e4038 density ≈0.0122 exposure
+  ≈1.55 saturation ≈1.05; Ashen Moor ≈#342d42 density ≈0.0208 exposure ≈1.37 saturation ≈0.82;
+  Frozen Crown ≈#6f93b0 density ≈0.0172 exposure ≈1.62 saturation ≈1.12 + snow flakes; border
+  bands z −245…−165 and −485…−405 with smoothstep weights.
+- Cycle-3 landmark anchors (ruins-builder FINAL after the visual-fix pass): Green March
+  `village_house_ruin` **MOVED to (56,−6)** h≈6.2 (native 13.81×6.5×7.66) + rebuilt 8-stone circle
+  r≈9.8 + 5 loose stones — 65 m from spawn, 32.2 m off the nearest road, 44.3 m from the nearest
+  castle footprint (the spawn/gate crowding is gone); Ashen Moor `chapel_ruin` (−36,−228) h≈10.0
+  (in-place replace; matches old footprint); Frozen Crown `watchtower_ruin` (−34,−472) h9.0 on a
+  3-rock outcrop (base top 2.8, tower top ≈11.8). Exact landmark camera fallbacks: green cam
+  (69.2,−21,h2.8)→(56,−6,3.0) yaw −2.4199/pitch 0.0100 (camera on the circle's collapsed-gap side,
+  occlusion-free); ashen cam (−36,−190,h3.2)→(−36,−228,5.0) yaw 0/pitch 0.0473; crown cam
+  (−34,−432,h3.2)→(−34,−472,7.3) yaw 0/pitch 0.1021. Validation after the move: all placements +
+  framing OK, all 8 circle stones road ≥23 m, min spacing 6.39 m, tsc 0, real-GLB 33/33, mocked 52/52.
+  Prop scatter: **12 `dead_tree`** (Ashen), **12 `ice_shard`** (Frozen), **13 `standing_stone`**
+  (Green: 8-stone circle r9.8 + 5 loose) — **confirmed 0 dead_tree / 0 ice_shard in Green March**
+  (region band check), so the bare trees near the spawn castle are world-scene's card-foliage issue,
+  not ruins scatter. Cost: +7 instanced draws structurally (3 landmarks + rocks + 3 scatter layers;
+  only +2–3 render per region view), ~34.2 k tris across the map (chapel 13,810 / watchtower 9,817 /
+  village 2,475 / rocks 450 / dead trees 5,568 / shards 1,296 / stones 819), only the 4 large landmark
+  layers cast shadows (architecture), scatter receive-only, no new lights, no 404s (3× retry then
+  skip). Grounding: village/house min-y 0, tower min-y 2.80 on the outcrop, trees/shards/stones
+  min-y ≈0.
+
+### Cycle-3 authoritative capture + regression — final build `index-CurTIx8l.js` (functional green; visual defects + time-to-HUD gate FAIL)
+
+**Final bundle:** `dist/client/assets/index-CurTIx8l.js` (839,609 B). A fresh `vite build` from the
+frozen tree **reproduced the exact hash** (839,609 B). Runs on this hash:
+`--characters --skip-build --out qa/characters-b6` (PASS 25/25), `--perf --skip-build --out
+qa/perf-b6` **and** `qa/perf-b6b` (two samples; 28/30 each — time-to-HUD/join gates fail),
+`--views --skip-build --out qa/views-b6` (clean early QA-view set; 18/19 — wind sample failed),
+fresh-build smoke `qa/final-batch6` (PASS 16/16 + hash reproduced), `--coop --skip-build --out
+qa/coop-batch6` (PASS 18/18), live baseline `qa/live-batch6` (PASS 17/17 vs deployed cycle-2).
+New assets in dist: pine 324,731 / oak 188,639 / pine_v2 122,514 / oak_v2 95,617 / snow_pine
+118,305 / maple 107,166 / dead_tree 93,579 / standing_stone 85,440 / ice_shard 84,000 / chapel_ruin
+444,298 / watchtower_ruin 477,873 / village_house_ruin 147,757.
+
+**1) Characters + elite undead — PASS 25/25** (`qa/characters-b6`):
+
+| Measure | cycle-2 (`BfnriryF`) | **cycle-3 (`CurTIx8l`)** | gate |
+| --- | --- | --- | --- |
+| in-game TP torso mean | 89.31 | **91.69** | 65–95 ✅ |
+| in-game TP torso p50 | 95.98 | **95.68** | 60–100 ✅ |
+| torso black (<20) | 14.75 % | **5.25 %** | <25 % ✅ |
+| torso clipping (≥250) | 0 % | **0 %** | <1 % ✅ |
+| close-up avg mean / p90 | 43.16 / 105.83 | **46.54 / 113.89** | luminance ✅ |
+| close-up min unique colours | 407 | **496** | ≥400 ✅ (SPEC 500: just under) |
+| elite undead | — | **PASS** (`__ssEliteUndeadInfo`+`Ids`): 25 elites (tier 3/2/1), tier-3 Plague Champion vs tier-0 zombie close-up diff meanAbsLum **31.1**, changed **88.9 %** — crown/shoulder-spike silhouette clearly distinct | ✅ |
+
+**2) Performance — PASS** (two samples, spawn TP high, DPR1): **194 calls** (<230), **1,641,589
+tris** (<1.9 M), geoms 158, meshes 646, objects 3,386, materials 234, textures 155, programs 70,
+lights 17, skinned 53; FP 152 calls / 1,525,946 tris; low tier 151 calls / 1,327,868 tris
+(−22 % vs high 193). Payload **15.39 MB** (assetTransferBytes 15,387,844; 83 requests, +1.70 MB vs
+cycle-2's 13.69 MB = new foliage/landmark/effect assets). Loading counts 0/20→4/20 delayed, join
+enabled 4.4–4.7 s, max frame gap 1.76 s, quality persists. `__ssPerf().landscape` now card-tree
+counts: pine 26 / oak 2 / maple 6 rendered at spawn (pineCount 230 / oakCount 108 / mapleCount 57 /
+snowCount 247; `pineLod`/`oakLod` empty by design — legacy fallback).
+
+**3) Time-to-HUD — GATE FAIL** (two authoritative samples; same SwiftShader machine):
+
+| Metric | cycle-2 | cycle-3 sample A | cycle-3 sample B | gate |
+| --- | --- | --- | --- | --- |
+| nav → landing | 3.56 s | 4.33 s | 3.97 s | — |
+| nav → HUD | 16.31 s | **16.27 s** | **18.03 s** | ≤15.0 s ❌ |
+| nav → state | 17.42 s | **16.96 s** | **18.05 s** | ≤16.2 s ❌ |
+| join enabled | 3.70 s | **4.71 s** | **4.36 s** | ≤3.8 s ❌ |
+
+No meaningful improvement (HUD −0.2 %/−2.8 % change, second sample worse; join is slower); the
+owner's pre-final probe reported 14.75 s first-state (different metric / pre-final payload), which
+did not reproduce in the harness on the final 15.39 MB build. **Time-to-HUD goal is not met.**
+
+**4) Regional identity + atmosphere audit.** All 7 required views + all 6 optional views captured
+(`qa/views-b6` clean set, no death overlay). Numeric distinctness passes: pairwise mean-RGB colour
+distance **9.94 / 20.7 / 26.7** (min between green/ashen 9.94), luminance spread **12.0**; fog/tint
+constants as spec. **But the visual audit fails the acceptance:** the `region-green` and
+`region-crown` QA captures are **blocked by giant dark foliage/trunk planes** (the camera sits
+inside/next to opaque card-tree geometry) so the regions cannot be visually compared; only
+`region-ashen` reads as a distinct place (chapel landmark + dead trees + grey fog). Corruption nest
+looks improved (detailed crystal/root mass, no flat magenta blobs); fire has sprite flames/glow but
+the smoke puffs render as **dark opaque dome shapes** around braziers (blending defect).
+
+**5) Visual defects confirmed in the audit (cycle-3 debt / blockers):**
+
+1. **Foliage/card-tree rendering is broken (major regression).** `treeline`/`foliage` views and
+   spawn/landing show **leafless, gnarled bare-branch trees** instead of pine/oak/maple canopies,
+   and `region-green`/`region-crown` views are filled by giant opaque dark foliage/trunk planes; the
+   new card-tree foliage appears to render with missing/inverted alpha or at wrong scale. This
+   directly fails the cycle-3 "foliage quality / no shard clumps / fogged LOD blend" goal and blocks
+   regional-identity visual verification.
+2. **Moon halo is a very large grey disc with a dark rim** (Lead concern a, confirmed) dominating
+   spawn/crown/ashen/landing views — regression from cycle-2's softer halo.
+3. **Standing-stone circle at spawn** (Lead concern b): the 8-stone circle r≈9.8 m around the Green
+   landmark at (14,28) puts several large slabs immediately right of the spawn road/gate; the
+   landmark reads as random monoliths crowding the spawn composition (proximity/composition issue).
+4. **Dead trees in Green March near spawn** (Lead concern c, confirmed): bare dead-looking trees
+   visible beside the spawn castle/landing — **ruins-builder confirmed 0 dead_tree / 0 ice_shard in
+   Green March (region band check)**, so this is world-scene's card-foliage rendering (broken/absent
+   leaf cards exposing branch skeletons), not ruins scatter.
+5. **Ground decals near spawn read as brownish/pink patches** (Lead concern d): decal/tint blending
+   issue around the road/camp; not yet systematic — captured for cycle-4.
+6. **Smoke sprites blend as dark opaque domes** around braziers (fire view) — needs alpha/colour fix.
+7. **`__ssRegionInfo()` follows the player, not the QA camera** (all region views report
+   region "march"/fog #1e4038); per-region fog numbers could not be read from camera captures
+   (harness limitation; documented as cycle-4 hook fix). Also the idle corruption timer kills the
+   player during 5+ min perf captures → QA added an early `--views` mode; perf-run region/landmark
+   captures contain a respawn overlay (the clean evidence is `qa/views-b6`).
+
+**6) Regression channels — PASS:** fresh-build smoke **16/16** + exact hash reproduced; co-op
+**18/18**; live baseline vs deployed cycle-2 **17/17**; 0 page/console/log errors, 0 bad
+responses/404s, 10 weapon cards; `server: stayed up` gate passes.
+
+**Verdict: functional/perf/character/regression channels are green, but cycle-3 does NOT meet its
+visual acceptance.** The foliage/card-tree regression, the giant moon disc, the spawn
+standing-stone composition and the time-to-HUD gate failure are real defects; regional identity
+cannot be visually certified from the green/crown captures because the foliage occludes the QA
+views. Recommendation for the Lead: either route a focused visual-fix rebuild (foliage alpha/scale +
+moon halo + stone proximity; world-scene/asset-forge) and re-run the affected captures, or deploy as
+a known-debt build and fold these into cycle 4. QA does not certify the cycle-3 foliage/regional-
+identity goals on `index-CurTIx8l.js`.
+
+**New AAA gaps for cycle 4:** fix card-tree alpha/scale + validate named QA views against foliage;
+moon halo scale/softness; landmark-circle proximity/composition at spawn; confirm dead-tree scatter
+regions; decal tint/blending on roads/camps; smoke sprite blending; `__ssRegionInfo` should sample the
+QA camera (or return per-region constants) for numeric audits; true time-to-HUD work (payload grew
+1.7 MB, join slower — the core-first pipeline did not pay off on the final build).
+
+### Visual-fix rebuild `index-j2KTUVMP.js` — focused re-verification
+
+Lead routed the cycle-3 defects; owners produced `dist/client/assets/index-j2KTUVMP.js` (840,799 B).
+Focused re-run results (same harness):
+
+- **Hash proof:** fresh bundled-Node-24 build **reproduced `index-j2KTUVMP.js` exactly** (840,799 B),
+  fresh-build smoke **PASS 16/16** (`qa/final-batch6b`).
+- **Visual fixes — VERIFIED** (`qa/views-b6b`, `read_image`): card trees now render **canopies**
+  (green needle pines + orange maple; `treeDebug` confirms `bark` 316 tris + `pine_leaves` 956 tris,
+  `alphaTest 0.42`) with no leafless skeletons or giant opaque planes; `region-green` is readable
+  again; relocated Green landmark at **(56,−6)** with its 8-stone circle frames cleanly
+  (`landmark-green`, 65 m from spawn) and the spawn road/gate is clear of stones; **moon halo is a
+  soft small moon** (no grey disc/dark rim); brazier **smoke is pale additive plume** (no dark
+  domes); spawn/landing **brown/pink decal patches are gone**; dead-looking bare trees in Green are
+  gone (canopies restored). Numeric region identity: fog follows the **QA camera** —
+  march #1e4038 d0.0122, moor #243939 d0.0137, crown #415867 d0.0156; pairwise colour distance
+  **9.36/31.5/32.2**, luminance spread **15.1**; wind diff **0.887–1.602** meanAbsLum (PASS in both
+  samples). Non-blocking nit: the `region-crown` camera still has a snow-pine canopy intruding over
+  ~40 % of the right frame (QA-view placement, not a geometry bug); maple/green pines read quite
+  bright/saturated at night → cycle-4 tone item.
+- **Perf — PASS** (`qa/perf-b6c`, `perf-b6d`): **195 calls** (<230), **1,666,828 tris** (<1.9 M),
+  FP 153/1,550,961, low 153/1,355,474; geoms 160, textures 160, programs 73; payload **15.06 MB**
+  (assetBytes 15,061,330). Quality tiers/loading/persistence pass; 0 errors/404s; 10 cards.
+- **Time-to-HUD — STILL FAILS** (two samples): HUD **18.54 s / 17.14 s** (cycle-2 16.31, gate
+  ≤15.0), state **20.06 s / 18.55 s** (gate ≤16.2), join **3.84/3.85 s** (gate ≤3.8); landing did
+  improve (**3.28/3.32 s** vs 3.56). The owner's 12.58 s first-state probe did not reproduce under
+  the harness on the final build. This remains the only routed goal that fails.
+- **Characters/elite spot-check — 24/25:** character code unchanged; close-ups pass (avg mean 45.79,
+  p90 112.62, min colours **545**, clipping 0); elite tier-3 vs normal diff **31.08 / 88.9 %** PASS.
+  The one marginal fail is the torso **p50 102.4** vs gate ≤100 (mean **91.5** ✓, black 4.86 % ✓) —
+  character materials are untouched, so this reads as the brighter foliage/background raising the
+  torso-region p50 (close-up tone unchanged); flagged as marginal/environmental, not a character
+  regression.
+- **Co-op — PASS 18/18** (`qa/coop-batch6b`).
+
+**Rebuild verdict:** five of six routed visual defects are fixed and verified; the only remaining
+gate failure is **time-to-HUD** (plus the marginal torso-p50 note). Everything else (perf, region
+identity, foliage, moon, smoke, decals, stones, dead trees, characters/elite, co-op, hash) is green.

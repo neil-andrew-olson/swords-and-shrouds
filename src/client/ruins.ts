@@ -287,6 +287,137 @@ export const ENVIRONMENT_DRESSING = {
   keepGraves: KEEP_GRAVES.length
 } as const;
 
+// ---------------------------------------------------------------------------------------------
+// Cycle-3 regional identity: one landmark per region plus region-specific prop dressing. All of it
+// goes through the same quantization-safe instanced path; every scatter prop is distance-culled
+// through instance-buffer compaction. Coordinates validated against shared/world, scene.ts's
+// deterministic cart/grave/rock scatter and every batch 10A-E placement.
+// ---------------------------------------------------------------------------------------------
+
+export type LandmarkKey = 'green' | 'ashen' | 'crown';
+export type LandmarkAsset = 'village_house_ruin' | 'chapel_ruin' | 'watchtower_ruin';
+
+export interface LandmarkPlacement {
+  key: LandmarkKey;
+  asset: LandmarkAsset;
+  x: number;
+  z: number;
+  yaw: number;
+  /** Target structure height in metres. */
+  height: number;
+  /** Base height above ground (the Frozen Crown watchtower stands on a rocky outcrop). */
+  baseY: number;
+}
+
+/**
+ * One distinguishable landmark per region, placed near the region road so it is readable while
+ * travelling. The Ashen chapel is the Phase-B gothic ruin at 10 m (larger than the batch-10B chapel
+ * set pieces); the Frozen Crown watchtower stands on the rocky outcrop below (top ~11.8 m); Green
+ * March gets the village-house ruin + standing-stone circle, sited east of the keep so it does not
+ * crowd the spawn road/gate view (>=25 m from spawn, >=8 m off every road centreline).
+ */
+export const REGION_LANDMARKS: readonly LandmarkPlacement[] = [
+  {key: 'green', asset: 'village_house_ruin', x: 56, z: -6, yaw: -1.94, height: 6.2, baseY: 0},
+  {key: 'ashen', asset: 'chapel_ruin', x: -36, z: -228, yaw: 1.35, height: 10.0, baseY: 0},
+  {key: 'crown', asset: 'watchtower_ruin', x: -34, z: -472, yaw: 1.0, height: 9.0, baseY: 2.8}
+];
+
+/** Raised rocky outcrop putting the Frozen Crown watchtower on high ground (existing rocks asset). */
+export const LANDMARK_ROCKS: readonly {x: number; z: number; yaw: number; height: number}[] = [
+  {x: -37.6, z: -474.6, yaw: 0.3, height: 3.2},
+  {x: -31.4, z: -469.4, yaw: 1.7, height: 2.4},
+  {x: -33.2, z: -477.2, yaw: 2.4, height: 2.8}
+];
+
+export interface RegionPropPlacement {
+  x: number;
+  z: number;
+  yaw: number;
+  height: number;
+}
+
+/** Dead, gnarled trees scattered through the Ashen Moor (region 1), clustered around the chapel. */
+export const DEAD_TREES: readonly RegionPropPlacement[] = [
+  {x: -30, z: -212, yaw: 0.4, height: 6.2},
+  {x: -44, z: -244, yaw: 1.9, height: 5.4},
+  {x: -28, z: -262, yaw: 3.1, height: 6.8},
+  {x: -50, z: -258, yaw: 4.5, height: 5.8},
+  {x: -16, z: -204, yaw: 5.8, height: 6.4},
+  {x: -12, z: -258, yaw: 1.1, height: 5.0},
+  {x: -40, z: -206, yaw: 2.6, height: 7.0},
+  {x: -52, z: -240, yaw: 3.9, height: 5.6},
+  {x: -22, z: -250, yaw: 5.2, height: 6.6},
+  {x: -38, z: -290, yaw: 0.8, height: 6.0},
+  {x: -46, z: -276, yaw: 2.2, height: 6.5},
+  {x: -22, z: -282, yaw: 3.6, height: 5.2}
+];
+
+/** Ice-shard clusters scattered through the Frozen Crown (region 2). */
+export const ICE_SHARDS: readonly RegionPropPlacement[] = [
+  {x: -28, z: -452, yaw: 0.3, height: 2.2},
+  {x: -40, z: -466, yaw: 1.5, height: 1.8},
+  {x: -24, z: -486, yaw: 2.7, height: 2.6},
+  {x: -44, z: -494, yaw: 3.9, height: 2.0},
+  {x: -18, z: -444, yaw: 5.1, height: 1.6},
+  {x: -34, z: -512, yaw: 0.6, height: 2.4},
+  {x: -48, z: -478, yaw: 1.8, height: 1.9},
+  {x: 14, z: -444, yaw: 3.0, height: 2.8},
+  {x: 36, z: -470, yaw: 4.2, height: 2.1},
+  {x: -14, z: -556, yaw: 5.4, height: 2.5},
+  {x: -30, z: -596, yaw: 0.9, height: 1.7},
+  {x: 20, z: -612, yaw: 2.1, height: 2.3}
+];
+
+/** Standing stones in the Green March (region 0): ruined 8-stone circle at the village ruin + loose stones. */
+export const STANDING_STONES: readonly RegionPropPlacement[] = [
+  // Circle around the village-house landmark (56,-6), radius 9.8 m; one slot is missing where the
+  // circle collapsed. Sited east of the keep, well clear of the spawn road/gate view.
+  {x: 64.35, z: -0.88, yaw: 2.18, height: 3.2},
+  {x: 59.12, z: 3.29, yaw: 2.11, height: 2.8},
+  {x: 52.42, z: 3.12, yaw: 2.04, height: 3.4},
+  {x: 47.41, z: -1.29, yaw: 1.97, height: 3.0},
+  {x: 46.4, z: -7.95, yaw: 1.9, height: 2.6},
+  {x: 49.83, z: -13.61, yaw: 1.83, height: 3.1},
+  {x: 55.83, z: -15.8, yaw: 1.76, height: 2.9},
+  {x: 65.69, z: -7.44, yaw: 1.62, height: 3.3},
+  // Loose stones along the keep -> crossing road section.
+  {x: -24, z: -4, yaw: 0.7, height: 2.5},
+  {x: -30, z: 24, yaw: 2.2, height: 3.0},
+  {x: -14, z: 2, yaw: 3.7, height: 2.8},
+  {x: 34, z: 22, yaw: 5.2, height: 2.6},
+  {x: 44, z: 8, yaw: 0.4, height: 3.1}
+];
+
+/** Region landmark counts + QA framing poses for the regional landmarks. */
+export const REGION_IDENTITY = {
+  landmarks: REGION_LANDMARKS.length,
+  landmarkRocks: LANDMARK_ROCKS.length,
+  deadTrees: DEAD_TREES.length,
+  iceShards: ICE_SHARDS.length,
+  standingStones: STANDING_STONES.length
+} as const;
+
+function landmarkPose(key: LandmarkKey, cx: number, cz: number, height: number, tx: number, tz: number, ty: number) {
+  const dx = tx - cx;
+  const dz = tz - cz;
+  return {
+    key,
+    x: cx,
+    z: cz,
+    height,
+    yaw: Math.atan2(dx, -dz),
+    pitch: Math.atan2(ty - height, Math.max(0.01, Math.hypot(dx, dz))),
+    distance: Math.hypot(dx, dz)
+  };
+}
+
+/** Ready-to-use `__ssQAPose({x,z,yaw,pitch,height})` values framing each landmark from its road. */
+export const LANDMARK_QA_POSES = [
+  landmarkPose('green', 69.2, -21, 2.8, 56, -6, 3.0),
+  landmarkPose('ashen', -36, -190, 3.2, -36, -228, 5.0),
+  landmarkPose('crown', -34, -432, 3.2, -34, -472, 7.3)
+] as const;
+
 const RACK_DX = 5.0;
 const RACK_DZ = 4.2;
 /** Weapon display yaw: front face (local +z) turned toward the castle centre. */
@@ -423,7 +554,8 @@ function createLayer(
   prepared: PreparedAsset,
   specs: readonly PlacementSpec[],
   name: string,
-  cullable: boolean
+  cullable: boolean,
+  architecture = false
 ): InstancedLayer | null {
   if (specs.length === 0) return null;
   const records: InstanceRecord[] = [];
@@ -443,8 +575,9 @@ function createLayer(
     const primitive = prepared.primitives[p];
     const instanced = new THREE.InstancedMesh(primitive.geometry, primitive.material, specs.length);
     instanced.name = `${name}:${p}`;
-    instanced.castShadow = wantsCastShadow(name);
+    instanced.castShadow = architecture ? true : wantsCastShadow(name);
     instanced.receiveShadow = true;
+    if (architecture) instanced.userData.architecture = true;
     if (!cullable) {
       for (let i = 0; i < records.length; i++) {
         _matrixA.multiplyMatrices(records[i].placement, primitive.localMatrix);
@@ -852,6 +985,48 @@ export function addRuins(scene: THREE.Scene): {
     addCullableLayer(createLayer(scene, prepared, specs, layerName, true));
   }
 
+  // ---- cycle-3 regional identity: one landmark per region + region-specific scatter ----
+  async function placeRockOutcrop(): Promise<void> {
+    // Raised rocky outcrop putting the Frozen Crown watchtower on high ground (existing rocks asset).
+    const rockGltf = await loadModel('rocks-large');
+    if (!rockGltf) return;
+    const rockPrepared = prepareAsset(rockGltf.scene);
+    if (!rockPrepared) return;
+    const rockSpecs = LANDMARK_ROCKS.map((rock) => baseSpec(rock.x, rock.z, rock.yaw, rock.height / rockPrepared.height));
+    createLayer(scene, rockPrepared, rockSpecs, 'landmark:crown:rocks', false, true);
+  }
+
+  async function placeRegionLandmarks(): Promise<void> {
+    await Promise.all([
+      ...REGION_LANDMARKS.map(async (landmark) => {
+        const gltf = await loadModel(`custom/${landmark.asset}`);
+        if (!gltf) return;
+        const prepared = prepareAsset(gltf.scene);
+        if (!prepared) return;
+        const spec = baseSpec(landmark.x, landmark.z, landmark.yaw, landmark.height / prepared.height);
+        spec.y = landmark.baseY;
+        // Large structures: mark as architecture so scene.ts's shadow trim keeps their castShadow.
+        createLayer(scene, prepared, [spec], `landmark:${landmark.key}:${landmark.asset}`, false, true);
+      }),
+      placeRockOutcrop()
+    ]);
+  }
+
+  async function placeRegionPropAsset(assetName: string, placements: readonly RegionPropPlacement[], layerName: string): Promise<void> {
+    const gltf = await loadModel(`custom/${assetName}`);
+    if (!gltf) return;
+    const prepared = prepareAsset(gltf.scene);
+    if (!prepared) return;
+    const specs: PlacementSpec[] = [];
+    for (let i = 0; i < placements.length; i++) {
+      const p = placements[i];
+      const spec = baseSpec(p.x, p.z, p.yaw, p.height / prepared.height);
+      spec.cullRange = DRESSING_RANGE;
+      specs.push(spec);
+    }
+    addCullableLayer(createLayer(scene, prepared, specs, layerName, true));
+  }
+
   function buildBanners(): void {
     const prepared = prepareBanner();
     const specs: PlacementSpec[] = [];
@@ -890,7 +1065,11 @@ export function addRuins(scene: THREE.Scene): {
     placeDressingAsset('stakes', ROADSIDE_STAKES, 1.0, 'dressing:stakes', {scaleVariance: true}),
     placeDressingAsset('barrels', CAMP_BARRELS, 1.45, 'dressing:barrels', {campIndex: CAMP_BARRELS.map((_, i) => i), scaleVariance: true}),
     placeDressingAsset('cart', CAMP_CARTS, 1.05, 'dressing:carts', {campIndex: CAMP_CARTS.map((_, i) => i)}),
-    placeDressingAsset('grave', KEEP_GRAVES, 1.13, 'dressing:graves', {scaleVariance: true})
+    placeDressingAsset('grave', KEEP_GRAVES, 1.13, 'dressing:graves', {scaleVariance: true}),
+    placeRegionLandmarks(),
+    placeRegionPropAsset('dead_tree', DEAD_TREES, 'regionprops:dead_tree'),
+    placeRegionPropAsset('ice_shard', ICE_SHARDS, 'regionprops:ice_shard'),
+    placeRegionPropAsset('standing_stone', STANDING_STONES, 'regionprops:standing_stone')
   ]).catch((error) => console.warn('[ruins] asynchronous placement failed', error));
   buildBanners();
   buildFlames();
