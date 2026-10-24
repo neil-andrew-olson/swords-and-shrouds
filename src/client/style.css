@@ -196,3 +196,43 @@ body.touch-device #perf{display:none}
  body.touch-device #toast{top:calc(120px + env(safe-area-inset-top))}
 }
 
+/* =============================================================================================
+   Cycle 10 — campaign journal overlay + next-objective HUD line (created by main.ts).
+   ============================================================================================= */
+#journal{width:min(780px,92vw);max-height:min(88vh,840px);padding:0;border:1px solid #cba56855;border-radius:10px;background:linear-gradient(160deg,#0c171af7,#081012fa);color:#efe6cf;box-shadow:0 24px 90px #000d;overflow:hidden}
+#journal::backdrop{background:#020606b8;backdrop-filter:blur(2px)}
+.journal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:18px 20px 12px;border-bottom:1px solid #cba56833;background:#0a1316b8}
+.journal-head h2{margin:2px 0 0;font-size:24px;font-weight:600;letter-spacing:.2px}
+.journal-head .eyebrow{font-size:9px;letter-spacing:2px;color:var(--gold)}
+#closeJournal,#journalBtn,#openJournalFromGuide{font:inherit;font-size:11px;letter-spacing:.4px;color:#f0e7d0;background:#152327;border:1px solid #cba56855;border-radius:6px;padding:8px 11px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+#closeJournal:hover,#journalBtn:hover,#openJournalFromGuide:hover{border-color:var(--gold);background:#1c2e33}
+#closeJournal:focus-visible,#journalBtn:focus-visible,#openJournalFromGuide:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.journal-scroll{overflow-y:auto;max-height:calc(min(88vh,840px) - 80px);padding:6px 20px 20px;scrollbar-width:thin;scrollbar-color:#cba56866 transparent;-webkit-overflow-scrolling:touch}
+.journal-section{padding:12px 0;border-bottom:1px solid #ffffff0f}
+.journal-section:last-child{border-bottom:0}
+.journal-section h3{margin:0 0 6px;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#cba568}
+.journal-section p{margin:4px 0;font-size:13px;line-height:1.5;color:#e5dcc4}
+.journal-regions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.journal-region{padding:7px 9px;border:1px solid #ffffff14;border-radius:6px;background:#ffffff06;font-size:12px;color:#cfc6ab}
+.journal-region.held{border-color:#cba56866;color:#e9d6a8;background:#cba5680f}
+.journal-controls{display:grid;grid-template-columns:repeat(2,1fr);gap:4px 16px;font-size:12px;color:#cfc6ab}
+.journal-control{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#journalTipsList{margin:4px 0 0;padding-left:18px;font-size:12px;line-height:1.6;color:#d6ccb1}
+#journalTipsList li{margin:2px 0}
+#objectiveLine{display:flex;align-items:center;gap:7px;margin:8px 0 2px;padding:7px 9px;border-left:3px solid var(--gold);background:#0b1517d9;border-radius:5px;font-size:11px;color:#f0e7d0;line-height:1.35;text-shadow:0 1px 2px #000}
+#objectiveArrow{color:var(--gold);font-size:12px;line-height:1;min-width:12px;text-align:center}
+#objectiveLine[hidden]{display:none!important}
+@media(max-width:700px){
+ #journal{width:96vw;max-height:92dvh}
+ .journal-head{padding:12px 14px 10px}
+ .journal-head h2{font-size:20px}
+ .journal-scroll{max-height:calc(92dvh - 66px);padding:4px 14px 16px}
+ .journal-regions{grid-template-columns:1fr}
+ .journal-controls{grid-template-columns:1fr}
+ #objectiveLine{font-size:10px;padding:6px 8px;margin:6px 0 0}
+}
+@media(pointer:coarse){
+ #journal{max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 12px)}
+ .journal-scroll{max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 82px)}
+}
+

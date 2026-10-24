@@ -138,6 +138,7 @@ export class Ambience{
  private moanTimer=3;
  // Region beds: lazily built per region, crossfaded by weight, torn down when inaudible.
  private regionGain:(GainNode|undefined)[]=[undefined,undefined,undefined];
+ private regionTargetLevels:[number,number,number]=[0,0,0];
  private regionSources:AudioScheduledSourceNode[][]=[[],[],[]];
  private regionNodes:AudioNode[][]=[[],[],[]];
  private regionBuilt=[false,false,false];
@@ -157,6 +158,7 @@ export class Ambience{
  private weatherFilter?:BiquadFilterNode;
  private weatherBuilt=false;
  private weatherGains:(GainNode|undefined)[]=[undefined,undefined,undefined];
+ private weatherTargetLevels:[number,number,number]=[0,0,0];
  private weatherSources:AudioScheduledSourceNode[][]=[[],[],[]];
  private weatherNodes:AudioNode[][]=[[],[],[]];
  private weatherKindBuilt=[false,false,false];
@@ -228,10 +230,10 @@ export class Ambience{
   return {
    contextState:this.context?.state??'uninitialized',
    weather:{region:this.weatherRegion||null,phase:this.weatherPhase||null,intensity:Math.round(this.weatherIntensity*1000)/1000},
-   regionBeds:REGIONS.map((region,index)=>({key:region.id,level:level(this.regionGain[index])})),
+   regionBeds:REGIONS.map((region,index)=>({key:region.id,level:Math.round(this.regionTargetLevels[index]*1000)/1000})),
    music:{level:Math.round(this.bedLevel*1000)/1000,duck:Math.round(this.duckLevel*1000)/1000},
-   weatherBeds:['rain','snow','ash'].map((kind,index)=>({kind,level:level(this.weatherGains[index])})),
-   landmarkBeds:[{key:'chapel',level:level(this.chapelGain)},{key:'forge',level:level(this.forgeGain)}],
+   weatherBeds:['rain','snow','ash'].map((kind,index)=>({kind,level:Math.round(this.weatherTargetLevels[index]*1000)/1000})),
+   landmarkBeds:[{key:'chapel',level:Math.round((this.enabled()?this.chapelNear*this.chapelNear*.022:0)*1000)/1000},{key:'forge',level:Math.round((this.enabled()?this.forgeNear*this.forgeNear*.024:0)*1000)/1000}],
    masterGain:level(this.master),
    focus:this.focusOverride?{x:this.focusOverride.x,z:this.focusOverride.z}:null
   };
@@ -938,6 +940,7 @@ export class Ambience{
    const regionActive=playing&&!!me;
    for(let i=0;i<3;i++){
     const target=regionActive&&enabled?this.regionWeights[i]*REGION_VOLUMES[i]:0;
+   this.regionTargetLevels[i]=target;
     if(target>.0008){
      this.ensureRegion(i);this.regionIdle[i]=0;
      const regionGain=this.regionGain[i];if(regionGain)regionGain.gain.setTargetAtTime(target,now,.55);
@@ -954,6 +957,7 @@ export class Ambience{
    this.weatherKindActive=weatherKind;
    const weatherRegionWeight=clamp01(this.regionWeights[this.weatherRegionIndex()]??0);
    const weatherLevel=enabled?this.weatherIntensity*weatherRegionWeight:0;
+   for(let kind=0;kind<3;kind++)this.weatherTargetLevels[kind]=weatherKind===kind&&weatherLevel>.004?weatherLevel*WEATHER_VOLUMES[kind]*(kind===0?1-.35*this.coverLevel:1):0;
    if(weatherKind>=0&&weatherLevel>.004){this.ensureWeather();this.ensureWeatherKind(weatherKind);}
    for(let kind=0;kind<3;kind++){
     const audible=weatherKind===kind&&weatherLevel>.004;
@@ -983,20 +987,22 @@ export class Ambience{
     masterFilter.frequency.setTargetAtTime(Math.max(1200,cutoff),now,.4);
    }
    // ---- landmark ambience: chapel ritual + forge, distance-crossfaded and lazily torn down ----
+   // QA diagnostic focus fast-forwards the ramp so __ssAudioState() levels are measurable at once.
+   const landmarkFast=!!this.focusOverride;
    const chapelTarget=enabled?this.chapelNear*this.chapelNear*.022:0;
    if(chapelTarget>.0008){
     this.ensureChapel();this.chapelIdle=0;
-    const chapel=this.chapelGain;if(chapel)chapel.gain.setTargetAtTime(chapelTarget,now,.6);
+    const chapel=this.chapelGain;if(chapel){if(landmarkFast)chapel.gain.setValueAtTime(chapelTarget,now);else chapel.gain.setTargetAtTime(chapelTarget,now,.6);}
    }else if(this.chapelBuilt){
-    const chapel=this.chapelGain;if(chapel)chapel.gain.setTargetAtTime(0,now,.5);
+    const chapel=this.chapelGain;if(chapel){if(landmarkFast)chapel.gain.setValueAtTime(0,now);else chapel.gain.setTargetAtTime(0,now,.5);}
     this.chapelIdle+=.08;if(this.chapelIdle>2.5)this.stopChapel();
    }
    const forgeTarget=enabled?this.forgeNear*this.forgeNear*.024:0;
    if(forgeTarget>.0008){
     this.ensureForge();this.forgeIdle=0;
-    const forge=this.forgeGain;if(forge)forge.gain.setTargetAtTime(forgeTarget,now,.5);
+    const forge=this.forgeGain;if(forge){if(landmarkFast)forge.gain.setValueAtTime(forgeTarget,now);else forge.gain.setTargetAtTime(forgeTarget,now,.5);}
    }else if(this.forgeBuilt){
-    const forge=this.forgeGain;if(forge)forge.gain.setTargetAtTime(0,now,.4);
+    const forge=this.forgeGain;if(forge){if(landmarkFast)forge.gain.setValueAtTime(0,now);else forge.gain.setTargetAtTime(0,now,.4);}
     this.forgeIdle+=.08;if(this.forgeIdle>2.5)this.stopForge();
    }
    const wind=this.windGain,windFilter=this.windFilter;

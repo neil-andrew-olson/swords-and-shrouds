@@ -12,6 +12,16 @@ test('independent sockets: rooms, sync, capacity, reconnect, leadership, isolati
  const room=s.rooms.get(aw.code)!;assert.equal(room.host,bw.id);room.game.status='defeat';resumed.send({type:'restart'});assert.match((await resumed.next('error')).text,/leader/);b.send({type:'restart'});await wait(80);assert.equal(room.game.status,'playing');assert.equal(room.game.actors.filter(a=>a.kind==='player').length,4);
  // Every room must receive snapshots, including even-index rooms.
  other.messages.length=0;await wait(230);assert.ok(other.messages.some(m=>m.type==='state'));
+ // Cycle-10 co-op siege sync: both clients see the same boss siege + boss actor.
+ const roomGame=room.game;for(const c of roomGame.castles)c.friendly=false;roomGame.everCaptured=false;roomGame.nextSiege=1e9;roomGame.stats.sieges=1;const qaCastle=roomGame.castles[0];const qaCaptures=roomGame.stats.captures;
+ process.env.SS_QA='1';b.send({type:'qa-siege',index:2});await wait(360);process.env.SS_QA='';delete process.env.SS_QA;
+ assert.equal(qaCastle.friendly,true,'QA gate auto-granted the first castle');assert.equal(roomGame.castles.filter((c:any)=>c.friendly).length,1,'exactly one friendly castle granted in co-op');assert.equal(roomGame.stats.captures,qaCaptures,'auto-grant does not count as a capture');assert.equal(roomGame.everCaptured,true);
+ const latest=(c:any)=>c.messages.filter((m:any)=>m.type==='state').at(-1);
+ const sa=latest(resumed).game.siege,sb=latest(b).game.siege;
+ assert.ok(sa&&sa.active,'siege active in host snapshot');assert.equal(sa.boss,true);assert.equal(sa.bossName,'Shroud Warden');assert.equal(sa.index,2);assert.equal(sa.castle,qaCastle.id,'forced siege targets the auto-granted castle');
+ assert.equal(sb.boss,true);assert.equal(sb.bossName,'Shroud Warden');assert.equal(sa.bossId,sb.bossId,'same siege boss id in co-op');assert.ok(sa.bossId,'boss id populated');
+ const bossA=latest(resumed).game.actors.find((x:any)=>x.boss),bossB=latest(b).game.actors.find((x:any)=>x.boss);
+ assert.ok(bossA&&bossB,'boss actor present in both co-op snapshots');assert.equal(bossA.id,bossB.id);assert.equal(bossA.name,'Shroud Warden');assert.equal(bossA.hp,bossB.hp);
  }finally{clients.forEach(c=>c.ws.terminate());await s.close();}
 });
 

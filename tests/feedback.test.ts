@@ -1,4 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue} from '../src/client/controller';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue,compassBearing,deriveObjectiveLine,deriveJournalSummary,type JournalInput} from '../src/client/controller';
 test('combat feedback ignores joins, replayed snapshots and reconnect gaps',()=>{const g=createGame();addPlayer(g,'p','P');assert.deepEqual(combatCues(undefined,g,'p'),[]);assert.deepEqual(combatCues(g,g,'p'),[]);const next=structuredClone(g);next.time=2;next.actors.find(a=>a.id==='p')!.hp=1;assert.deepEqual(combatCues(g,next,'p'),[]);});
 test('combat feedback follows confirmed swings and health loss with range and impact limits',()=>{const g=createGame();g.actors=[];const p=addPlayer(g,'p','P');for(let i=0;i<5;i++)spawn(g,'zombie',p.x+1,p.z);spawn(g,'zombie',70,-400);const next=structuredClone(g);next.time=.1;const n=next.actors.find(a=>a.id==='p')!;n.attackSerial=1;n.hp-=10;n.weapon='hammer';for(const a of next.actors)if(a.kind==='zombie')a.hp-=5;const cues=combatCues(g,next,'p');assert.equal(cues.filter(c=>c.kind==='impact').length,3);assert.equal(cues.filter(c=>c.kind==='swing').length,1);assert.equal(cues.find(c=>c.kind==='swing')!.weapon,'hammer');assert.ok(cues.some(c=>c.kind==='hurt'));assert.ok(cues.some(c=>c.kind==='equip'));assert.ok(cues.filter(c=>c.kind==='impact').every(c=>c.material==='flesh'));assert.ok(cues.every(c=>c.volume>0&&c.volume<=1));assert.deepEqual(combatCues(next,{...next,time:.2},'p'),[]);
 const armed=structuredClone(next),replay=structuredClone(armed);replay.time=.3;assert.deepEqual(combatCues(armed,replay,'p'),[]);
@@ -79,4 +79,30 @@ assert.ok(Math.abs(diagonal.magnitude-1)<1e-9&&Math.abs(diagonal.mx-Math.SQRT1_2
 assert.deepEqual(touchStickVector(Number.NaN,0),zero);assert.deepEqual(touchStickVector(0,0,0),zero);
 assert.ok(Math.abs(touchStickVector(TOUCH_STICK_RADIUS,0,TOUCH_STICK_RADIUS,.5).magnitude-1)<1e-9);
 assert.equal(touchSensitivityValue(1.4),1.4);assert.equal(touchSensitivityValue('0.6'),.6);
-assert.equal(touchSensitivityValue(.2),1);assert.equal(touchSensitivityValue(3),1);assert.equal(touchSensitivityValue('nope'),1);assert.equal(touchSensitivityValue(null),1);});
+assert.equal(touchSensitivityValue(.2),1);assert.equal(touchSensitivityValue(3),1);assert.equal(touchSensitivityValue('nope'),1);assert.equal(touchSensitivityValue(null),1);
+// Campaign journal/next-objective derivation (cycle-10): text at every progress stage + counts.
+const journalCastles=[{id:'border',name:'Border Fortress',x:42,z:-67,region:'march',friendly:false},{id:'keep',name:'Fallen Keep',x:0,z:0,region:'march',friendly:true},{id:'citadel',name:'High Citadel',x:0,z:-206,region:'moor',friendly:false}];
+const journalCamps=[{id:'c1',name:'Old Mill',x:-20,z:19,region:'march',rescued:false},{id:'c2',name:'Crossing',x:22,z:-37,region:'moor',rescued:true}];
+const journalBase:JournalInput={player:{x:0,z:27},time:100,castles:journalCastles,regions:[{id:'march',name:'Green March'},{id:'moor',name:'Ashen Moor'}],camps:journalCamps,nest:{x:0,z:-664,hp:500,maxHp:500},siege:null,nextSiege:250,stats:{captures:1,rescues:1,sieges:1},weapon:{id:'spear',name:'War spear',damage:32,reach:5.6,cooldown:.7,stamina:20,shield:true}};
+assert.equal(compassBearing(0,-1),'N');assert.equal(compassBearing(1,0),'E');assert.equal(compassBearing(0,1),'S');assert.equal(compassBearing(-1,0),'W');assert.equal(compassBearing(1,-1),'NE');
+const reclaim=deriveObjectiveLine(journalBase);
+assert.equal(reclaim.kind,'reclaim');assert.equal(reclaim.detail,'Border Fortress');assert.equal(reclaim.distance,103);assert.equal(reclaim.text,'Free Border Fortress · 103 m');assert.deepEqual(reclaim.target,{x:42,z:-67});
+const siegeNow=deriveObjectiveLine({...journalBase,siege:{castle:'border',starts:95,active:true},time:100});
+assert.equal(siegeNow.kind,'siege');assert.equal(siegeNow.text,'Hold Border Fortress — siege underway');assert.equal(siegeNow.distance,103);
+const siegeSoon=deriveObjectiveLine({...journalBase,siege:{castle:'keep',starts:145,active:false},time:100,nextSiege:145});
+assert.equal(siegeSoon.kind,'siege');assert.equal(siegeSoon.text,'Siege in 45 s — hold Fallen Keep');
+const unknownSiege=deriveObjectiveLine({...journalBase,siege:{castle:'missing',starts:145,active:false},time:100,nextSiege:145});
+assert.equal(unknownSiege.text,'Siege in 45 s — hold the keep');assert.equal(unknownSiege.distance,null);assert.equal(unknownSiege.target,null);
+const allHeld=journalCastles.map(c=>({...c,friendly:true}));
+const rescueStage=deriveObjectiveLine({...journalBase,castles:allHeld});
+assert.equal(rescueStage.kind,'rescue');assert.equal(rescueStage.text,'Rescue survivors in Green March · 1 left');assert.equal(rescueStage.distance,22);
+const nestStage=deriveObjectiveLine({...journalBase,castles:allHeld,camps:journalCamps.map(c=>({...c,rescued:true}))});
+assert.equal(nestStage.kind,'nest');assert.equal(nestStage.text,'Destroy the plague nest · 691 m');
+const emptyStage=deriveObjectiveLine({...journalBase,castles:[],camps:[]});
+assert.equal(emptyStage.kind,'none');assert.equal(emptyStage.text,'The kingdom is yours — hold it.');
+const journal=deriveJournalSummary(journalBase);
+assert.deepEqual(journal.castles,{held:1,total:3});assert.deepEqual(journal.survivors,{rescued:1,total:2});assert.deepEqual(journal.camps,{rescued:1,total:2});
+assert.deepEqual(journal.regions.map(r=>[r.id,r.held,r.castlesHeld,r.castlesTotal]),[['march',false,1,2],['moor',false,0,1]]);
+assert.equal(journal.nest.protected,true);assert.equal(journal.sieges.survived,1);assert.equal(journal.sieges.nextIn,150);assert.equal(journal.weapon?.name,'War spear');assert.equal(journal.weapon?.shield,true);
+const activeJournal=deriveJournalSummary({...journalBase,siege:{castle:'border',starts:95,active:true},time:100});
+assert.equal(activeJournal.sieges.active,true);assert.equal(activeJournal.sieges.nextIn,0);assert.equal(activeJournal.sieges.castleName,'Border Fortress');});

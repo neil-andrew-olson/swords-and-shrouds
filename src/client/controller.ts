@@ -66,3 +66,111 @@ export function captionAllowed(now:number,lastAt:number,lastCue:CaptionCue|undef
  if(cue===lastCue)return false;
  return elapsed>=minInterval*.5&&CAPTION_PRIORITY[cue]>CAPTION_PRIORITY[lastCue??cue];
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * Campaign journal + next-objective derivation: pure helpers (main.ts renders; tests cover the
+ * state→text logic). Inputs are minimal projections of the authoritative Game snapshot.
+ * ------------------------------------------------------------------------------------------- */
+export type ObjectivePoint={x:number;z:number};
+export type ObjectiveKind='siege'|'reclaim'|'rescue'|'nest'|'none';
+export type ObjectiveLine={kind:ObjectiveKind;text:string;detail:string;distance:number|null;bearing:string|null;target:ObjectivePoint|null};
+export type JournalWeapon={id:string;name:string;damage:number;reach:number;cooldown:number;stamina:number;shield:boolean};
+export type JournalInput={
+ player:ObjectivePoint;
+ time:number;
+ castles:{id:string;name:string;x:number;z:number;region:string;friendly:boolean}[];
+ regions:{id:string;name:string}[];
+ camps:{id:string;name:string;x:number;z:number;region?:string;rescued:boolean}[];
+ nest:{x:number;z:number;hp:number;maxHp:number};
+ siege:{castle:string;starts:number;active:boolean}|null;
+ nextSiege:number;
+ stats:{captures:number;rescues:number;sieges:number};
+ weapon?:JournalWeapon|null;
+};
+export type JournalSummary={
+ castles:{held:number;total:number};
+ regions:{id:string;name:string;held:boolean;castlesHeld:number;castlesTotal:number}[];
+ survivors:{rescued:number;total:number};
+ camps:{rescued:number;total:number};
+ nest:{protected:boolean;hp:number;maxHp:number};
+ sieges:{survived:number;active:boolean;nextIn:number|null;castleName:string|null};
+ weapon:JournalWeapon|null;
+};
+/** 8-way compass label for a world-space delta; north = -z (matches the game's compass). */
+export function compassBearing(dx:number,dz:number):string{
+ const angle=Math.atan2(dx,-dz);
+ const sectors=['N','NE','E','SE','S','SW','W','NW'];
+ return sectors[Math.round(((angle+Math.PI*2)%(Math.PI*2))/(Math.PI/4))%8];
+}
+function objectiveTarget(player:ObjectivePoint,point:ObjectivePoint):{distance:number;bearing:string;target:ObjectivePoint}{
+ const dx=point.x-player.x,dz=point.z-player.z;
+ return {distance:Math.round(Math.hypot(dx,dz)),bearing:compassBearing(dx,dz),target:{x:point.x,z:point.z}};
+}
+/** Derive the single next objective (priority: active siege → imminent siege → nearest hostile
+ * castle → survivors → plague nest → all-clear). Deterministic, no DOM, rounds distance to metres. */
+export function deriveObjectiveLine(input:JournalInput):ObjectiveLine{
+ const player=input.player;
+ const hostile=input.castles.filter(c=>!c.friendly);
+ const campsLeft=input.camps.filter(c=>!c.rescued);
+ const allCastles=input.castles.length>0&&hostile.length===0;
+ const allCamps=input.camps.length>0&&campsLeft.length===0;
+ const siegeCastle=input.siege?input.castles.find(c=>c.id===input.siege!.castle):undefined;
+ const siegeAt=input.siege?.starts??input.nextSiege;
+ const nextIn=Math.max(0,Math.round(siegeAt-input.time));
+ if(input.siege?.active){
+  const name=siegeCastle?.name??'the keep';
+  const t=siegeCastle?objectiveTarget(player,siegeCastle):{distance:null,bearing:null,target:null};
+  return {kind:'siege',text:`Hold ${name} — siege underway`,detail:name,...t};
+ }
+ if(input.siege&&input.siege.active===false&&nextIn<=120){
+  const name=siegeCastle?.name??'the keep';
+  const t=siegeCastle?objectiveTarget(player,siegeCastle):{distance:null,bearing:null,target:null};
+  return {kind:'siege',text:`Siege in ${nextIn} s — hold ${name}`,detail:name,...t};
+ }
+ if(hostile.length){
+  let best=hostile[0]!;
+  for(const castle of hostile)if(Math.hypot(castle.x-player.x,castle.z-player.z)<Math.hypot(best.x-player.x,best.z-player.z))best=castle;
+  const t=objectiveTarget(player,best);
+  return {kind:'reclaim',text:`Free ${best.name} · ${t.distance} m`,detail:best.name,...t};
+ }
+ if(allCastles&&!allCamps){
+  const byRegion=new Map<string,typeof campsLeft>();
+  for(const camp of campsLeft){
+   const region=camp.region??'wilds';
+   const list=byRegion.get(region);if(list)list.push(camp);else byRegion.set(region,[camp]);
+  }
+  const regionNames=new Map(input.regions.map(r=>[r.id,r.name]));
+  let best=campsLeft[0]!,bestRegion=best.region??'wilds',bestCount=0;
+  for(const [region,list] of byRegion)if(list.length>bestCount){bestCount=list.length;best=list[0];bestRegion=region;}
+  const t=objectiveTarget(player,best);
+  return {kind:'rescue',text:`Rescue survivors in ${regionNames.get(bestRegion)??bestRegion} · ${campsLeft.length} left`,detail:best.name,...t};
+ }
+ if(allCastles&&allCamps){
+  const t=objectiveTarget(player,input.nest);
+  return {kind:'nest',text:`Destroy the plague nest · ${t.distance} m`,detail:'plague nest',...t};
+ }
+ return {kind:'none',text:'The kingdom is yours — hold it.',detail:'',distance:null,bearing:null,target:null};
+}
+/** Journal section state derived from the same authoritative projection (counts/totals/status). */
+export function deriveJournalSummary(input:JournalInput):JournalSummary{
+ const held=input.castles.filter(c=>c.friendly).length;
+ const regions=input.regions.map(region=>{
+  const castles=input.castles.filter(c=>c.region===region.id);
+  return {id:region.id,name:region.name,held:castles.length>0&&castles.every(c=>c.friendly),castlesHeld:castles.filter(c=>c.friendly).length,castlesTotal:castles.length};
+ });
+ const rescued=input.camps.filter(c=>c.rescued).length;
+ const allCastles=input.castles.length>0&&held===input.castles.length;
+ const allCamps=input.camps.length>0&&rescued===input.camps.length;
+ const siegeCastle=input.siege?input.castles.find(c=>c.id===input.siege!.castle):undefined;
+ return {
+  castles:{held,total:input.castles.length},
+  regions,
+  survivors:{rescued,total:input.camps.length},
+  camps:{rescued,total:input.camps.length},
+  nest:{protected:!(allCastles&&allCamps),hp:input.nest.hp,maxHp:input.nest.maxHp},
+  sieges:{survived:input.stats.sieges,active:!!input.siege?.active,nextIn:input.siege?.active?0:Math.max(0,Math.round((input.siege?.starts??input.nextSiege)-input.time)),castleName:siegeCastle?.name??null},
+  weapon:input.weapon??null
+ };
+}
+
+

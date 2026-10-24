@@ -39,7 +39,7 @@ function hurt(g:Game,a:Actor,amount:number,attacker?:Actor){
  if(a.block&&attacker){const towards=Math.atan2(attacker.x-a.x,-(attacker.z-a.z));if(Math.cos(towards-a.yaw)>.2)amount*=attacker&&a.kind==='player'&&!weaponStats(a.weapon).shield?.55:.2;}
  if(a.kind==='player'&&a.armor==='heavy')amount*=.7;
  a.hp=Math.max(0,a.hp-amount);if(a.kind==='zombie'&&attacker?.kind==='player'&&attacker.weapon!=='hammer'){if(a.hp===0)sever(g,a,'head');else if(a.hp<=a.maxHp*.5)sever(g,a,(a.severed??[]).includes('rightArm')?'leftArm':(a.severed??[]).includes('leftArm')?'rightArm':attacker.x<a.x?'leftArm':'rightArm');}
- if(a.hp===0){a.deadUntil=g.time+(a.kind==='player'?12:a.kind==='soldier'?7:2);a.windup=0;if(a.kind==='player'){a.downed=true;a.revive=0;a.block=false;event(g,`${a.name} is down! Hold Interact nearby for 3 seconds before corruption takes hold.`);}if(hostile(a)){g.stats.kills++;g.resources.wood+=2;g.resources.iron++;}if(a.kind==='soldier')event(g,'An Oathsworn has fallen. Corruption rises in 7 seconds.');}
+ if(a.hp===0){a.deadUntil=g.time+(a.kind==='player'?12:a.kind==='soldier'?7:2);a.windup=0;if(a.kind==='player'){a.downed=true;a.revive=0;a.block=false;event(g,`${a.name} is down! Hold Interact nearby for 3 seconds before corruption takes hold.`);}if(hostile(a)){g.stats.kills++;g.resources.wood+=2;g.resources.iron++;if(a.boss&&g.siege&&g.siege.bossId===a.id&&!g.siege.bossRewarded){g.siege.bossRewarded=true;g.siege.bossKilled=true;g.resources.wood+=10;g.resources.iron+=5;g.resources.medicine+=1;event(g,`${a.name} falls: +10 wood, +5 iron, +1 healing supply.`);}}if(a.kind==='soldier')event(g,'An Oathsworn has fallen. Corruption rises in 7 seconds.');}
 }
 function swing(g:Game,a:Actor){const w=weaponStats(a.weapon);a.stamina=Math.max(0,(a.stamina??100)-w.stamina);noise(g,a,22);a.cd=w.cooldown;a.swing=.25;a.attackSerial=(a.attackSerial??0)+1;for(const e of g.actors){if(!hostile(e)||e.hp<=0||dist(a,e)>w.reach||!lineClear(a,e))continue;const angle=Math.atan2(e.x-a.x,-(e.z-a.z));if(Math.cos(angle-a.yaw)>w.arc)hurt(g,e,w.damage,a);}
  if(dist(a,g.nest)<4&&g.castles.every(c=>c.friendly)&&g.camps.every(c=>c.rescued)){g.nest.hp=Math.max(0,g.nest.hp-w.damage);if(g.nest.hp===0){g.status='victory';event(g,'The shroud is broken. The kingdom lives.');}}
@@ -75,6 +75,38 @@ function interactions(g:Game,dt:number){
  for(const cache of g.caches)if(!cache.taken&&interacting.some(p=>dist(p,cache)<3)){cache.taken=true;g.resources.wood+=12;g.resources.iron+=5;g.resources.medicine++;event(g,'Supplies recovered: 12 wood, 5 iron, 1 healing supply.');}
  for(const c of g.camps)if(!c.rescued&&interacting.some(p=>dist(p,c)<4)&&!g.actors.some(a=>hostile(a)&&a.hp>0&&dist(a,c)<9)){c.rescued=true;g.resources.recruits+=4;g.stats.rescues++;event(g,`${c.name} rescued. Four recruits await your orders.`);}
  for(const c of g.castles){if(c.friendly)continue;const defenders=g.actors.some(a=>hostile(a)&&a.hp>0&&(a.castle===c.id||dist(a,c)<10));if(!defenders&&interacting.some(p=>dist(p,c)<4)){c.capture+=dt;if(c.capture>=5){c.friendly=true;c.gate=180+c.level*120;c.barrier=0;c.capture=0;c.lost=0;g.everCaptured=true;g.stats.captures++;if(!c.rewarded){c.rewarded=true;g.resources.wood+=16;g.resources.iron+=8;}event(g,`${c.name} reclaimed. Fortify and assign guards.`);}}else c.capture=0;}
+}
+
+/** Cycle-10 siege escalation: one deterministic siege built from the completed-siege count. Every
+ *  second siege (and the endgame from the 9th on) is led by a corrupted 'Shroud Warden' boss. */
+function openSiege(g:Game,requestedIndex=g.stats.sieges+1,startsAt=g.time+30):boolean{
+ if(g.siege)return false;
+ const friendly=g.castles.filter(c=>c.friendly);
+ if(!friendly.length)return false;
+ const index=Math.max(1,Math.floor(requestedIndex));
+ g.stats.sieges=index-1;
+ const target=friendly[((index-1)+g.stats.captures)%friendly.length];
+ const boss=index%2===0||index>=9;
+ const bossName=boss?'Shroud Warden':'';
+ const bossHp=boss?240+Math.min(40,Math.max(0,(index-2)*5)):0;
+ g.siege={castle:target.id,starts:startsAt,active:false,boss,bossName,bossHp,index,waveSize:0,bossId:'',bossKilled:false,bossRewarded:false};
+ const lead=boss?`${bossName} leads the horde.`:'';event(g,startsAt<=g.time?`The siege of ${target.name} begins! ${lead}`.trim():`Siege approaching ${target.name} in 30 seconds. ${lead}`.trim());
+ return true;
+}
+/** QA-only deterministic siege starter; the server gates its message behind SS_QA (never normal play). */
+/** QA-only: deterministically make the first castle friendly so a QA-gated forced siege has a target.
+ *  Deliberately bypasses normal capture flow (no capture count, rewards or achievements) — only the
+ *  server's SS_QA-gated qa-siege path calls this; production play never does. */
+export function qaEnsureFriendlyCastle(g:Game):boolean{
+ const castle=g.castles[0];
+ if(!castle)return false;
+ castle.friendly=true;
+ g.everCaptured=true;
+ return true;
+}
+export function forceSiege(g:Game,index=g.stats.sieges+1):boolean{
+ g.everCaptured=true;
+ return openSiege(g,index,g.time);
 }
 export function tick(g:Game,dt=.05){
  if(g.status!=='playing')return;g.time+=dt;g.noises=g.noises.filter(n=>n.until>g.time);
@@ -128,8 +160,8 @@ export function tick(g:Game,dt=.05){
    const target=nearest&&dist(a,nearest)<(a.kind==='corrupted'?20:13)&&lineClear(a,nearest)?nearest:undefined;const heard=g.noises.filter(n=>dist(a,n)<n.radius).sort((x,y)=>dist(a,x)-dist(a,y))[0];if(heard)a.investigate={x:heard.x,z:heard.z,until:g.time+6};
    const defense=g.castles.find(c=>c.friendly&&(c.barrier>0||c.gate>0)&&a.z>=c.z+(c.barrier>0?12:9)&&dist(a,c)<30&&(a.castle===c.id||(nearest&&Math.abs(nearest.x-c.x)<9&&Math.abs(nearest.z-c.z)<9)||(a.investigate&&Math.abs(a.investigate.x-c.x)<9&&Math.abs(a.investigate.z-c.z)<9)));
    if(defense){const front={x:defense.x,z:defense.z+(defense.barrier>0?14:11)};a.yaw=Math.atan2(front.x-a.x,-(front.z-a.z));if(dist(a,front)>1.8)moveEnemy(g,a,waypoint(a,front),dt*2.6);else if(a.cd===0){if(defense.barrier>0)defense.barrier=Math.max(0,defense.barrier-12);else defense.gate=Math.max(0,defense.gate-12);a.cd=1;a.swing=.25;a.attackSerial=(a.attackSerial??0)+1;noise(g,front,30);}continue;}
-   if(a.windup>0){a.windup-=dt;if(a.windup<=0&&target&&dist(a,target)<2.8&&lineClear(a,target)){hurt(g,target,(a.kind==='corrupted'?24:13)*Math.max(.25,1-(a.severed??[]).filter(p=>p!=='head').length*.4),a);a.swing=.2;}continue;}
-   if(target){a.yaw=Math.atan2(target.x-a.x,-(target.z-a.z));if(dist(a,target)>2||!lineClear(a,target))moveEnemy(g,a,waypoint(a,target),dt*(a.kind==='corrupted'?3.6:2.6));else if(a.cd===0){a.windup=.65;a.cd=1.65;a.attackSerial=(a.attackSerial??0)+1;}}
+   if(a.windup>0){a.windup-=dt;if(a.windup<=0&&target&&dist(a,target)<2.8&&lineClear(a,target)){hurt(g,target,(a.boss?(a.maxHp<=240?28:30):a.kind==='corrupted'?24:13)*Math.max(.25,1-(a.severed??[]).filter(p=>p!=='head').length*.4),a);a.swing=.2;}continue;}
+   if(target){a.yaw=Math.atan2(target.x-a.x,-(target.z-a.z));if(dist(a,target)>2||!lineClear(a,target))moveEnemy(g,a,waypoint(a,target),dt*(a.boss?2.9:a.kind==='corrupted'?3.6:2.6));else if(a.cd===0){a.windup=a.boss?.95:.65;a.cd=a.boss?2.2:1.65;a.attackSerial=(a.attackSerial??0)+1;}}
    else if(a.investigate&&a.investigate.until>g.time&&dist(a,a.investigate)>1.5){a.yaw=Math.atan2(a.investigate.x-a.x,-(a.investigate.z-a.z));moveEnemy(g,a,waypoint(a,a.investigate),dt*2.6);}
    else if(fort?.friendly){const gate={x:fort.x,z:fort.z+11};if(fort.gate>0||fort.barrier>0){if(dist(a,gate)>2.5)moveEnemy(g,a,waypoint(a,gate),dt*2.6);else if(a.cd===0){if(fort.barrier>0)fort.barrier=Math.max(0,fort.barrier-12);else fort.gate=Math.max(0,fort.gate-12);noise(g,gate,30);a.cd=1;a.swing=.2;}}else moveEnemy(g,a,waypoint(a,fort),dt*2.6);}
   }
@@ -147,9 +179,9 @@ export function tick(g:Game,dt=.05){
  for(const c of g.castles){c.artilleryCd=Math.max(0,c.artilleryCd-dt);if(!c.friendly)continue;const target=g.actors.filter(a=>hostile(a)&&a.hp>0&&dist(a,c)<34).sort((a,b)=>dist(a,c)-dist(b,c))[0];if(target&&c.artilleryCd===0){g.shots.push({id:++g.nextId,castle:c.id,x:c.x+6,z:c.z-6,tx:target.x,tz:target.z,lands:g.time+.7,damage:42+c.level*12});c.artilleryCd=g.regions.some(r=>r.id===c.region&&r.held)?3:4.5;}}
  for(const region of g.regions){const held=g.castles.filter(c=>c.region===region.id).every(c=>c.friendly);if(held&&!region.held){region.incomeAt=g.time+60;if(!region.paid){g.resources.wood+=40;g.resources.iron+=20;region.paid=true;}event(g,`${region.name} secured: supply income every minute and faster castle artillery.`);}if(!held&&region.held)event(g,`${region.name} supply routes lost. Reclaim every castle to restore them.`);region.held=held;if(held&&g.time>=region.incomeAt){g.resources.wood+=24;g.resources.iron+=12;g.resources.medicine+=2;region.incomeAt=g.time+60;event(g,`${region.name} supplies arrived: 24 wood, 12 iron, 2 healing supplies.`);}}
  if(g.everCaptured&&!g.castles.some(c=>c.friendly)){g.status='defeat';event(g,'The last stronghold has fallen.');return;}
- if(!g.siege&&g.everCaptured&&g.time>=g.nextSiege){const friendly=g.castles.filter(c=>c.friendly);const target=friendly[(g.stats.sieges+g.stats.captures)%friendly.length];g.siege={castle:target.id,starts:g.time+30,active:false};event(g,`Siege approaching ${target.name} in 30 seconds.`);}
+ if(!g.siege&&g.everCaptured&&g.time>=g.nextSiege)openSiege(g);
  if(g.siege){const c=g.castles.find(c=>c.id===g.siege!.castle)!;
-  if(!g.siege.active&&g.time>=g.siege.starts){g.siege.active=true;const count=6+Math.min(8,g.stats.sieges*2+Math.max(0,g.actors.filter(a=>a.kind==='player'&&a.connected).length-1)*2);for(let n=0;n<count;n++)spawn(g,n===count-1?'corrupted':'zombie',c.x+(n%3-1)*2,c.z+19+Math.floor(n/3)*2,{castle:c.id});event(g,`The siege of ${c.name} has begun.`);}
+  if(!g.siege.active&&g.time>=g.siege.starts){g.siege.active=true;const extra=Math.max(0,g.actors.filter(a=>a.kind==='player'&&a.connected).length-1)*2;const boss=!!g.siege.boss;const count=Math.min(14,6+g.stats.sieges*2+extra+(boss?1:0));const normals=count-(boss?1:0);for(let n=0;n<normals;n++)spawn(g,n===normals-1?'corrupted':'zombie',c.x+(n%3-1)*2,c.z+19+Math.floor(n/3)*2,{castle:c.id});if(boss){const bossHp=Math.max(240,Math.min(280,g.siege.bossHp||240));const bossActor=spawn(g,'corrupted',c.x,c.z+19+Math.floor(normals/3)*2,{castle:c.id,name:g.siege.bossName||'Shroud Warden',hp:bossHp,maxHp:bossHp,armor:'heavy',boss:true});g.siege.bossId=bossActor.id;g.siege.bossHp=bossHp;}g.siege.waveSize=count;event(g,boss?`${g.siege.bossName} leads the siege of ${c.name}!`:`The siege of ${c.name} has begun.`);}
   if(g.siege.active&&(!c.friendly||!g.actors.some(a=>hostile(a)&&a.hp>0&&a.castle===c.id))){if(c.friendly){g.stats.sieges++;g.resources.wood+=16;g.resources.iron+=6;event(g,`Siege repelled at ${c.name}.`);}g.siege=null;const players=g.actors.filter(a=>a.kind==='player'&&a.connected);const pressure=players.length?players.reduce((v,a)=>v+1-a.hp/a.maxHp,0)/players.length:0;g.nextSiege=g.time+120+Math.round(pressure*60);}
  }
 }

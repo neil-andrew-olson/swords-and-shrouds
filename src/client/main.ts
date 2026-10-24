@@ -5,8 +5,8 @@ import {Ambience} from './ambience';
 import {WEAPON_IDS,WEAPONS,weaponStats} from '../shared/weapons';
 import {WorldView} from './scene';
 import {weaponCombatProfile} from './equipment';
-import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue,touchStickVector,touchSensitivityValue} from './controller';
-import {dist,clamp,BOUNDS,REGIONS} from '../shared/world';
+import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue,touchStickVector,touchSensitivityValue,deriveObjectiveLine,deriveJournalSummary,type JournalInput,type JournalSummary,type ObjectiveLine,type ObjectivePoint} from './controller';
+import {dist,clamp,BOUNDS,REGIONS,CASTLES,CAMPS,NEST} from '../shared/world';
 import type {Game,Actor} from '../shared/types';
 type PerfSnapshot={fps?:number;frameMs?:number;calls?:number;triangles?:number;points?:number;geometries?:number;textures?:number;programs?:number;quality?:string;tier?:string};
 type PerfHooks={__ssPerf?:()=>PerfSnapshot|undefined;__ssQuality?:(tier:'low'|'medium'|'high')=>void};
@@ -41,6 +41,36 @@ const touchPointers=new Set<number>();
 let lastLookDx=0,lastLookDy=0;
 const keys=new Set<string>(),mouse={attack:false,block:false},touch={mx:0,forward:0,attack:false,block:false,interact:false};
 const guide=$<HTMLDialogElement>('guide'),result=$<HTMLDialogElement>('result');
+
+// ---- Campaign journal overlay (created here so the HUD/Guide buttons exist before frame starts) ----
+const journal=document.createElement('dialog');
+journal.id='journal';journal.className='journal';journal.setAttribute('aria-label','Campaign journal');
+journal.innerHTML=`<div class="journal-head"><div><span class="eyebrow">CAMPAIGN JOURNAL</span><h2 id="journalTitle">The war for the kingdom</h2></div><button id="closeJournal" type="button">Close · J</button></div>
+<div class="journal-scroll" id="journalScroll">
+ <section class="journal-section" id="journalCampaign"><h3>Reclaim the kingdom</h3><p id="journalCastles"></p><div id="journalRegionList" class="journal-regions"></div></section>
+ <section class="journal-section" id="journalSurvivors"><h3>Survivors</h3><p id="journalSurvivorsLine"></p><p id="journalCampsLine"></p></section>
+ <section class="journal-section" id="journalNest"><h3>The plague nest</h3><p id="journalNestLine"></p></section>
+ <section class="journal-section" id="journalSieges"><h3>Sieges</h3><p id="journalSiegesLine"></p></section>
+ <section class="journal-section" id="journalWeapon"><h3>Your weapon</h3><p id="journalWeaponLine"></p></section>
+ <section class="journal-section" id="journalControls"><h3>Controls</h3><div id="journalControlsLine" class="journal-controls"></div></section>
+ <section class="journal-section" id="journalTips"><h3>Field notes</h3><ul id="journalTipsList"></ul></section>
+</div>`;
+document.body.append(journal);
+const JOURNAL_TIPS=[
+ 'Bring a shield to sieges — blocking beats dodging in a gate.',
+ 'The plague nest opens only when every castle and survivor group is secured.',
+ 'Hold Interact at a castle banner for five seconds to reclaim it.',
+ 'Weapon reach matters: spears and halberds outrange the dead.',
+ 'Camps with enemies nearby cannot be rescued — clear them first.'
+];
+$('journalTipsList').innerHTML=JOURNAL_TIPS.map(tip=>`<li>${tip}</li>`).join('');
+const journalHudButton=document.createElement('button');
+journalHudButton.type='button';journalHudButton.id='journalBtn';journalHudButton.textContent='Journal · J';
+const hudTop=document.querySelector('#hud .hud-top');
+if(hudTop){const guideButton=document.getElementById('guideBtn');if(guideButton)guideButton.before(journalHudButton);else hudTop.append(journalHudButton);}
+const journalGuideButton=document.createElement('button');
+journalGuideButton.type='button';journalGuideButton.id='openJournalFromGuide';journalGuideButton.textContent='Open campaign journal · J';
+$('closeGuide').after(journalGuideButton);
 const me=()=>game?.actors.find(a=>a.id===id);
 const send=(value:unknown)=>{if(ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify(value));};
 let sound:AudioContext|undefined;function tone(freq=180){if(audioPaused||!$<HTMLInputElement>('sound').checked)return;try{sound??=new AudioContext();void sound.resume();const o=sound.createOscillator(),gain=sound.createGain();o.type='triangle';o.frequency.setValueAtTime(freq,sound.currentTime);o.frequency.exponentialRampToValueAtTime(freq*.5,sound.currentTime+.13);gain.gain.setValueAtTime(.04,sound.currentTime);gain.gain.exponentialRampToValueAtTime(.001,sound.currentTime+.15);o.connect(gain);gain.connect(sound.destination);o.start();o.stop(sound.currentTime+.16);}catch{}}
@@ -52,7 +82,7 @@ window.addEventListener('pointerdown',unlockAudio);window.addEventListener('keyd
 // The Sound checkbox stays authoritative (unchecking it also suspends the contexts).
 let audioPaused=false;
 function updateAudioPause(){
- const paused=!soundEnabled()||document.hidden||guide.open||result.open;
+ const paused=!soundEnabled()||document.hidden||guide.open||result.open||journal.open;
  if(paused===audioPaused)return;
  audioPaused=paused;
  combatAudio.setPaused(paused);ambience.setPaused(paused);
@@ -83,7 +113,7 @@ function stopRumble(){
 }
 /** Short dual-rumble pulse: guarded by reduced-motion, menu/pause and pad connectivity. */
 function rumble(strength:number,duration=110){
- if(reducedMotionQuery?.matches||guide.open||result.open||document.hidden)return;
+ if(reducedMotionQuery?.matches||guide.open||result.open||journal.open||document.hidden)return;
  const actuator=rumblePad?.vibrationActuator;
  if(!actuator?.playEffect)return;
  const now=performance.now();
@@ -192,7 +222,7 @@ function hideCaption(){captionLine.hidden=true;captionLine.textContent='';captio
 /** True when a caption must be suppressed (disabled, paused/menu/hidden, or rate-limited). */
 function captionGated(cue:CaptionCue,force=false){
  if(!captionsEnabled)return true;
- if(guide.open||result.open||document.hidden)return true;
+ if(guide.open||result.open||journal.open||document.hidden)return true;
  if(!force&&(!game||game.status!=='playing'))return true;
  return !captionAllowed(performance.now(),captionAt,captionCue,cue);
 }
@@ -227,7 +257,84 @@ function cmd(action:string){send({type:'command',action});}
 function cameraToggle(){first=!first;localStorage.setItem('ss-camera',first?'first':'third');$('cameraBtn').textContent=`${first?'First':'Third'} person · V / Y`;}
 $('cameraBtn').textContent=`${first?'First':'Third'} person · V / Y`;
 function release(){stopRumble();keys.clear();mouse.attack=mouse.block=false;touch.mx=touch.forward=0;touch.attack=touch.block=touch.interact=false;send({type:'input',input:{mx:0,mz:0,yaw,attack:false,block:false,interact:false,seq:seq++}});}
-function openGuide(){stopRumble();release();document.exitPointerLock?.();guide.showModal();menuIndex=0;}
+function openGuide(){if(journal.open)journal.close();stopRumble();release();document.exitPointerLock?.();guide.showModal();menuIndex=0;}
+function closeJournalOverlay(){if(journal.open)journal.close();}
+function openJournal(){if(journal.open)return;if(guide.open)guide.close();if(result.open)return;stopRumble();release();document.exitPointerLock?.();journal.showModal();menuIndex=0;updateJournal();}
+journalHudButton.onclick=openJournal;
+journalGuideButton.onclick=()=>{if(guide.open)guide.close();openJournal();};
+$('closeJournal').onclick=closeJournalOverlay;
+journal.addEventListener('click',e=>{if(e.target===journal)closeJournalOverlay();});
+journal.addEventListener('cancel',e=>{e.preventDefault();closeJournalOverlay();});
+// ---- Next-objective HUD line: derived from the authoritative snapshot at HUD cadence. ----
+const objectiveLineEl=document.createElement('div');
+objectiveLineEl.id='objectiveLine';objectiveLineEl.hidden=true;
+objectiveLineEl.innerHTML='<span id="objectiveArrow" aria-hidden="true"></span><span id="objectiveText">Join a campaign to see your next objective.</span>';
+const objectivesPanel=$('objectives');
+const objectivesEyebrow=objectivesPanel?.querySelector('.eyebrow');
+if(objectivesEyebrow)objectivesEyebrow.after(objectiveLineEl);else objectivesPanel?.prepend(objectiveLineEl);
+let lastObjective:ObjectiveLine|null=null;
+let lastJournalSummary:JournalSummary|null=null;
+let previewJournalStage:'early'|'mid'|'late'|null=null;
+let previewObjectiveText:string|null=null;
+function journalInput(player:Actor):JournalInput{
+ const g=game!;const w=weaponStats(player.weapon);
+ return {player:{x:player.x,z:player.z},time:g.time,castles:g.castles.map(c=>({id:c.id,name:c.name,x:c.x,z:c.z,region:c.region,friendly:c.friendly})),regions:g.regions.map(r=>({id:r.id,name:r.name})),camps:g.camps.map(c=>({id:c.id,name:c.name,x:c.x,z:c.z,region:(c as {region?:string}).region,rescued:c.rescued})),nest:{x:g.nest.x,z:g.nest.z,hp:g.nest.hp,maxHp:g.nest.maxHp},siege:g.siege?{castle:g.siege.castle,starts:g.siege.starts,active:g.siege.active}:null,nextSiege:g.nextSiege,stats:{captures:g.stats.captures,rescues:g.stats.rescues,sieges:g.stats.sieges},weapon:{id:player.weapon??'sword',name:w.name,damage:w.damage,reach:w.reach,cooldown:w.cooldown,stamina:w.stamina,shield:!!w.shield}};
+}
+function objectiveArrowFor(player:Actor,target:ObjectivePoint){
+ const angle=Math.atan2(target.x-player.x,-(target.z-player.z))-yaw;
+ const arrows=['↑','↗','→','↘','↓','↙','←','↖'];
+ return arrows[Math.round(((angle+Math.PI*2)%(Math.PI*2))/(Math.PI/4))%8];
+}
+function updateObjectiveHud(player:Actor){
+ if(!game)return;
+ const objective=deriveObjectiveLine(journalInput(player));
+ lastObjective=objective;
+ objectiveLineEl.hidden=false;
+ const text=previewObjectiveText??objective.text;
+ const textEl=$('objectiveText');
+ if(textEl.textContent!==text)textEl.textContent=text;
+ const arrowEl=$('objectiveArrow');
+ const arrow=objective.target?objectiveArrowFor(player,objective.target):'';
+ if(arrowEl && arrowEl.textContent!==arrow)arrowEl.textContent=arrow;
+}
+function journalControlsLegend(){
+ if(padWasConnected)return ['Move — Left stick','Look — Right stick','Attack — RT','Block — LT','Sweep — B','Heal — X','Interact — A','Journal — Start / Menu','Guide — View'];
+ if(touchDevice)return ['Move — Left stick','Look — Drag the right side','Attack / Block / Interact — Touch buttons','Sweep / Heal — Bottom buttons','Journal — Journal button'];
+ return ['Move — WASD','Look — Mouse','Attack — Left click','Block — Right click','Sweep — Q or B','Heal — H','Interact — E','Camera — V','Journal — J','Guide — G'];
+}
+function previewSummary(summary:JournalSummary):JournalSummary{
+ if(!previewJournalStage)return summary;
+ const next:JournalSummary=structuredClone(summary);
+ if(previewJournalStage==='early'){next.castles.held=1;next.survivors={rescued:1,total:9};next.camps={rescued:1,total:9};next.sieges={...next.sieges,survived:0,nextIn:150};next.nest.protected=true;}
+ else if(previewJournalStage==='mid'){next.castles.held=5;next.survivors={rescued:4,total:9};next.camps={rescued:4,total:9};next.sieges={...next.sieges,survived:1,nextIn:45};next.nest.protected=true;}
+ else{next.castles.held=9;next.survivors={rescued:9,total:9};next.camps={rescued:9,total:9};next.sieges={...next.sieges,survived:3,nextIn:0};next.nest.protected=false;next.nest.hp=500;}
+ const perStage:Record<'early'|'mid'|'late',number[]>={early:[1,0,0],mid:[2,2,1],late:[3,3,3]};
+ next.regions=next.regions.map((region,index)=>{const held=perStage[previewJournalStage!][index]??0;return {...region,castlesHeld:held,held:held===region.castlesTotal};});
+ return next;
+}
+/** QA-only demo summary so the journal layout can be captured without joining a server room. */
+function previewJournalDemo():JournalSummary{
+ const stage=previewJournalStage??'early';
+ const friendlyCount=stage==='early'?1:stage==='mid'?5:9;
+ const demo:JournalInput={player:{x:0,z:27},time:0,castles:CASTLES.map((c,index)=>({id:c.id,name:c.name,x:c.x,z:c.z,region:c.region,friendly:index<friendlyCount})),regions:REGIONS.map(r=>({id:r.id,name:r.name})),camps:CAMPS.map((c,index)=>({id:c.id,name:c.name,x:c.x,z:c.z,region:c.region,rescued:index<(stage==='early'?1:stage==='mid'?4:9)})),nest:{x:NEST.x,z:NEST.z,hp:500,maxHp:500},siege:null,nextSiege:150,stats:{captures:friendlyCount,rescues:stage==='early'?1:stage==='mid'?4:9,sieges:stage==='late'?3:0},weapon:{id:'spear',name:'War spear',damage:32,reach:5.6,cooldown:.7,stamina:20,shield:true}};
+ return previewSummary(deriveJournalSummary(demo));
+}
+function updateJournal(){
+ const castleEl=$('journalCastles'),survivorEl=$('journalSurvivorsLine'),campsEl=$('journalCampsLine'),nestEl=$('journalNestLine'),siegeEl=$('journalSiegesLine'),weaponEl=$('journalWeaponLine'),regionEl=$('journalRegionList'),controlsEl=$('journalControlsLine');
+ let summary:JournalSummary|null=null;
+ if(game&&me())summary=previewSummary(deriveJournalSummary(journalInput(me()!)));
+ else if(previewJournalStage)summary=previewJournalDemo();
+ if(!summary){castleEl.textContent='No campaign in progress — join a room to record your progress.';survivorEl.textContent='';campsEl.textContent='';nestEl.textContent='';siegeEl.textContent='';weaponEl.textContent='';regionEl.replaceChildren();controlsEl.textContent=journalControlsLegend().join(' · ');return;}
+ lastJournalSummary=summary;
+ castleEl.textContent=`Castles held: ${summary.castles.held} / ${summary.castles.total} · Regions secured: ${summary.regions.filter(r=>r.held).length} / ${summary.regions.length}`;
+ regionEl.replaceChildren(...summary.regions.map(region=>{const row=document.createElement('div');row.className='journal-region'+(region.held?' held':'');row.textContent=`${region.held?'†':'‡'} ${region.name} — ${region.castlesHeld}/${region.castlesTotal} castles`;return row;}));
+ survivorEl.textContent=`Survivors rescued: ${summary.survivors.rescued} / ${summary.survivors.total}`;
+ campsEl.textContent=`Camps secured: ${summary.camps.rescued} / ${summary.camps.total} · +4 recruits per rescue`;
+ nestEl.textContent=summary.nest.protected?'Sealed — free every castle and rescue every survivor first.':`Vulnerable — ${summary.nest.hp} / ${summary.nest.maxHp} integrity. Reach the plague nest to end it.`;
+ siegeEl.textContent=summary.sieges.active?`Siege underway${summary.sieges.castleName?` at ${summary.sieges.castleName}`:''} — hold the line.`:`Sieges survived: ${summary.sieges.survived} · Next siege in ${summary.sieges.nextIn??'—'} s`;
+ weaponEl.textContent=summary.weapon?`${summary.weapon.name} — ${summary.weapon.damage} damage · ${summary.weapon.reach} m reach · ${summary.weapon.cooldown}s cooldown · ${summary.weapon.stamina} stamina · ${summary.weapon.shield?'shield allowed':'two-handed (no shield)'}`:'No weapon equipped.';
+ controlsEl.replaceChildren(...journalControlsLegend().map(line=>{const row=document.createElement('div');row.className='journal-control';row.textContent=line;return row;}));
+}
 $('armoryBtn').onclick=()=>{openGuide();$('armoryPanel').scrollIntoView({block:'center'});};
 $('manageCastle').onclick=()=>{openGuide();$('campMenu').scrollIntoView({block:'center'});};$('openRules').onclick=openGuide;$('guideBtn').onclick=openGuide;$('closeGuide').onclick=()=>guide.close();$('cameraBtn').onclick=cameraToggle;
 $('name').setAttribute('value',localStorage.getItem('ss-name')||'');$<HTMLInputElement>('sensitivity').value=String(sensitivity);$<HTMLInputElement>('invert').checked=invert;
@@ -262,7 +369,7 @@ for(const location of ['landing','armory']){
 }
 
 // ---- Read-only QA hooks: character selector state + controller/pad state (no gameplay effect) ----
-const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown;__ssAudioState?:()=>unknown;__ssAudioFocus?:(x?:number|null,z?:number|null)=>unknown};
+const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown;__ssAudioState?:()=>unknown;__ssAudioFocus?:(x?:number|null,z?:number|null)=>unknown;__ssObjectives?:()=>unknown;__ssJournal?:()=>unknown;__ssJournalPreview?:(stage?:string|null)=>unknown;__ssObjectivePreview?:(text?:string|null)=>unknown;__ssForceSiege?:(index?:number|null)=>unknown};
 qaHooks.__ssCharacterSelect=()=>({
  appearanceField:'appearance',
  landingSelectId:characterSelectors[0]?.id??null,
@@ -279,7 +386,7 @@ qaHooks.__ssPad=()=>({
  hints:['RT Attack','LT Block','B Sweep','X Heal','A Interact','Y View'],
  rumbleSupported:!!rumblePad?.vibrationActuator,
  reducedMotion:!!reducedMotionQuery?.matches,
- rumbleGuarded:!!reducedMotionQuery?.matches||guide.open||result.open||document.hidden,
+ rumbleGuarded:!!reducedMotionQuery?.matches||guide.open||result.open||journal.open||document.hidden,
  deadzone:deadzonePreset,
  deadzoneValue:deadzoneAmount,
  padSensitivity,
@@ -305,8 +412,8 @@ qaHooks.__ssCaptions=()=>({
  lastAt:+captionAt.toFixed(1),
  rateLimitMs:CAPTION_RATE_LIMIT_MS,
  displayMs:3800,
- gated:!captionsEnabled||guide.open||result.open||document.hidden,
- paused:guide.open||result.open||document.hidden
+ gated:!captionsEnabled||guide.open||result.open||journal.open||document.hidden,
+ paused:guide.open||result.open||journal.open||document.hidden
 });
 /** QA-only deterministic caption trigger (respects the enabled/pause gates; no gameplay effect). */
 qaHooks.__ssCaptionDemo=(cue?:string)=>{
@@ -321,7 +428,7 @@ qaHooks.__ssAudioState=()=>{
  const state=ambience.audioState();
  return {
   enabled:soundEnabled(),
-  paused:document.hidden||guide.open||result.open,
+  paused:document.hidden||guide.open||result.open||journal.open,
   contextState:state.contextState,
   weather:state.weather,
   regionBeds:state.regionBeds,
@@ -339,6 +446,43 @@ qaHooks.__ssAudioFocus=(x?:number|null,z?:number|null)=>{
  const pos=typeof x==='number'&&typeof z==='number'&&Number.isFinite(x)&&Number.isFinite(z)?{x,z}:null;
  ambience.setDiagnosticFocus(pos);
  return qaHooks.__ssAudioState?.();
+};
+/** Read-only campaign objective/journal state for QA (live authoritative snapshot; no side effects). */
+qaHooks.__ssObjectives=()=>{
+ const player=me();
+ if(!game||!player)return {next:lastObjective??{kind:'none',text:'Join a campaign to see your next objective.',detail:'',distance:null,bearing:null,target:null},progress:null,journalOpen:journal.open};
+ const input=journalInput(player);
+ return {next:deriveObjectiveLine(input),progress:deriveJournalSummary(input),journalOpen:journal.open,previewObjective:previewObjectiveText,previewStage:previewJournalStage};
+};
+qaHooks.__ssJournal=()=>({
+ open:journal.open,
+ summary:lastJournalSummary,
+ lineText:$('objectiveText')?.textContent??null,
+ journalButtonId:'journalBtn',
+ openFromGuideId:'openJournalFromGuide',
+ closeId:'closeJournal',
+});
+/** QA-only layout previews (display only, never touches gameplay/authority). */
+qaHooks.__ssJournalPreview=(stage?:string|null)=>{
+ previewJournalStage=stage==='early'||stage==='mid'||stage==='late'?stage:null;
+ if(journal.open)updateJournal();
+ return qaHooks.__ssJournal?.();
+};
+qaHooks.__ssObjectivePreview=(text?:string|null)=>{
+ previewObjectiveText=typeof text==='string'?text:null;
+ if(game&&me())updateObjectiveHud(me()!);
+ else{objectiveLineEl.hidden=previewObjectiveText===null;const textEl=$('objectiveText');if(textEl&&previewObjectiveText!==null)textEl.textContent=previewObjectiveText;}
+ return {previewObjective:previewObjectiveText,lineText:$('objectiveText')?.textContent??null};
+};
+/** QA-only siege trigger: sends {type:'qa-siege', index?} on the live socket. Server side is
+ * SS_QA=1-gated; this hook never changes client gameplay state itself. Returns true if the message
+ * was handed to an open socket. */
+qaHooks.__ssForceSiege=(index?:number|null)=>{
+ try{
+  const message=typeof index==='number'&&Number.isFinite(index)?{type:'qa-siege',index:Math.max(0,Math.floor(index))}:{type:'qa-siege'};
+  send(message);
+  return ws?.readyState===WebSocket.OPEN;
+ }catch{return false;}
 };
 
 // ---- Progressive world loading: show real asset counts, gate joining on the core set only ----
@@ -386,7 +530,7 @@ async function connect(mode:'create'|'join'|'resume'){
  ws.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch{return;}
   if(m.type==='welcome'){cmd('character:'+selectedCharacter);id=m.id;code=m.code;token=m.token;everJoined=true;attempts=0;seq=0;sessionStorage.setItem('ss-session',JSON.stringify({code,token}));$('landing').hidden=true;$('hud').hidden=false;$('roomCode').textContent=code;toast('Campaign started. Clear the Fallen Keep, then hold E / A at its banner.');}
   else if(m.type==='state'){if(!document.hidden){for(const cue of combatCues(game,m.game,id)){combatAudio.play(cue);if(cue.kind==='impact'||cue.kind==='hurt')ambience.duck(1);else if(cue.kind==='swing'||cue.kind==='block')ambience.duck(.55);if(cue.kind==='hurt'){const hudActor=m.game.actors.find((a:Actor)=>a.id===id);const weight=weaponCombatProfile(hudActor?.weapon).weight;rumble(clamp(.16+.24*weight,.2,.55),150);$('hud').classList.remove('hurt-flash');void $('hud').offsetWidth;$('hud').classList.add('hurt-flash');view.shake=Math.max(view.shake,.24);}else if(cue.kind==='block')rumble(.3,90);}for(const event of eventCues(game,m.game)){combatAudio.playEvent(event);if(event==='capture'){rumble(.22,170);const captured=m.game.castles.find((c:{id:string;name:string;friendly:boolean})=>c.friendly&&!game?.castles.find(o=>o.id===c.id)?.friendly);if(captured)showCaption('castle-captured',captured.name);}}
-   if(game?.status==='playing'){const wasSiege=!!game.siege?.active,nowSiege=!!m.game.siege?.active;if(nowSiege&&!wasSiege){const target=m.game.castles.find((c:{id:string;name:string})=>c.id===m.game.siege?.castle);showCaption('siege-start',target?.name);}else if(!nowSiege&&wasSiege)showCaption('siege-end');}
+   if(game?.status==='playing'){const wasSiege=!!game.siege?.active,nowSiege=!!m.game.siege?.active;if(nowSiege&&!wasSiege){const target=m.game.castles.find((c:{id:string;name:string})=>c.id===m.game.siege?.castle);const bossName=(m.game.siege as {bossName?:string}|null)?.bossName;showCaption('siege-start',target?.name?`${target.name}${bossName?` · ${bossName} leads the wave`:''}`:bossName??undefined);}else if(!nowSiege&&wasSiege)showCaption('siege-end');}
   }game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();stopRumble();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;$('restart').hidden=host!==id;result.showModal();}else if(game!.status==='playing'&&result.open){result.close();lastEvent=0;cmd('character:'+selectedCharacter);}}
   else if(m.type==='error'){if(!everJoined){sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;stopped=true;ws?.close();$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}else{toast(m.text);if(/expired|not found/.test(m.text)){stopped=true;sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;setTimeout(()=>location.reload(),2000);}}}
  };
@@ -397,8 +541,8 @@ $('create').onclick=()=>connect('create');$('join').onclick=()=>connect('join');
 $('invite').onclick=async()=>{const url=new URL(location.href);url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);toast('Invitation link copied. Send it to your fellowship.');}catch{toast(`Room code: ${code}. Friends can enter it on this site.`);}};
 for(const id of WEAPON_IDS){const w=WEAPONS[id],b=document.createElement('button');b.id='equip-'+id;b.dataset.command='equip:'+id;b.innerHTML=`<strong>${w.name}</strong><span>${w.style}</span><span>${w.damage} damage · ${w.reach} m reach · ${w.stamina} stamina · ${w.cooldown}s recovery</span><small>Join a campaign to equip</small>`;b.disabled=true;$('weaponCards').append(b);}
 document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach(b=>b.onclick=()=>cmd(b.dataset.command!));
-window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement||guide.open||result.open)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='KeyR')cmd('nextWeapon');if(e.code==='KeyI')$('armoryBtn').click();if(e.code==='KeyV')cameraToggle();if(e.code==='KeyH')cmd('heal');if(e.code==='KeyQ')cmd('sweep');if(e.code==='Digit1')cmd('follow');if(e.code==='Digit2')cmd('hold');if(e.code==='Digit3')cmd('attack');if(e.code==='KeyG')openGuide();if(e.code==='KeyB'){$('manageCastle').click();}});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden){release();stopRumble();}updateAudioPause();});
-canvas.addEventListener('click',()=>{if(game&&!guide.open&&!result.open&&matchMedia('(pointer:fine)').matches)canvas.requestPointerLock?.();});canvas.addEventListener('contextmenu',e=>e.preventDefault());canvas.addEventListener('mousedown',e=>{if(document.pointerLockElement===canvas){if(e.button===0){mouse.attack=true;}if(e.button===2)mouse.block=true;}});window.addEventListener('mouseup',e=>{if(e.button===0)mouse.attack=false;if(e.button===2)mouse.block=false;});document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas)release();});document.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas){yaw+=e.movementX*.0025*sensitivity;pitch=clamp(pitch-e.movementY*.0025*sensitivity*(invert?-1:1),-1.05,1.05);}});
+window.addEventListener('keydown',e=>{if(e.code==='KeyJ'&&!e.repeat&&!(e.target instanceof HTMLInputElement)&&!(e.target instanceof HTMLSelectElement)){if(journal.open)closeJournalOverlay();else openJournal();return;}if(e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement||guide.open||result.open||journal.open)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='KeyR')cmd('nextWeapon');if(e.code==='KeyI')$('armoryBtn').click();if(e.code==='KeyV')cameraToggle();if(e.code==='KeyH')cmd('heal');if(e.code==='KeyQ')cmd('sweep');if(e.code==='Digit1')cmd('follow');if(e.code==='Digit2')cmd('hold');if(e.code==='Digit3')cmd('attack');if(e.code==='KeyG')openGuide();if(e.code==='KeyB'){$('manageCastle').click();}});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden){release();stopRumble();}updateAudioPause();});
+canvas.addEventListener('click',()=>{if(game&&!guide.open&&!result.open&&!journal.open&&matchMedia('(pointer:fine)').matches)canvas.requestPointerLock?.();});canvas.addEventListener('contextmenu',e=>e.preventDefault());canvas.addEventListener('mousedown',e=>{if(document.pointerLockElement===canvas){if(e.button===0){mouse.attack=true;}if(e.button===2)mouse.block=true;}});window.addEventListener('mouseup',e=>{if(e.button===0)mouse.attack=false;if(e.button===2)mouse.block=false;});document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas)release();});document.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas){yaw+=e.movementX*.0025*sensitivity;pitch=clamp(pitch-e.movementY*.0025*sensitivity*(invert?-1:1),-1.05,1.05);}});
 const stick=$('stick');let stickId=-1;function stickMove(e:PointerEvent){const rect=stick.getBoundingClientRect();const vector=touchStickVector(e.clientX-(rect.left+rect.width/2),e.clientY-(rect.top+rect.height/2),35,deadzoneAmount);touch.mx=vector.mx;touch.forward=vector.forward;const knob=stick.firstElementChild as HTMLElement;if(knob)knob.style.transform=`translate(${(vector.mx*25).toFixed(1)}px,${(-vector.forward*25).toFixed(1)}px)`;}
 stick.onpointerdown=e=>{stickId=e.pointerId;stick.setPointerCapture(stickId);stickMove(e);};stick.onpointermove=e=>{if(e.pointerId===stickId)stickMove(e);};const stopStick=()=>{stickId=-1;touch.mx=touch.forward=0;(stick.firstElementChild as HTMLElement).style.transform='';};stick.onpointerup=stopStick;stick.onpointercancel=stopStick;
 let lookId=-1,lookX=0,lookY=0;const look=$('lookpad');look.onpointerdown=e=>{lookId=e.pointerId;lookX=e.clientX;lookY=e.clientY;look.setPointerCapture(lookId);};look.onpointermove=e=>{if(e.pointerId!==lookId)return;lastLookDx=e.clientX-lookX;lastLookDy=e.clientY-lookY;yaw+=lastLookDx*.006*touchLookSensitivity;pitch=clamp(pitch-lastLookDy*.006*touchLookSensitivity*(invert?-1:1),-1.05,1.05);lookX=e.clientX;lookY=e.clientY;};look.onpointerup=look.onpointercancel=()=>{lookId=-1;lastLookDx=0;lastLookDy=0;};
@@ -418,6 +562,8 @@ function applyInputHints(){
  $('cameraBtn').textContent=`${first?'First':'Third'} person${usingPad?' · Y':touchDevice?'':' · V'}`;
  $('armoryBtn').textContent=touchDevice?'Armory':'Armory · I';
  $('guideBtn').textContent=touchDevice?'Guide':'Guide / Menu';
+ journalHudButton.textContent=touchDevice?'Journal':'Journal · J';
+ journalGuideButton.textContent=touchDevice?'Open campaign journal':'Open campaign journal · J';
  for(const [action,keyboard,touchLabel] of touchHintLabels){
   const button=document.querySelector<HTMLButtonElement>(`[data-command="${action}"]`);
   if(button)button.textContent=touchDevice?touchLabel:keyboard;
@@ -439,7 +585,7 @@ function applyInputHints(){
 refreshDeviceProfile();
 window.addEventListener('resize',()=>refreshDeviceProfile());
 window.addEventListener('orientationchange',()=>refreshDeviceProfile());
-function menuGamepad(p:Gamepad){const d=readPad(p,padPrev,deadzoneAmount);menuPrev=d.previous;const root=guide.open?guide:result.open?result:$('landing');const buttons=[...root.querySelectorAll<HTMLButtonElement>('button')].filter(b=>!b.hidden&&!b.disabled&&b.offsetParent!==null);if(!buttons.length)return;const up=(p.buttons[12]?.pressed&&!padPrev[12]),down=(p.buttons[13]?.pressed&&!padPrev[13]);if(up)menuIndex=(menuIndex+buttons.length-1)%buttons.length;if(down)menuIndex=(menuIndex+1)%buttons.length;menuIndex%=buttons.length;if(up||down)buttons[menuIndex].focus();if(p.buttons[0]?.pressed&&!padPrev[0])buttons[menuIndex].click();if(d.menu&&guide.open)guide.close();}
+function menuGamepad(p:Gamepad){const d=readPad(p,padPrev,deadzoneAmount);menuPrev=d.previous;const root=guide.open?guide:journal.open?journal:result.open?result:$('landing');const buttons=[...root.querySelectorAll<HTMLButtonElement>('button')].filter(b=>!b.hidden&&!b.disabled&&b.offsetParent!==null);if(!buttons.length)return;const up=(p.buttons[12]?.pressed&&!padPrev[12]),down=(p.buttons[13]?.pressed&&!padPrev[13]);if(up)menuIndex=(menuIndex+buttons.length-1)%buttons.length;if(down)menuIndex=(menuIndex+1)%buttons.length;menuIndex%=buttons.length;if(up||down)buttons[menuIndex].focus();if(p.buttons[0]?.pressed&&!padPrev[0])buttons[menuIndex].click();if(d.menu&&(guide.open||journal.open)){if(guide.open)guide.close();else closeJournalOverlay();}}
 function updateCompass(p:Actor){
  const track=$('compassTrack');if(!track||!game)return;
  track.replaceChildren();
@@ -509,6 +655,8 @@ $('playerName').textContent=p.name;$('hud').classList.toggle('low-health',p.hp>0
  }else{
   bossBar.style.display='none';
  }
+ updateObjectiveHud(p);
+ if(journal.open)updateJournal();
 }
 function frame(now:number){const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame=now;let pads:Gamepad[]=[];try{pads=Array.from(navigator.getGamepads?.()??[]).filter((p):p is Gamepad=>!!p&&p.connected&&p.mapping==='standard');}catch{}const pad=pads.find(p=>p.index===padIndex)||pads[0];if(pad){padIndex=pad.index;padName=pad.id;}else{padName='';padPrev=[];menuPrev=[];}
  const padConnected=!!pad;
@@ -524,8 +672,8 @@ function frame(now:number){const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame
   }
  }else if(padConnected)rumblePad=pad as RumblePad;
  let strafe=touch.mx+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0),forward=touch.forward+(keys.has('KeyW')?1:0)-(keys.has('KeyS')?1:0),attack=mouse.attack||touch.attack,block=mouse.block||touch.block,interact=keys.has('KeyE')||touch.interact;
- if(pad){const d=readPad(pad,padPrev,deadzoneAmount);if(!game||guide.open||result.open)menuGamepad(pad);else if(!document.hidden){strafe+=d.mx;forward+=d.forward;yaw+=d.lookX*dt*2.6*padSensitivity;pitch=clamp(pitch-d.lookY*dt*1.8*padSensitivity*(invert?-1:1),-1.05,1.05);attack ||=d.attack;block ||=d.block;interact ||=d.interact;if(pad.buttons.some(b=>b.pressed))combatAudio.unlock();if(d.toggle)cameraToggle();if(d.heal)cmd('heal');if(d.sweep)cmd('sweep');if(d.menu)openGuide();for(const action of d.commands)cmd(action);}padPrev=d.previous;}
- const p=me();if(game&&p){if(now-lastSend>=50){const inactive=guide.open||result.open||document.hidden;send({type:'input',input:{mx:inactive?0:Math.cos(yaw)*strafe+Math.sin(yaw)*forward,mz:inactive?0:Math.sin(yaw)*strafe-Math.cos(yaw)*forward,yaw,attack:!inactive&&attack,block:!inactive&&block,interact:!inactive&&interact,seq:seq++}});lastSend=now;}if(now-lastHud>100){updateHud(p);lastHud=now;}}
+ if(pad){const d=readPad(pad,padPrev,deadzoneAmount);if(!game||guide.open||result.open||journal.open)menuGamepad(pad);else if(!document.hidden){strafe+=d.mx;forward+=d.forward;yaw+=d.lookX*dt*2.6*padSensitivity;pitch=clamp(pitch-d.lookY*dt*1.8*padSensitivity*(invert?-1:1),-1.05,1.05);attack ||=d.attack;block ||=d.block;interact ||=d.interact;if(pad.buttons.some(b=>b.pressed))combatAudio.unlock();if(d.toggle)cameraToggle();if(d.heal)cmd('heal');if(d.sweep)cmd('sweep');if(d.menu)openGuide();for(const action of d.commands)cmd(action);}padPrev=d.previous;}
+ const p=me();if(game&&p){if(now-lastSend>=50){const inactive=guide.open||result.open||journal.open||document.hidden;send({type:'input',input:{mx:inactive?0:Math.cos(yaw)*strafe+Math.sin(yaw)*forward,mz:inactive?0:Math.sin(yaw)*strafe-Math.cos(yaw)*forward,yaw,attack:!inactive&&attack,block:!inactive&&block,interact:!inactive&&interact,seq:seq++}});lastSend=now;}if(now-lastHud>100){updateHud(p);lastHud=now;}}
 updateCaptions(now);pollCaptionWeather(dt);pollCaptionActors(p,dt);
  if(now>toastUntil)$('toast').textContent='';updateAudioPause();paintPerf(now);ambience.update(dt,game,p);view.draw(game,p,yaw,pitch,first,dt,now/1000);requestAnimationFrame(frame);
 }

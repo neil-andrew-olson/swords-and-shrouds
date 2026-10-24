@@ -2226,3 +2226,23 @@ Deployed after the Lead accepted the cycle-9 pass. Live verification runs:
 **Cycle-9 live deployment is verified end-to-end: green**; task-87 complete. Cycle-10 candidates:
 near-forge audio ear check, physical-device/real-GPU/perceptual passes, hardware controller rumble,
 server-authoritative spear equip/grip capture, campaign/siege depth, more enemy variety, balance.
+
+---
+
+## Iteration cycle 2026-10M (AAA loop, cycle 10) - campaign journal, wayfinding, siege boss, audio ramp
+
+### Authoritative capture + regression - final build index-DTiDZ99w.js (918,844 B): PASS
+
+Fresh bundled-Node-24 build reproduced index-DTiDZ99w.js exactly (fresh-build smoke 26/26, 0 page/console/log errors, 0 404s, 11 cards, WS 1/0; night TP 55.34). Authoritative runs: characters 93/93 (qa/characters-c10), perf 98/98 (qa/perf-c10), mobile 25/25 (qa/mobile-c10), co-op 18/18 (qa/coop-c10), pre-deploy live baseline 26/26 (qa/live-batch13-pre, deployed cycle-9: 11 cards).
+
+1) Campaign journal + objectives - PASS. Opens from HUD #journalBtn (Guide #openJournalFromGuide / hotkey J wired by owner), modal #journal with aria-label, scroll #journalScroll (719/628, overflow-y auto), close #closeJournal; all 7 sections populated live (castles/regions, survivors, camps, nest, sieges, weapon stats, controls, tips). Display-only stages early/mid/late: 1/9 -> 5/9 -> 9/9 castles, 1->4->9 survivors, 0->1->3 sieges, nest sealed->vulnerable. Next objective #objectiveText = "Free The Fallen Keep - 27 m" with direction; player position unchanged while open (modal pauses input); close returns journal closed. Mobile portrait 390x844 journal 352x747, scrollHeight 928 > clientHeight 684, 7/7 sections; landscape 844x390 776x300 scrollable; screenshots journal-desktop.png, journal-stage-{early,mid,late}.png, mobile-journal{,-landscape}.png.
+
+2) Wayfinding - PASS. #ss-objectives DOM pool capacity 14, visible 6, 0 WebGL draws; labels include distances (Survivors - The Old Mill - 22 m; NEXT - Hostile - The Fallen Keep - 27 m; Hostile - The Border Fortress - 103 m; High Citadel - 164 m); 2+ types (camps + castles). Reduced motion: all 6 markers get ss-obj reduced, pulsing 0, animation none (normal 6 pulsing); wayfinding-normal/reduced.png. No draw explosion (TP calls 183).
+
+3) Siege boss - PASS (forced) + normal deferred. Local server SS_QA=1, __ssForceSiege(2) -> state siege {active:true, boss:true, bossName:'Shroud Warden', bossHp:240, bossId:'a165', index:2, waveSize:9}, boss actor kind corrupted name Shroud Warden hp/maxHp 240; announcement toast "Shroud Warden leads the siege of The Fallen Keep!" + boss caption path; siege-boss.png. Normal forced siege index1 refused while boss siege active -> no-boss/normal assertion deferred to weapons-armory game+multiplayer tests (forceSiege index1 boss:false; co-op same boss id/name/hp both sockets). Co-op smoke 18/18.
+
+4) Audio state/focus - PARTIAL. __ssAudioState enabled/running; clear {phase clear, intensity .081, rain 0} -> forced downpour phase downpour intensity .329 rain bed .018 (music duck .84). __ssAudioFocus(52.14,7.3)/chapel accepted but forge/chapel bed levels did not ramp in the headless poll window (owner harness measured forge .024 / chapel .016 immediately) -> near-forge/chapel level remains human ear debt; no product failure.
+
+5) Regression/perf - PASS. Spawn TP 183 calls / 1,635,288 tris (low 143/1.36 M; medium/high 183/1.635 M), geoms 167, textures 207, programs 104; payload 18,376,349 B = 17.52 MiB local; night TP 51.66 (<=75); 7/7 atmosphere + 14 optional views incl. content-abbey (contentFocus {name:'content-abbey',x:40,z:-40}, 1,570 colours, grounded/clearanced); plague decals diff 7.58/27.2%; regions 4.21-21.25 colour distance (pass); wind 17.5; weather/low-tier/crown green; hit-hold + 11 weapons (spear) + captions/deadzone unchanged; HUD click->HUD 156 ms / state 6.28 s / join 3.22 s; mobile 25/25; co-op 18/18; live baseline 26/26; 0 page/console/log errors, 0 404s.
+
+Cycle-10 verdict: PASS on the cycle-10 gates (journal/objectives, wayfinding, forced siege boss, regressions), with near-forge/chapel audio level and normal forced-siege no-boss deferred (owner tests + human ear check); gaps: journal hotkey/Guide-open scripted only via HUD button (owner wiring exists), perf-end force-siege can be refused while a siege is active. After deploy: final live pass + task-92 complete.
