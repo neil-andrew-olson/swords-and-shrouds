@@ -88,10 +88,16 @@ SwiftShader rAF fps (relative proxy only) improved 0.58 → 1.35.
   and authoritative gameplay.
 - Build locally with the bundled Node (see above), then run
   `& $node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build` in the hosting repo.
-- Batch 2026-10C deployment: game commit + hosting pin recorded in the commits; live verification
-  after push should confirm `/games/swords-and-shrouds/health`, the new JS bundle hash
-  (`index-BeMuJwuM.js` expected), the slimmed assets (~12.2 MB total transfer) and that
-  `/assets/custom/rapier.glb.gz` etc. are substantially smaller than before.
+- Batch 2026-10C deployment: game commit `d2b340a` pushed to `swords-and-shrouds` main; hosting
+  commit `47f4782` pins it; Cloudflare Workers Builds deployed successfully (new bundle live ~45 s
+  after push).
+- Live verification (2026-10-24 03:05 America/Chicago): `/games/swords-and-shrouds/` serves
+  `index-BIHlx9in.js` (794,060 B) and `index-CnBWkizl.css`; `/health` OK; the old bundle is gone;
+  assets are the slimmed set — oak 188,639 B (was 8.26 MB), rapier 153,792 B (was 1.36 MB),
+  pine 324,731 B, gatehouse 48,316 B, road normal 247,721 B, fortress_keep 390,396 B. QA's live
+  pass measured **12.18 MB** of asset transfer vs the batch-2 live reference **42.6 MB**
+  (−71.4 %), 0 page/console errors, 0 failed requests, 10 weapon cards, no blue-cone legacy towers
+  in early/mid/settled landing frames.
 
 ## Continuity procedure
 

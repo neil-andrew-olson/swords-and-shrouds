@@ -13,6 +13,10 @@ Batch-1 baseline/final runs and the batch-2 local, live-URL and co-op runs are r
 | Batch-2 live URL (deployed batch-1) | 2026-10-24 01:15 | `& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --out qa/live-batch1 --expect-weapons 8` | **PASS 17/17**, 8 weapon cards, 0 page errors, 0 asset 404s, WS opens=1/closes=0 |
 | Batch-2 live deployment: game `657cdde` / hosting `a627cbb` | 2026-10-24 01:21 | `& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --out qa/live-batch2 --expect-weapons 10 --expect-assets custom/flamberge.glb.gz,custom/mace.glb.gz,custom/camp_tent.glb.gz,custom/stone_wall.glb.gz` | **PASS 18/18**, new bundle `index-DZ7lk_yj.js`, 10 weapon cards, 4/4 new assets HTTP 200, 0 page errors, 0 asset 404s, WS opens=1/closes=0 |
 | Batch-2 2-player co-op | 2026-10-24 01:10 | `& $node scripts/smoke-browser.mjs --coop --skip-build --out qa/coop` | **PASS 18/18**, shared armory unlock, both snapshots list both players, 0 page errors |
+| Batch-3 perf after-capture (`index-BeMuJwuM.js`) | 2026-10-24 03:00 | `& $node scripts/smoke-browser.mjs --perf --skip-build --out qa/perf-after-batch3` | **PASS 23/23** — calls 88,544→301 (0.34 %), tris 4.04 M→1.76 M (43.6 %), payload 43.19→12.20 MB (−71.8 %), tier + loading gates |
+| Batch-3 local smoke (fresh build) | 2026-10-24 02:59 | `& $node scripts/smoke-browser.mjs --out qa/final-batch3` | **PASS 16/16**, 10 cards, 0 errors; rebuilt same bundle; no blue cones in all three landing frames |
+| Batch-3 co-op | 2026-10-24 02:50 | `& $node scripts/smoke-browser.mjs --coop --skip-build --out qa/coop-batch3` | **PASS 18/18**, shared armory unlock, both snapshots list both players |
+| Batch-3 live deployment: game `d2b340a` / hosting `47f4782` | 2026-10-24 03:05 | `& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --out qa/live-batch3 --expect-weapons 10 --expect-assets custom/flamberge.glb.gz,custom/mace.glb.gz,custom/camp_tent.glb.gz,custom/stone_wall.glb.gz` | **PASS 18/18**, bundle `index-BIHlx9in.js`, 10 cards, 4/4 assets 200, live payload **12.18 MB (−71.4 % vs 42.6 MB batch-2)**, 0 errors/404s, no blue cones |
 
 ## Harness
 
@@ -619,8 +623,39 @@ warnings**, 0 log errors, 0 bad responses, 0 failed requests, 10 weapon cards, W
 - **Live baseline (deployed batch-2, 2026-10-24 02:51):** `--url https://neilandrew.dev/games/swords-and-shrouds/ --out qa/live-prebatch3 --expect-weapons 10` → **PASS 17/17**;
   deployed batch-2 bundle still served, 10 weapon cards, 0 page errors, 0 asset 404s, WS
   opens=1/closes=0 (one 9.9 s message gap, no reconnect), fps 0.7. Only log-level entry is the
-  third-party Cloudflare-Insights beacon (`ERR_ADDRESS_UNREACHABLE`, not gated). This is the
-  pre-batch-3 deployment reference; the final new-live run happens after the Lead ships batch 3.
+  third-party Cloudflare-Insights beacon (`ERR_ADDRESS_UNREACHABLE`, not gated). This was the
+  pre-batch-3 deployment reference; the final new-live run is recorded below.
+
+### Final live deployment verification — batch-3 (game `d2b340a`, hosting `47f4782`)
+
+Run after the Lead's Cloudflare deployment (bundle `index-BIHlx9in.js`, 794,060 B):
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch3 --expect-weapons 10 `
+    --expect-assets custom/flamberge.glb.gz,custom/mace.glb.gz,custom/camp_tent.glb.gz,custom/stone_wall.glb.gz
+```
+
+- **Result: PASS 18/18.** 0 uncaught page errors, 0 console errors, 0 bad responses, 0 failed
+  internal requests; 10 weapon cards; all 4 expected GLBs HTTP 200. 70 internal requests (65
+  `/assets/**`). Live bundle in the network log: **`assets/index-BIHlx9in.js`** + CSS
+  `index-CnBWkizl.css`. WS `wss://…/ws` opens=1/closes=0, max gap 2.4 s. Renderer ANGLE
+  SwiftShader WebGL2, fps 1.4.
+- **Live payload delta** (measured by GET-ting all 65 requested asset URLs): **12,182,505 B =
+  12.18 MB** vs the batch-2 live reference **42.6 MB** → 28.6 %, i.e. **−71.4 %**. Slim assets
+  confirmed live: oak 188,639 B (was 8.26 MB), rapier 153,792 B (was 1.36 MB), pine 324,731 B
+  (was 1.35 MB), gatehouse 48,316 B (was 3.44 MB), road_country_normal.png 247,721 B (was
+  1.72 MB), fortress_keep 390,396 B, CREDITS 4,697 B.
+- **Landing-page visual:** `qa/live-batch3/00-landing-early.png` (immediately),
+  `00-landing-mid.png` and `00-landing.png` all show **no legacy blue-cone towers**, with the stone
+  keeps/masonry visible; moon+halo, tents, low ruined walls, racks, HUD and 10-card armory all
+  present. No visual regression vs the local final capture.
+- Only log-level entry: external `static.cloudflareinsights.com` beacon
+  (`ERR_ADDRESS_UNREACHABLE`, third-party, not gated).
+- Co-op and the pre-deploy live baseline results above stand (same game code path; batch-3 co-op
+  PASS 18/18 and live baseline PASS 17/17).
+
+**Batch-3 live deployment is verified end-to-end: green.**
 
 **Verdict: batch-3 smoothness pass is green on every measured axis** on the final bundle
 `index-BeMuJwuM.js` — draw calls 0.34 % and triangles 43.6 % of baseline in the spawn view, local
