@@ -85,9 +85,13 @@ procedural ambience and layered combat audio; docs `docs/BATCH-2026-10-SPEC.md` 
 - Build locally with the bundled Node: prepend
   `C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin` to PATH, then run
   `& $node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build` in the hosting repo.
-- Live verification for batch 2026-10B: recorded in the hosting commit message / this session log;
-  after deploying, check `/games/swords-and-shrouds/health`, the new JS bundle hash, the four new
-  `.glb.gz` assets and `assets/CREDITS.txt` return 200.
+- Batch 2026-10B deployment: game commit `657cdde` pushed to `swords-and-shrouds` main; hosting
+  commit `a627cbb` pins it; Cloudflare Workers Builds deployed successfully.
+- Live verification (2026-10-24 01:20 America/Chicago): `/games/swords-and-shrouds/health` returns
+  `{"ok":true,"backend":"cloudflare-durable-objects"}`; the live HTML serves the new bundle
+  `index-DZ7lk_yj.js` (774 kB) and `index-DSURmr1-.css`, and the old bundle is gone;
+  `assets/custom/{flamberge,mace,camp_tent,stone_wall}.glb.gz` and `assets/CREDITS.txt` return
+  HTTP 200. 24 seconds from hosting push to new bundle live.
 
 ## Continuity procedure
 
