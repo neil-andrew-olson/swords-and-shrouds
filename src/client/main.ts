@@ -5,7 +5,7 @@ import {Ambience} from './ambience';
 import {WEAPON_IDS,WEAPONS,weaponStats} from '../shared/weapons';
 import {WorldView} from './scene';
 import {weaponCombatProfile} from './equipment';
-import {readPad} from './controller';
+import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue} from './controller';
 import {dist,clamp,BOUNDS,REGIONS} from '../shared/world';
 import type {Game,Actor} from '../shared/types';
 type PerfSnapshot={fps?:number;frameMs?:number;calls?:number;triangles?:number;points?:number;geometries?:number;textures?:number;programs?:number;quality?:string;tier?:string};
@@ -19,6 +19,11 @@ const canvas=$<HTMLCanvasElement>('world');let view:WorldView;try{view=new World
 let game:Game|undefined,id='',code='',host='',token='',ws:WebSocket|undefined,seq=0,yaw=0,pitch=-.13,first=localStorage.getItem('ss-camera')==='first',sensitivity=Number(localStorage.getItem('ss-sensitivity'))||1,invert=localStorage.getItem('ss-invert')==='true';
 let attempts=0,everJoined=false,lastSend=0,lastHud=0,lastFrame=performance.now(),lastEvent=0,toastUntil=0,stopped=false;
 let padPrev:boolean[]=[],menuPrev:boolean[]=[],padIndex=-1,padName='',padWasConnected=false,menuIndex=0;
+const storedDeadzone=localStorage.getItem('ss-deadzone');
+let deadzonePreset:DeadzonePreset=storedDeadzone&&Object.hasOwn(DEADZONE_PRESETS,storedDeadzone)?storedDeadzone as DeadzonePreset:'normal';
+let deadzoneAmount=deadzoneValue(deadzonePreset);
+let padSensitivity=Number(localStorage.getItem('ss-pad-sensitivity'))||1;
+let captionsEnabled=localStorage.getItem('ss-captions')==='1';
 const keys=new Set<string>(),mouse={attack:false,block:false},touch={mx:0,forward:0,attack:false,block:false,interact:false};
 const guide=$<HTMLDialogElement>('guide'),result=$<HTMLDialogElement>('result');
 const me=()=>game?.actors.find(a=>a.id===id);
@@ -112,6 +117,86 @@ qualitySelect.onchange=()=>{
 const qualityLabel=document.createElement('label');
 qualityLabel.append('Graphics quality ',qualitySelect);
 document.querySelector('#guide .settings')?.append(qualityLabel);
+
+// ---- Controller settings (deadzone preset + look sensitivity) in the existing Guide/Settings row ----
+const guideSettings=document.querySelector('#guide .settings');
+const padDeadzoneSelect=document.createElement('select');
+padDeadzoneSelect.id='padDeadzone';padDeadzoneSelect.setAttribute('aria-label','Controller deadzone preset');
+for(const preset of Object.keys(DEADZONE_PRESETS) as DeadzonePreset[]){
+ const option=document.createElement('option');option.value=preset;option.textContent=preset[0].toUpperCase()+preset.slice(1);padDeadzoneSelect.append(option);
+}
+padDeadzoneSelect.value=deadzonePreset;
+padDeadzoneSelect.onchange=()=>{
+ deadzonePreset=padDeadzoneSelect.value as DeadzonePreset;
+ deadzoneAmount=deadzoneValue(deadzonePreset);
+ localStorage.setItem('ss-deadzone',deadzonePreset);
+};
+const padDeadzoneLabel=document.createElement('label');
+padDeadzoneLabel.append('Deadzone ',padDeadzoneSelect);
+guideSettings?.append(padDeadzoneLabel);
+const padSensitivityInput=document.createElement('input');
+padSensitivityInput.id='padSensitivity';padSensitivityInput.type='range';padSensitivityInput.min='0.4';padSensitivityInput.max='2';padSensitivityInput.step='0.1';
+padSensitivityInput.value=String(padSensitivity);padSensitivityInput.setAttribute('aria-label','Controller look sensitivity');
+padSensitivityInput.oninput=()=>{
+ padSensitivity=Number(padSensitivityInput.value)||1;
+ localStorage.setItem('ss-pad-sensitivity',String(padSensitivity));
+};
+const padSensitivityLabel=document.createElement('label');
+padSensitivityLabel.append('Controller look ',padSensitivityInput);
+guideSettings?.append(padSensitivityLabel);
+const captionsToggle=document.createElement('input');
+captionsToggle.id='captionsToggle';captionsToggle.type='checkbox';captionsToggle.checked=captionsEnabled;
+captionsToggle.onchange=()=>{
+ captionsEnabled=captionsToggle.checked;
+ localStorage.setItem('ss-captions',captionsEnabled?'1':'0');
+ if(!captionsEnabled)hideCaption();
+};
+const captionsLabel=document.createElement('label');
+captionsLabel.append(captionsToggle,' Captions (non-visual cues)');
+guideSettings?.append(captionsLabel);
+
+// ---- Accessibility captions: one subtle HUD line, off by default, rate-limited ----
+const captionLine=document.createElement('div');
+captionLine.id='captions';captionLine.hidden=true;captionLine.setAttribute('role','status');captionLine.setAttribute('aria-live','polite');
+$('hud')?.append(captionLine);
+let captionAt=0;
+let captionCue:CaptionCue|undefined;
+let captionDisplayedUntil=0;
+let captionWeatherTimer=0,captionFlash=0,captionFlashSeen=false,captionUndeadTimer=6,captionLowHealthLatched=false;
+function hideCaption(){captionLine.hidden=true;captionLine.textContent='';captionCue=undefined;captionAt=0;}
+/** True when a caption must be suppressed (disabled, paused/menu/hidden, or rate-limited). */
+function captionGated(cue:CaptionCue,force=false){
+ if(!captionsEnabled)return true;
+ if(guide.open||result.open||document.hidden)return true;
+ if(!force&&(!game||game.status!=='playing'))return true;
+ return !captionAllowed(performance.now(),captionAt,captionCue,cue);
+}
+function showCaption(cue:CaptionCue,detail?:string,force=false){
+ if(captionGated(cue,force))return;
+ captionCue=cue;captionAt=performance.now();captionDisplayedUntil=captionAt+3800;
+ captionLine.textContent=captionText(cue,detail);captionLine.hidden=false;
+}
+function updateCaptions(now:number){if(!captionLine.hidden&&now>=captionDisplayedUntil)hideCaption();}
+/** Thunder/lightning captions come from world-scene's weather flash counter (polled at 4 Hz). */
+function pollCaptionWeather(dt:number){
+ if(!captionsEnabled)return;
+ captionWeatherTimer+=dt;if(captionWeatherTimer<.25)return;captionWeatherTimer=0;
+ const hook=(window as unknown as {__ssWeather?:()=>{flash?:number;intensity?:number}}).__ssWeather;
+ if(typeof hook!=='function')return;
+ let weather;try{weather=hook();}catch{return;}
+ const flash=typeof weather?.flash==='number'?weather.flash:0;
+ if(!captionFlashSeen){captionFlashSeen=true;captionFlash=flash;}
+ else if(flash>captionFlash){captionFlash=flash;if((weather?.intensity??0)>.05)showCaption('thunder');}
+}
+/** Low-health and nearby-undead captions (rate-limited like the audio beds they describe). */
+function pollCaptionActors(p:Actor|undefined,dt:number){
+ if(!captionsEnabled||!p||!game)return;
+ if(p.hp>0&&p.hp/p.maxHp<.3&&!captionLowHealthLatched){captionLowHealthLatched=true;showCaption('low-health');}
+ else if(p.hp/p.maxHp>=.45)captionLowHealthLatched=false;
+ captionUndeadTimer-=dt;if(captionUndeadTimer>0)return;
+ captionUndeadTimer=7+Math.random()*6;
+ for(const a of game.actors)if(a.hp>0&&(a.kind==='zombie'||a.kind==='corrupted')&&dist(a,p)<34){showCaption('undead');return;}
+}
 function toast(text:string){$('toast').textContent=text;toastUntil=performance.now()+5000;}
 function cmd(action:string){send({type:'command',action});}
 function cameraToggle(){first=!first;localStorage.setItem('ss-camera',first?'first':'third');$('cameraBtn').textContent=`${first?'First':'Third'} person · V / Y`;}
@@ -152,7 +237,7 @@ for(const location of ['landing','armory']){
 }
 
 // ---- Read-only QA hooks: character selector state + controller/pad state (no gameplay effect) ----
-const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown};
+const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown};
 qaHooks.__ssCharacterSelect=()=>({
  appearanceField:'appearance',
  landingSelectId:characterSelectors[0]?.id??null,
@@ -169,8 +254,42 @@ qaHooks.__ssPad=()=>({
  hints:['RT Attack','LT Block','B Sweep','X Heal','A Interact','Y View'],
  rumbleSupported:!!rumblePad?.vibrationActuator,
  reducedMotion:!!reducedMotionQuery?.matches,
- rumbleGuarded:!!reducedMotionQuery?.matches||guide.open||result.open||document.hidden
+ rumbleGuarded:!!reducedMotionQuery?.matches||guide.open||result.open||document.hidden,
+ deadzone:deadzonePreset,
+ deadzoneValue:deadzoneAmount,
+ padSensitivity,
+ captionsEnabled
 });
+qaHooks.__ssControllerSettings=()=>({
+ deadzonePreset,
+ deadzoneValue:deadzoneAmount,
+ presets:{...DEADZONE_PRESETS},
+ padSensitivity,
+ captionsEnabled,
+ deadzoneSelectId:'padDeadzone',
+ sensitivityInputId:'padSensitivity',
+ captionsToggleId:'captionsToggle',
+ storageKeys:{deadzone:'ss-deadzone',padSensitivity:'ss-pad-sensitivity',captions:'ss-captions'}
+});
+qaHooks.__ssCaptions=()=>({
+ enabled:captionsEnabled,
+ lineId:'captions',
+ visible:!captionLine.hidden,
+ text:captionLine.textContent||'',
+ lastCue:captionCue??null,
+ lastAt:+captionAt.toFixed(1),
+ rateLimitMs:CAPTION_RATE_LIMIT_MS,
+ displayMs:3800,
+ gated:!captionsEnabled||guide.open||result.open||document.hidden,
+ paused:guide.open||result.open||document.hidden
+});
+/** QA-only deterministic caption trigger (respects the enabled/pause gates; no gameplay effect). */
+qaHooks.__ssCaptionDemo=(cue?:string)=>{
+ const cues:CaptionCue[]=['thunder','undead','siege-start','siege-end','low-health','castle-captured'];
+ const target=cues.includes(cue as CaptionCue)?cue as CaptionCue:'thunder';
+ showCaption(target,'Demo Keep',true);
+ return qaHooks.__ssCaptions?.();
+};
 
 // ---- Progressive world loading: show real asset counts, gate joining on the core set only ----
 const defaultConnectionText=$('connection').textContent;
@@ -216,7 +335,9 @@ async function connect(mode:'create'|'join'|'resume'){
  ws.onopen=()=>{const name=$<HTMLInputElement>('name').value.trim()||'Knight';localStorage.setItem('ss-name',name);send({type:mode,name,code:mode==='resume'?code:$<HTMLInputElement>('code').value.trim().toUpperCase(),...(mode==='resume'?{token}:{})});};
  ws.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch{return;}
   if(m.type==='welcome'){cmd('character:'+selectedCharacter);id=m.id;code=m.code;token=m.token;everJoined=true;attempts=0;seq=0;sessionStorage.setItem('ss-session',JSON.stringify({code,token}));$('landing').hidden=true;$('hud').hidden=false;$('roomCode').textContent=code;toast('Campaign started. Clear the Fallen Keep, then hold E / A at its banner.');}
-  else if(m.type==='state'){if(!document.hidden){for(const cue of combatCues(game,m.game,id)){combatAudio.play(cue);if(cue.kind==='impact'||cue.kind==='hurt')ambience.duck(1);else if(cue.kind==='swing'||cue.kind==='block')ambience.duck(.55);if(cue.kind==='hurt'){const hudActor=m.game.actors.find((a:Actor)=>a.id===id);const weight=weaponCombatProfile(hudActor?.weapon).weight;rumble(clamp(.16+.24*weight,.2,.55),150);$('hud').classList.remove('hurt-flash');void $('hud').offsetWidth;$('hud').classList.add('hurt-flash');view.shake=Math.max(view.shake,.24);}else if(cue.kind==='block')rumble(.3,90);}for(const event of eventCues(game,m.game)){combatAudio.playEvent(event);if(event==='capture')rumble(.22,170);}}game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();stopRumble();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;$('restart').hidden=host!==id;result.showModal();}else if(game!.status==='playing'&&result.open){result.close();lastEvent=0;cmd('character:'+selectedCharacter);}}
+  else if(m.type==='state'){if(!document.hidden){for(const cue of combatCues(game,m.game,id)){combatAudio.play(cue);if(cue.kind==='impact'||cue.kind==='hurt')ambience.duck(1);else if(cue.kind==='swing'||cue.kind==='block')ambience.duck(.55);if(cue.kind==='hurt'){const hudActor=m.game.actors.find((a:Actor)=>a.id===id);const weight=weaponCombatProfile(hudActor?.weapon).weight;rumble(clamp(.16+.24*weight,.2,.55),150);$('hud').classList.remove('hurt-flash');void $('hud').offsetWidth;$('hud').classList.add('hurt-flash');view.shake=Math.max(view.shake,.24);}else if(cue.kind==='block')rumble(.3,90);}for(const event of eventCues(game,m.game)){combatAudio.playEvent(event);if(event==='capture'){rumble(.22,170);const captured=m.game.castles.find((c:{id:string;name:string;friendly:boolean})=>c.friendly&&!game?.castles.find(o=>o.id===c.id)?.friendly);if(captured)showCaption('castle-captured',captured.name);}}
+   if(game?.status==='playing'){const wasSiege=!!game.siege?.active,nowSiege=!!m.game.siege?.active;if(nowSiege&&!wasSiege){const target=m.game.castles.find((c:{id:string;name:string})=>c.id===m.game.siege?.castle);showCaption('siege-start',target?.name);}else if(!nowSiege&&wasSiege)showCaption('siege-end');}
+  }game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();stopRumble();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;$('restart').hidden=host!==id;result.showModal();}else if(game!.status==='playing'&&result.open){result.close();lastEvent=0;cmd('character:'+selectedCharacter);}}
   else if(m.type==='error'){if(!everJoined){sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;stopped=true;ws?.close();$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}else{toast(m.text);if(/expired|not found/.test(m.text)){stopped=true;sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;setTimeout(()=>location.reload(),2000);}}}
  };
  ws.onclose=e=>{release();if(stopped)return;if(e.code===4000||e.code===4001){stopped=true;sessionStorage.removeItem('ss-session');toast(e.reason);$('connection').textContent=e.reason;setTimeout(()=>location.reload(),2500);return;}if(everJoined&&attempts<8){toast('Connection lost. Reconnecting…');setTimeout(()=>connect('resume'),Math.min(8000,500*2**attempts++));}else{$('connection').textContent='Unable to connect. Try again shortly.';$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}};
@@ -232,7 +353,7 @@ const stick=$('stick');let stickId=-1;function stickMove(e:PointerEvent){const r
 stick.onpointerdown=e=>{stickId=e.pointerId;stick.setPointerCapture(stickId);stickMove(e);};stick.onpointermove=e=>{if(e.pointerId===stickId)stickMove(e);};const stopStick=()=>{stickId=-1;touch.mx=touch.forward=0;(stick.firstElementChild as HTMLElement).style.transform='';};stick.onpointerup=stopStick;stick.onpointercancel=stopStick;
 let lookId=-1,lookX=0,lookY=0;const look=$('lookpad');look.onpointerdown=e=>{lookId=e.pointerId;lookX=e.clientX;lookY=e.clientY;look.setPointerCapture(lookId);};look.onpointermove=e=>{if(e.pointerId!==lookId)return;yaw+=(e.clientX-lookX)*.006*sensitivity;pitch=clamp(pitch-(e.clientY-lookY)*.006*sensitivity*(invert?-1:1),-1.05,1.05);lookX=e.clientX;lookY=e.clientY;};look.onpointerup=look.onpointercancel=()=>{lookId=-1;};
 document.querySelectorAll<HTMLButtonElement>('[data-hold]').forEach(b=>{const action=b.dataset.hold as 'attack'|'block'|'interact';b.onpointerdown=e=>{b.setPointerCapture(e.pointerId);touch[action]=true;};b.onpointerup=b.onpointercancel=()=>{touch[action]=false;};});
-function menuGamepad(p:Gamepad){const d=readPad(p,padPrev);menuPrev=d.previous;const root=guide.open?guide:result.open?result:$('landing');const buttons=[...root.querySelectorAll<HTMLButtonElement>('button')].filter(b=>!b.hidden&&!b.disabled&&b.offsetParent!==null);if(!buttons.length)return;const up=(p.buttons[12]?.pressed&&!padPrev[12]),down=(p.buttons[13]?.pressed&&!padPrev[13]);if(up)menuIndex=(menuIndex+buttons.length-1)%buttons.length;if(down)menuIndex=(menuIndex+1)%buttons.length;menuIndex%=buttons.length;if(up||down)buttons[menuIndex].focus();if(p.buttons[0]?.pressed&&!padPrev[0])buttons[menuIndex].click();if(d.menu&&guide.open)guide.close();}
+function menuGamepad(p:Gamepad){const d=readPad(p,padPrev,deadzoneAmount);menuPrev=d.previous;const root=guide.open?guide:result.open?result:$('landing');const buttons=[...root.querySelectorAll<HTMLButtonElement>('button')].filter(b=>!b.hidden&&!b.disabled&&b.offsetParent!==null);if(!buttons.length)return;const up=(p.buttons[12]?.pressed&&!padPrev[12]),down=(p.buttons[13]?.pressed&&!padPrev[13]);if(up)menuIndex=(menuIndex+buttons.length-1)%buttons.length;if(down)menuIndex=(menuIndex+1)%buttons.length;menuIndex%=buttons.length;if(up||down)buttons[menuIndex].focus();if(p.buttons[0]?.pressed&&!padPrev[0])buttons[menuIndex].click();if(d.menu&&guide.open)guide.close();}
 function updateCompass(p:Actor){
  const track=$('compassTrack');if(!track||!game)return;
  track.replaceChildren();
@@ -317,8 +438,9 @@ function frame(now:number){const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame
   }
  }else if(padConnected)rumblePad=pad as RumblePad;
  let strafe=touch.mx+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0),forward=touch.forward+(keys.has('KeyW')?1:0)-(keys.has('KeyS')?1:0),attack=mouse.attack||touch.attack,block=mouse.block||touch.block,interact=keys.has('KeyE')||touch.interact;
- if(pad){const d=readPad(pad,padPrev);if(!game||guide.open||result.open)menuGamepad(pad);else if(!document.hidden){strafe+=d.mx;forward+=d.forward;yaw+=d.lookX*dt*2.6*sensitivity;pitch=clamp(pitch-d.lookY*dt*1.8*sensitivity*(invert?-1:1),-1.05,1.05);attack ||=d.attack;block ||=d.block;interact ||=d.interact;if(pad.buttons.some(b=>b.pressed))combatAudio.unlock();if(d.toggle)cameraToggle();if(d.heal)cmd('heal');if(d.sweep)cmd('sweep');if(d.menu)openGuide();for(const action of d.commands)cmd(action);}padPrev=d.previous;}
+ if(pad){const d=readPad(pad,padPrev,deadzoneAmount);if(!game||guide.open||result.open)menuGamepad(pad);else if(!document.hidden){strafe+=d.mx;forward+=d.forward;yaw+=d.lookX*dt*2.6*padSensitivity;pitch=clamp(pitch-d.lookY*dt*1.8*padSensitivity*(invert?-1:1),-1.05,1.05);attack ||=d.attack;block ||=d.block;interact ||=d.interact;if(pad.buttons.some(b=>b.pressed))combatAudio.unlock();if(d.toggle)cameraToggle();if(d.heal)cmd('heal');if(d.sweep)cmd('sweep');if(d.menu)openGuide();for(const action of d.commands)cmd(action);}padPrev=d.previous;}
  const p=me();if(game&&p){if(now-lastSend>=50){const inactive=guide.open||result.open||document.hidden;send({type:'input',input:{mx:inactive?0:Math.cos(yaw)*strafe+Math.sin(yaw)*forward,mz:inactive?0:Math.sin(yaw)*strafe-Math.cos(yaw)*forward,yaw,attack:!inactive&&attack,block:!inactive&&block,interact:!inactive&&interact,seq:seq++}});lastSend=now;}if(now-lastHud>100){updateHud(p);lastHud=now;}}
+updateCaptions(now);pollCaptionWeather(dt);pollCaptionActors(p,dt);
  if(now>toastUntil)$('toast').textContent='';updateAudioPause();paintPerf(now);ambience.update(dt,game,p);view.draw(game,p,yaw,pitch,first,dt,now/1000);requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

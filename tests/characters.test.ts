@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createGame,addPlayer,command,snapshot} from '../src/simulation/game';
-import {PLAYER_CHARACTERS,characterAsset,isPlayerCharacter} from '../src/shared/characters';
+import {PLAYER_CHARACTERS,UNDEAD_ASSETS,characterAsset,characterAssetFallback,isPlayerCharacter} from '../src/shared/characters';
 
 test('character selection defaults to crusader and replicates independently',()=>{
  const game=createGame(),a=addPlayer(game,'one','One'),b=addPlayer(game,'two','Two');
@@ -34,6 +34,26 @@ test('all actor kinds select generated character models',()=>{
  assert.equal(characterAsset({...a,kind:'soldier',role:'heavy'}),'berserker');
  assert.equal(characterAsset({...a,kind:'soldier',role:undefined}),'ally');
  assert.equal(characterAsset({...a,kind:'corrupted'}),'fallen');
- assert.equal(characterAsset({...a,kind:'zombie',id:'z2'}),'skeleton-soldier');
- assert.equal(characterAsset({...a,kind:'zombie',id:'z3'}),'zombie');
+ // Cycle-7 deterministic undead silhouettes: id%4 -> zombie | skeleton-soldier | zombie-bloated | skeleton-armoured.
+ const undead=(id:string)=>({...a,kind:'zombie' as const,id});
+ assert.equal(characterAsset(undead('z0')),'zombie');
+ assert.equal(characterAsset(undead('z1')),'skeleton-soldier');
+ assert.equal(characterAsset(undead('z2')),'zombie-bloated');
+ assert.equal(characterAsset(undead('z3')),'skeleton-armoured');
+ const reachable=new Set<string>();const fallbacks:Record<string,string|undefined>={};
+ for(let n=0;n<16;n++){
+  const actor=undead('a'+n),asset=characterAsset(actor);
+  reachable.add(asset);
+  assert.equal(characterAsset(actor),asset,'deterministic id '+n);
+  fallbacks[asset]=characterAssetFallback(actor);
+ }
+ assert.deepEqual([...reachable].sort(),[...UNDEAD_ASSETS].sort(),'all four undead assets reachable');
+ assert.equal(fallbacks['zombie'],undefined,'base zombie has no fallback');
+ assert.equal(fallbacks['skeleton-soldier'],undefined,'base skeleton has no fallback');
+ assert.equal(fallbacks['zombie-bloated'],'zombie','bloated falls back to the base zombie');
+ assert.equal(fallbacks['skeleton-armoured'],'skeleton-soldier','armoured falls back to the base skeleton');
+ // Variants keep the same actor kind/rig identity; non-undead kinds never report a fallback.
+ assert.equal(characterAssetFallback({...a,kind:'player'}),undefined);
+ assert.equal(characterAssetFallback({...a,kind:'corrupted'}),undefined);
+ assert.equal(characterAssetFallback({...a,kind:'soldier'}),undefined);
 });

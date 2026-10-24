@@ -609,6 +609,12 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    }else if(name==='landmark-ashen'){
     // Straight-on over the region road to chapel_ruin (-36,-228), h≈10.
     const c=this.landmarkCoords.ashen;pose=look(c.x,3.2,c.z+38,c.x,5.0,c.z);
+   }else if(name==='content-altar'){
+    pose=look(-16,2.8,-224,-31,2.4,-226.5);
+   }else if(name==='content-furnace-village'){
+    pose=look(48,2.8,18,50,1.5,5);
+   }else if(name==='content-furnace-camp'){
+    pose=look(40,2.6,-44,32,1.5,-41);
    }else if(name==='landmark-crown'){
     // Fully inside Frozen Crown (cam z≈c.z+10 → crown weight dominates), looking up at the
     // watchtower_ruin (-34,-472) on its outcrop (top ≈11.8 m).
@@ -683,10 +689,10 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    const info=this.renderer.info;let objects=0,meshes=0,lights=0,skinned=0;const materials=new Set<THREE.Material>();
    this.scene.traverse(o=>{objects++;if(o instanceof THREE.Mesh){meshes++;if(o instanceof THREE.SkinnedMesh)skinned++;for(const m of Array.isArray(o.material)?o.material:[o.material])materials.add(m);}else if(o instanceof THREE.Light)lights++;else if(o instanceof THREE.Points||o instanceof THREE.Sprite||o instanceof THREE.Line)meshes++;});
    let sum=0;for(let i=0;i<this.frameCount;i++)sum+=this.frameTimes[i];const frameMs=this.frameCount?sum/this.frameCount:0;
-   return {calls:info.render.calls,triangles:info.render.triangles,software:this.softwareRenderer,weather:{region:this.weatherRegion,phase:this.weatherStates[this.weatherRegion].name,intensity:+this.weatherStates[this.weatherRegion].intensity.toFixed(3)},points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
+   return {calls:info.render.calls,triangles:info.render.triangles,software:this.softwareRenderer,weather:{region:this.weatherRegion,phase:this.weatherStates[this.weatherRegion].name,intensity:+this.weatherStates[this.weatherRegion].intensity.toFixed(3)},contentFocus:this.qaView?{name:this.qaView.name,x:this.qaView.x,z:this.qaView.z}:null,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
    win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
@@ -700,6 +706,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    win.__ssPreviewBody=(name?:string|null,distance?:number|{distance?:number})=>{const d=typeof distance==='number'?distance:(distance?.distance??10);return view.previewBody(name===undefined?null:name,d);};
    win.__ssCombatFx=()=>view.combatFx();
    win.__ssCharacterFx=()=>({quality:view.quality,clothWind:view.characterClothWind});
+   win.__ssEnemyVariants=()=>view.enemyVariants();
    win.__ssClearWeather=()=>view.clearWeather();
    win.__ssSetReducedMotion=(value?:boolean|null)=>view.setReducedMotion(value===undefined?null:value);
    win.__ssSurfaceAt=(x:number,z:number)=>view.surfaceAt(x,z);
@@ -843,6 +850,15 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    const route=[START,...REGIONS.flatMap(r=>[{x:0,z:r.offset+12},{x:0,z:r.offset+24},{x:42,z:r.offset-45},{x:42,z:r.offset-55},{x:42,z:r.offset-43},{x:-24,z:r.offset-113},{x:-24,z:r.offset-123},{x:-24,z:r.offset-112},{x:0,z:r.offset-200}]),NEST];
    for(let i=1;i<route.length;i++){const a=route[i-1],b=route[i];const dx=b.x-a.x,dz=b.z-a.z;const len2=dx*dx+dz*dz||1;const t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/len2));const px=a.x+dx*t,pz=a.z+dz*t;if(Math.hypot(x-px,z-pz)<2.4)return 'stone';}
    return z<-405?'snow':z<-165?'ash':'grass';
+  }
+  /** window.__ssEnemyVariants(): undead variant mapping + asset availability for QA. */
+  enemyVariants(){
+   const mapping:{[variant:string]:string}={'zombie-bloated':'zombie','skeleton-armoured':'skeleton-soldier'};
+   const variants:{[name:string]:{asset:string;available:boolean;fallback:string}}={};
+   for(const [variant,fallback] of Object.entries(mapping)){
+    variants[variant]={asset:variant,available:this.characterAssets.custom.has(variant),fallback};
+   }
+   return {mapping,rule:'undead id%4: 0 zombie, 1 skeleton-soldier, 2 zombie-bloated, 3 skeleton-armoured',variants,base:{zombie:this.characterAssets.custom.has('zombie'),'skeleton-soldier':this.characterAssets.custom.has('skeleton-soldier')}};
   }
   /** window.__ssClearWeather(): deterministic clear-weather state for QA night captures. */
   clearWeather(){
@@ -1151,7 +1167,14 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    if(this.corruptionMat)this.corruptionMat.opacity=.42+Math.sin(time*.8)*.07;
    for(const f of this.flagMeshes){const pos=f.mesh.geometry.attributes.position;for(let i=0;i<pos.count;i++){const px=pos.getX(i);pos.setZ(i,Math.sin(time*5.5+px*3+f.seed)*(px/1.8)*.22);}pos.needsUpdate=true;}
    this.updateEffects(dt*this.visualScale,time,me);
-   this.ruinsUpdate?.(g,me,time);
+   if(this.ruinsUpdate){
+    // Content QA views: dressing/ruins are culled around the player distance (85 m) in normal play,
+    // so a synthetic focus at the QA camera is needed for altar/furnace/well captures. Allocation is
+    // debug-only (only while window.__ssQAView is active).
+    let ruinsFocus=me;
+    if(this.qaView){const base=(me??{}) as Record<string,unknown>;ruinsFocus={...base,id:(base.id as string|undefined)??'qa-focus',x:this.qaView.x,z:this.qaView.z} as Actor;}
+    this.ruinsUpdate(g,ruinsFocus,time);
+   }
    if(!g){const t=time*.025;this.camera.position.set(31+Math.sin(t)*4,15,32);this.camera.lookAt(0,2,0);if(this.shake>0){
     this.camera.position.x+=(Math.random()-.5)*this.shake;
     this.camera.position.y+=(Math.random()-.5)*this.shake;

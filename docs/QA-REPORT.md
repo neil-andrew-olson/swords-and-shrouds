@@ -1794,3 +1794,103 @@ Deployed after the Lead accepted the cycle-6 pass. Live verification runs:
 the altar-culling capture caveat carried into cycle 7.** task-66 complete; cycle-7 candidates:
 strict-mask palette hero/fallen/ranger, altar capture/teleport hook, physical controller rumble/real
 hardware, surface-audio ear check, real-GPU/perceptual/mobile passes, content depth.
+
+---
+
+## Iteration cycle 2026-10J (AAA loop, cycle 7) — enemy variants, palette, content capture hook, accessibility (in progress)
+
+Cycle 7 adds two undead silhouettes (`zombie-bloated`, `skeleton-armoured`) mapped deterministically by
+actor id, clears the remaining strict-mask palette debt (ranger/hero/fallen), makes QA content views
+render the player-distance-culled altar/furnace/well dressing, adds accessibility captions + controller
+deadzone/sensitivity settings, and enriches the plague-nest ritual dressing.
+
+### Harness additions (`scripts/smoke-browser.mjs`)
+
+- **Enemy variants:** new `probeEnemyVariants` reads `__ssEnemyVariants()` when present (else derives
+  the id%4 mapping from the authoritative actor list), captures base zombie / skeleton-soldier and
+  `zombie-bloated` / `skeleton-armoured` actors close-up + 10 m, checks distinct silhouettes (pixel
+  diff vs base), frame-to-frame animation/grounding, and records the defensive-fallback state (code/
+  unit-test verified when not forceable headlessly). Live assets include the two variant GLBs.
+- **Strict-mask palette:** owner-counter values are tracked in `CHAR_GATE.cycle7StrictMasked`; QA gates
+  **≥500 on ≥5/7** on that reproducible counter and reports its own crop metric + preview-body strict
+  proxy alongside (crop metric is also reported per body).
+- **Content capture:** the content views are gated by comparing `content-altar-close` against the
+  cycle-5 (no-props) reference — a strong diff proves the QA-focus culling fix renders the culled
+  altar/candles; furnace/well captures are reported; normal-play player-focus 85 m culling is
+  unchanged in source.
+- **Accessibility/controller:** captions toggle + cue evidence (thunder/undead/low health when the hook/
+  DOM is available), deadzone/sensitivity preset persistence, deterministic readPad state, and the
+  existing reduced-motion/rumble-guard probes retained.
+- **Plague-area dressing:** optional QA view/pose near the nest (0,−664) for a night capture to verify
+  the ritual/corpse/stake dressing and 0 404s.
+- **Perf gates:** cycle-7 SPEC **<290 calls / <2.15 M tris**; tiers/payload/views/HUD app path retained.
+
+### Cycle-6 reference values (before cycle-7)
+
+- Perf: 206 calls / 1,726,578 tris / geoms 171 / textures 181 / programs 100; payload 16.31 MiB (live
+  16.28 MiB across 86 assets); authoritative bundle `index-BY6s-QI9.js` (883,369 B), live
+  `index-CwNoKm_O.js` (883,519 B).
+- Armour: QA crop colours 605–955 (7/7 ≥500); strict owner counter **4/7 ≥500** (templar 559, ally 707,
+  berserker 725, survivor 1077; hero 454, fallen 460, ranger 379); torso 82.35/72.32/black 4.62; elite
+  30.82/88.4 %; survivor identity verified live.
+- Controller/reduced-motion: synthetic pad hints/rumble guard live; reduced-motion exactly 0 vignette/
+  hit-stop/kick; cloth-wind isolation high/medium true, low false.
+- Content/altar: implemented but culling-limited captures (cycle-7 hook to fix); furnaces visible.
+
+### Cycle-7 authoritative capture + regression — final build `index-BF93HyxO.js` (889,821 B): PASS
+
+**Artifact:** Lead-confirmed final hash **`index-BF93HyxO.js` (889,821 B)**. Fresh bundled-Node-24 build
+reproduced it **exactly** (fresh-build smoke **38/38 PASS**, `qa/final-c7`; 0 page/console/log errors,
+0 404s, 10 cards, WS 1/0, night TP **53.66** forced-clear). Authoritative runs: `--characters` **58/58**
+(`qa/characters-c7`), `--perf` **60/60** (`qa/perf-c7`), `--coop` **18/18** (`qa/coop-c7`), live
+baseline **PASS** (`qa/live-batch10-pre`, deployed cycle-6 baseline).
+
+**1) Enemy variants — PASS.** `__ssEnemyVariants()` reports both assets available
+(`zombie-bloated` fallback `zombie`, `skeleton-armoured` fallback `skeleton-soldier`) with the
+deterministic **id%4** rule (0 zombie, 1 skeleton-soldier, 2 zombie-bloated, 3 skeleton-armoured);
+captured in-world actors `a6` (bloated) and `a7` (armoured) close-up + 10 m. Distinct silhouettes:
+base-zombie vs bloated **meanAbsLum 31.9 / 70.5 % changed**, base-skeleton vs armoured **64.0 / 96.8 %**;
+both animate/ground (frame diff 3.8 / 16.4 with 5–48 % body pixels moving). Contracts: bloated
+10,620 tris / 2 prims / 30 joints / 10 clips / 361 KB; armoured 7,089 / 2 / 51 / 9 / 286 KB.
+Fallback is code + unit-test verified (no headless force hook; world-scene wires `custom.get(variant) ??
+custom.get(base)`). **Art note:** bloated is intentionally plague-pale and still clearly brighter than
+the base zombie at night (owner close-up mean ~126 vs 83) — cycle-8 tone note, not a failure. **QA
+capture caveat:** the in-world bloated close-up/10 m QA frames are partly obstructed by camp props
+(weapon rack/cart) because `__ssCharacterPreview` must frame the existing actor where it spawned; the
+armoured silhouette is clearly visible. Canonical silhouette evidence is weapons-armory's
+`qa/char-viewer/shots/c7var-base.png` (10 m line) + `c7bl2`/`c7h2` close-ups; a QA enemy-framing/spawn
+hook is a cycle-8 ask (not a model defect).
+
+**2) Strict-mask palette — PASS (7/7 ≥500).** Owner counter (weapons-armory pose-pinned): templar 561,
+hero 526, berserker 721, ranger 651, ally 694, survivor 1082, fallen 937 — **7/7 ≥500** (SPEC ≥5/7
+met; hero is closest at 526). QA crop metric **7/7 ≥500** (638–1033); QA strict proxy 7/7 (597–700);
+gradient 7.11–13.08; torso body-mask 84.48 / 76.68 / black 5.03 %; clip 0; elite 31.36 / 87.89 %.
+
+**3) Content capture hook — PASS.** `__ssPerf().contentFocus` is non-null while content QA views are
+active (`content-altar` −16,−224; `content-altar-close` −24,−221; `content-furnace-village` 48,18;
+`content-furnace-camp` 40,−44; `content-plague` −8,−680). `content-altar-close` differs strongly from
+the cycle-6 no-props reference (meanAbsLum **17.17 / 29.5 % changed**) → the altar + candles now render
+in QA captures; furnaces/wells captured; plague-nest ritual dressing captured at ruins-builder's final
+pose (`content-plague`, mean 65.5, 2,022 colours). Normal-play culling remains player-focus at 85 m
+(source unchanged); 0 404s.
+
+**4) Accessibility + controller settings — PASS.** Controls exist with correct defaults (captions off;
+deadzone normal 0.18; sensitivity 1). Captions: enabling the toggle shows thunder/undead/low-health
+texts (`Lightning. Thunder rolls in the distance.` / `Undead moan nearby.` / `Low health. Find cover or
+heal.`), auto-clears after ~3.8 s, is suppressed when disabled or gated (Guide); persistence keys
+`ss-captions`. Deadzone presets tight/normal/wide apply through `__ssControllerSettings()` and persist
+(localStorage `ss-deadzone`), sensitivity 1.4 persists (`ss-pad-sensitivity`); readPad default path
+unchanged, hints/rumble/reduced-motion guards intact (0 errors).
+
+**5) Perf / HUD / regression — PASS.** Spawn TP **213 calls** (<290 ✅) / **1,735,988 tris**
+(<2.15 M ✅), geoms 175, textures 188, programs 101; FP 165/1.62 M; low 164/1.42 M; payload
+**17,847,399 B = 17.02 MiB** (+0.7 MB vs cycle-6 local, enemy variants + content). Night TP forced-clear
+**53.66** (≤75; Lead gate 69.96); weather/snow unchanged (240→800, fog 0.0189→0.0242, low-tier 0);
+regions 22.95–25.37 colour distance; `region-crown` AND `landmark-crown` report crown; HUD click→HUD
+**157 ms** / state 1,276 ms / join **3.35 s** (≤3.8); fresh-build **38/38** + exact hash, co-op
+**18/18**, live baseline PASS, 0 page/console/log errors and 0 404s throughout.
+
+**Cycle-7 verdict: PASS on all gates.** Cycle-8 candidates: zombie-bloated night tone (pale vs base),
+hero strict-mask 526 headroom, physical controller rumble/real hardware, real-GPU/perceptual/mobile
+passes, surface-audio ear check, content depth, nest ground-decal polish. After deploy: final live
+pass + task-73 complete.

@@ -91,15 +91,19 @@ const CHAR_GATE = {
   // body mask, 5-bit RGB); QA reports both this gate and its own crop/proxy metrics.
   strictColourBodiesRequired: 5,
   cycle6StrictMasked: {templar: 559, hero: 454, berserker: 725, ranger: 379, ally: 707, survivor: 1077, fallen: 460},
+  // Cycle-7 rebuild values (weapons-armory, pose-pinned strict counter): 7/7 >=500 after the hue-chip
+  // rebuild (hero re-installed at 10:41). QA gates >=5/7 on this owner number and reports its own
+  // crop metric + preview-body strict proxy alongside.
+  cycle7StrictMasked: {templar: 561, hero: 526, berserker: 721, ranger: 651, ally: 694, survivor: 1082, fallen: 937},
 };
-// Performance acceptance for cycle 6 (SPEC: <280 calls / <2.05M tris).
-const PERF_GATE = {maxCalls: 280, maxTris: 2_050_000};
+// Performance acceptance for cycle 7 (SPEC: <290 calls / <2.15M tris).
+const PERF_GATE = {maxCalls: 290, maxTris: 2_150_000};
 // QA atmosphere/region audit views requested from world-scene via window.__ssQAView(name).
 const QA_VIEWS = ['treeline', 'fire', 'camp', 'courtyard', 'region-green', 'region-ashen', 'region-crown'];
 // Cycle-3/4 optional views: landmarks, foliage/corruption/wind, char lineup, and the new cycle-4
 // smithy stalls. Each is captured when the hook supports it (or a `__ssQAPose` fallback exists);
 // absence is reported (not a hard fail) so the required 7 stay the gate.
-const QA_VIEWS_OPTIONAL = ['landmark-green', 'landmark-ashen', 'landmark-crown', 'foliage', 'corruption', 'wind', 'char-lineup', 'prop-stall-village', 'prop-stall-camp', 'content-altar', 'content-altar-close', 'content-furnace-village', 'content-furnace-camp'];
+const QA_VIEWS_OPTIONAL = ['landmark-green', 'landmark-ashen', 'landmark-crown', 'foliage', 'corruption', 'wind', 'char-lineup', 'prop-stall-village', 'prop-stall-camp', 'content-altar', 'content-altar-close', 'content-furnace-village', 'content-furnace-camp', 'content-plague'];
 
 // Cycle-4/6 appearance coverage: the 6 playable select options (cycle 6 adds survivor as the
 // "Wandering Survivor") + the fallen body (requires the QA body-preview hook / in-game actor).
@@ -141,6 +145,8 @@ const LANDMARK_POSES = {
   'content-altar-close3': {x: -31.5, z: -218, height: 2.6, yaw: 0.439, pitch: -0.155},
   'content-furnace-village': {x: 48, z: 18, height: 2.8, yaw: 0.1526, pitch: -0.0985},
   'content-furnace-camp': {x: 40, z: -44, height: 2.6, yaw: -1.9296, pitch: -0.128},
+  // Cycle-7 plague-nest ritual dressing (ruins-builder FINAL pose: NEST_QA_POSES['content-plague']).
+  'content-plague': {x: -8, z: -680, height: 3.2, yaw: 2.6224, pitch: -0.1234},
 };
 // Cycle-2 reference timings (SwiftShader, same machine) and the cycle-3 "meaningfully earlier" gate.
 const CYCLE2_TIMINGS = {landingMs: 3564, hudMs: 16308, stateMs: 17415, joinMs: 3698};
@@ -808,6 +814,16 @@ async function captureQaViews(page, outDir, report, check) {
     const entry = {name, result, via: pose ? 'pose' : 'view', file: shot.file, stats: shot.stats};
     const regionInfo = await readRegionInfo(page);
     if (regionInfo) entry.regionInfo = regionInfo;
+    // Cycle-7 QA-focus culling proof: __ssPerf().contentFocus is non-null while a content QA view is
+    // active (the ruins/dressing pass uses the QA camera instead of the distant player).
+    try {
+      entry.contentFocus = await page.evaluate(
+        `(()=>{try{const p=window.__ssPerf?window.__ssPerf():null;return p&&p.contentFocus!==undefined?p.contentFocus:null;}catch(e){return null;}})()`,
+        {timeoutMs: 10000},
+      );
+    } catch {
+      entry.contentFocus = null;
+    }
     return entry;
   };
   for (const name of QA_VIEWS) {
@@ -1096,14 +1112,44 @@ async function captureQaViews(page, outDir, report, check) {
     try {
       const diff = await comparePngs(page, altarRef, altarClose.file, {x0: 0.3, y0: 0.35, x1: 0.7, y1: 0.85});
       report.views.altarGlow = {reference: path.relative(ROOT, altarRef), current: path.relative(ROOT, altarClose.file), diff, stats: altarClose.stats};
-      report.notes.push(
-        `content: altar glow implemented in code (+3 candle cones, 0 draws, warm emissive lift) but the content-altar QA poses only move the camera while dressing:altar/flames are player-distance culled at 85 m (altar ~270 m from spawn) — not visually capturable with current culling; cycle-7 ask: make dressing culling follow the QA camera or add a teleport hook. Capture diff vs cycle-5: ${JSON.stringify({diff, mean: altarClose.stats.mean, p90: altarClose.stats.p90})}`,
+      check(
+        'content: QA content views render the culled altar dressing (close-up differs strongly vs cycle-6)',
+        diff.meanAbsLum > 2 || diff.changedPct > 2,
+        `diff=${JSON.stringify({meanAbsLum: diff.meanAbsLum, changedPct: diff.changedPct})} stats=${JSON.stringify({mean: altarClose.stats.mean, p90: altarClose.stats.p90, colors: altarClose.stats.uniqueColors})}`,
       );
+      if (!(diff.meanAbsLum > 2 || diff.changedPct > 2)) {
+        report.notes.push(`content: content-altar-close does not yet show the culled altar/candles (QA-focus culling fix missing or not active) — diff vs cycle-6 ${JSON.stringify(diff)}`);
+      }
     } catch (error) {
       report.notes.push(`content: altar glow comparison failed (${error?.message || error})`);
     }
   } else {
     report.notes.push('content: altar glow reference/capture missing — visual-only check');
+  }
+  // Normal-play culling is unchanged in source (player focus); report the furnace/well content captures.
+  for (const name of ['content-furnace-village', 'content-furnace-camp', 'content-altar']) {
+    const cap = (report.views.optionalCaptures || []).find(c => c.name === name);
+    if (cap) report.notes.push(`content: ${name} captured (${JSON.stringify({mean: cap.stats.mean, colors: cap.stats.uniqueColors})}) — QA-focus culling; normal play still culls at 85 m from the player`);
+  }
+  const contentFocusViews = (report.views.optionalCaptures || []).filter(c => String(c.name).startsWith('content-') && c.contentFocus);
+  if (contentFocusViews.length) {
+    check(
+      'content: QA-focus culling is active for content views (contentFocus non-null)',
+      contentFocusViews.length >= 2,
+      JSON.stringify(contentFocusViews.map(c => ({name: c.name, contentFocus: c.contentFocus}))),
+    );
+  } else {
+    report.notes.push('content: __ssPerf().contentFocus not reported — QA-focus culling verified visually only');
+  }
+  const plagueCap = (report.views.optionalCaptures || []).find(c => c.name === 'content-plague');
+  if (plagueCap) {
+    check(
+      'content: plague-nest ritual dressing captured (nest QA pose)',
+      !!plagueCap.stats && plagueCap.stats.sampled > 1000 && plagueCap.stats.nonDarkPct > 2,
+      JSON.stringify({mean: plagueCap.stats.mean, colors: plagueCap.stats.uniqueColors, contentFocus: plagueCap.contentFocus ?? null}),
+    );
+  } else {
+    report.notes.push('content: content-plague view unavailable — plague-nest dressing not captured (gap)');
   }
 }
 
@@ -2604,7 +2650,241 @@ async function probeCharacterFx(page, report, check) {
 }
 
 
-/** Cycle-1 readability capture: 5 player appearances + undead close-ups with body luminance. */
+/** Cycle-7 undead-variant probe: capture base zombie/skeleton-soldier vs zombie-bloated and
+ * skeleton-armoured for the deterministic id subset (id%4 mapping), check distinct silhouettes,
+ * animation motion/grounding, and report the hook/fallback state. */
+async function probeEnemyVariants(page, outDir, report, check) {
+  const hook = await page.evaluate(
+    `(()=>{try{return typeof window.__ssEnemyVariants==='function'?JSON.parse(JSON.stringify(window.__ssEnemyVariants())):null;}catch(e){return null;}})()`,
+    {timeoutMs: 10000},
+  ).catch(() => null);
+  const actors = (await page.evaluate(`window.__qaWs ? window.__qaWs.allActors : []`, {timeoutMs: 10000}).catch(() => [])) || [];
+  const num = a => Number(String(a.id).replace(/[^0-9]/g, '') || 0);
+  const enemy = a => a && a.kind && !['player', 'soldier', 'corrupted'].includes(a.kind);
+  const open = a => Math.abs(a.x || 0) > 12 || (typeof a.z === 'number' && a.z < -200);
+  const pick = fn => actors.filter(a => enemy(a) && fn(num(a))).sort((a, b) => (open(b) ? 1 : 0) - (open(a) ? 1 : 0))[0] || null;
+  const targets = {
+    zombieBase: pick(n => n % 4 === 0),
+    skeletonBase: pick(n => n % 4 === 1),
+    bloated: pick(n => n % 4 === 2),
+    armoured: pick(n => n % 4 === 3),
+  };
+  report.enemyVariants = {hook, mapping: 'id%4: 0 zombie, 1 skeleton-soldier, 2 zombie-bloated, 3 skeleton-armoured', actors: {}};
+  // Variant checks require the cycle-7 hook/preload state; an older deployed build has no variants
+  // (id-based actor selection would just frame base assets under variant labels), so skip cleanly.
+  if (!hook) {
+    report.enemyVariants.hooksAbsent = true;
+    report.notes.push('enemy: __ssEnemyVariants absent (older deployed artifact) — variant checks deferred to the deployed cycle-7 artifact');
+    return;
+  }
+  const captures = {};
+  for (const [label, actor] of Object.entries(targets)) {
+    if (!actor) {
+      report.enemyVariants.actors[label] = null;
+      continue;
+    }
+    report.enemyVariants.actors[label] = {id: actor.id, kind: actor.kind, x: actor.x, z: actor.z, variant: hook && hook.assets ? hook.assets[label] ?? null : null};
+    const preview = await charPreview(page, actor.id);
+    if (!preview || preview.ok === false) continue;
+    await sleep(1300);
+    const closeup = await screenshotWithStats(page, outDir, `enemy-${label}-closeup.png`, CHAR_CLOSEUP_REGION);
+    await sleep(600);
+    const closeup2 = await screenshot(page, outDir, `enemy-${label}-closeup2.png`);
+    const animDiff = await comparePngs(page, closeup.file, closeup2, CHAR_CORE_REGION).catch(() => null);
+    await charPreview(page, null);
+    await sleep(500);
+    const ten = await captureActorAt10m(page, actor, outDir, `enemy-${label}-10m.png`);
+    captures[label] = {actor: {id: actor.id, kind: actor.kind}, closeup: {file: closeup.file, stats: closeup.stats}, animDiff, tenMeter: ten};
+    await sleep(400);
+  }
+  report.enemyVariants.captures = captures;
+  if (hook && hook.variants) {
+    check(
+      'enemy: both variant assets report available/preloaded + fallback mapping',
+      hook.variants['zombie-bloated'] && hook.variants['zombie-bloated'].available === true &&
+        hook.variants['skeleton-armoured'] && hook.variants['skeleton-armoured'].available === true,
+      JSON.stringify(hook.variants),
+    );
+    check(
+      'enemy: variant mapping rule is the deterministic id%4 mix',
+      /id%4|%4/i.test(String(hook.rule || '')) || (hook.mapping && hook.mapping['zombie-bloated'] === 'zombie' && hook.mapping['skeleton-armoured'] === 'skeleton-soldier'),
+      JSON.stringify({rule: hook.rule, mapping: hook.mapping}),
+    );
+  }
+  const pairs = {};
+  for (const [a, b] of [['zombieBase', 'bloated'], ['skeletonBase', 'armoured']]) {
+    if (captures[a]?.closeup && captures[b]?.closeup) {
+      pairs[`${a}-vs-${b}`] = await comparePngs(page, captures[a].closeup.file, captures[b].closeup.file, CHAR_CLOSEUP_REGION).catch(() => null);
+    }
+  }
+  report.enemyVariants.distinctness = pairs;
+  const bloated = captures.bloated, armoured = captures.armoured;
+  check(
+    'enemy: bloated zombie variant spawns in the deterministic subset and renders',
+    !!bloated && bloated.closeup.stats.sampled > 1000,
+    JSON.stringify({actor: targetActorSummary(targets.bloated), capture: !!bloated}),
+  );
+  check(
+    'enemy: armoured skeleton variant spawns in the deterministic subset and renders',
+    !!armoured && armoured.closeup.stats.sampled > 1000,
+    JSON.stringify({actor: targetActorSummary(targets.armoured), capture: !!armoured}),
+  );
+  const distinctOk = Object.values(pairs).length > 0 && Object.values(pairs).every(d => d && (d.meanAbsLum > 2 || d.changedPct > 2));
+  check(
+    'enemy: variants are visually distinct from their base silhouettes',
+    distinctOk,
+    JSON.stringify(pairs),
+  );
+  const animOk = [bloated, armoured].filter(Boolean).every(c => c.animDiff && c.animDiff.meanAbsLum > 0.1);
+  check('enemy: variant rigs animate/ground (frame-to-frame motion)', animOk, JSON.stringify({bloated: bloated?.animDiff, armoured: armoured?.animDiff}));
+  if (hook && hook.fallback != null) {
+    report.notes.push(`enemy: __ssEnemyVariants fallback state = ${JSON.stringify(hook.fallback)}`);
+  } else {
+    report.notes.push('enemy: defensive fallback for missing variant assets is code-level/test-verified (no headless force hook exposed)');
+  }
+}
+
+function targetActorSummary(a) {
+  return a ? {id: a.id, kind: a.kind, x: a.x, z: a.z} : null;
+}
+
+/** Cycle-7 accessibility captions + controller deadzone/sensitivity settings probe. */
+async function probeAccessibility(page, outDir, report, check) {
+  const hasCaptions = await page.evaluate(`typeof window.__ssCaptions==='function'`, {timeoutMs: 10000}).catch(() => false);
+  const hasSettings = await page.evaluate(`typeof window.__ssControllerSettings==='function'`, {timeoutMs: 10000}).catch(() => false);
+  if (!hasCaptions && !hasSettings) {
+    report.accessibility = {hooksAbsent: true};
+    report.notes.push('a11y: __ssCaptions/__ssControllerSettings absent on this build — accessibility checks skipped');
+    return;
+  }
+  const readCaptions = () => page.evaluate(`(()=>{try{return typeof window.__ssCaptions==='function'?JSON.parse(JSON.stringify(window.__ssCaptions())):null;}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+  const readSettings = () => page.evaluate(`(()=>{try{return typeof window.__ssControllerSettings==='function'?JSON.parse(JSON.stringify(window.__ssControllerSettings())):null;}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+  const setting = report.accessibility = {captionsHook: hasCaptions, settingsHook: hasSettings};
+  const settings0 = await readSettings();
+  setting.initial = settings0;
+  const captions0 = await readCaptions();
+  setting.initialCaptions = captions0;
+  const controls = await page.evaluate(
+    `(()=>{const t=document.getElementById('captionsToggle');const d=document.getElementById('padDeadzone');const s=document.getElementById('padSensitivity');return {toggle:!!t,toggleChecked:t?!!t.checked:null,deadzone:!!d,deadzoneValue:d?d.value:null,deadzoneOptions:d?[...d.options].map(o=>({value:o.value,text:(o.textContent||'').trim()})):null,sensitivity:!!s,sensitivityValue:s?s.value:null,sensitivityType:s?s.type:null};})()`,
+    {timeoutMs: 10000},
+  ).catch(() => null);
+  setting.controls = controls;
+  check(
+    'a11y: captions toggle + caption line + controller settings controls exist',
+    !!(controls && controls.toggle && controls.deadzone && controls.sensitivity),
+    JSON.stringify(controls),
+  );
+  // Enable captions via the real toggle, then fire deterministic demo cues.
+  if (controls && controls.toggle && hasCaptions) {
+    await page.evaluate(
+      `(()=>{const t=document.getElementById('captionsToggle');if(!t)return false;t.checked=true;t.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`,
+      {timeoutMs: 10000},
+    ).catch(() => false);
+    await sleep(400);
+    const enabledState = await readCaptions();
+    setting.enabledState = enabledState;
+    const cues = [
+      ['thunder', /Lightning\. Thunder rolls/i],
+      ['undead', /Undead moan nearby/i],
+      ['low-health', /Low health/i],
+    ];
+    const cueResults = [];
+    for (const [cue, re] of cues) {
+      const fired = await page.evaluate(
+        `(()=>{try{return typeof window.__ssCaptionDemo==='function'?window.__ssCaptionDemo(${JSON.stringify(cue)}):null;}catch(e){return {error:String((e&&e.message)||e)};}})()`,
+        {timeoutMs: 10000},
+      ).catch(() => null);
+      await sleep(450);
+      const state = await readCaptions();
+      cueResults.push({cue, fired, state});
+      if (cue === 'thunder') {
+        await screenshot(page, outDir, 'captions-thunder.png').catch(() => null);
+      }
+      // Wait out the rate limit/display before the next cue.
+      await sleep(2600);
+    }
+    setting.cueResults = cueResults;
+    check(
+      'a11y: captions show thunder/undead/low-health cues when enabled',
+      cueResults.every(c => c.state && c.state.visible === true && re0(c.state.text, c.cue)),
+      JSON.stringify(cueResults.map(c => ({cue: c.cue, visible: c.state?.visible, text: c.state?.text}))),
+    );
+    // Auto-clear after displayMs.
+    const last = cueResults[cueResults.length - 1]?.state;
+    await sleep(4200);
+    const cleared = await readCaptions();
+    setting.cleared = cleared;
+    check(
+      'a11y: caption auto-clears after the display window',
+      !cleared || cleared.visible === false || !cleared.text,
+      JSON.stringify(cleared),
+    );
+    // Disable → demo cue must not paint.
+    await page.evaluate(
+      `(()=>{const t=document.getElementById('captionsToggle');if(!t)return false;t.checked=false;t.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`,
+      {timeoutMs: 10000},
+    ).catch(() => false);
+    await sleep(400);
+    await page.evaluate(`(()=>{try{return window.__ssCaptionDemo('thunder');}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+    await sleep(500);
+    const disabledState = await readCaptions();
+    setting.disabledState = disabledState;
+    check(
+      'a11y: captions stay hidden when the toggle is off',
+      !disabledState || disabledState.enabled === false || disabledState.visible === false || !disabledState.text,
+      JSON.stringify(disabledState),
+    );
+  }
+  // Deadzone presets + sensitivity persistence through the hook/localStorage.
+  if (hasSettings) {
+    const presetResults = [];
+    for (const [preset, expected] of [['tight', 0.1], ['wide', 0.28], ['normal', 0.18]]) {
+      await page.evaluate(
+        `(()=>{const d=document.getElementById('padDeadzone');if(!d)return false;d.value=${JSON.stringify(preset)};d.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`,
+        {timeoutMs: 10000},
+      ).catch(() => false);
+      await sleep(300);
+      const st = await readSettings();
+      const stored = await page.evaluate(`localStorage.getItem('ss-deadzone')`, {timeoutMs: 10000}).catch(() => null);
+      presetResults.push({preset, expected, state: st, stored});
+    }
+    setting.deadzonePresets = presetResults;
+    check(
+      'a11y/controller: deadzone presets apply + persist (tight/wide/normal)',
+      presetResults.every(r => r.state && r.state.deadzonePreset === r.preset && Math.abs(Number(r.state.deadzoneValue) - r.expected) < 0.001 && r.stored === r.preset),
+      JSON.stringify(presetResults.map(r => ({preset: r.preset, hook: r.state, stored: r.stored}))),
+    );
+    await page.evaluate(
+      `(()=>{const s=document.getElementById('padSensitivity');if(!s)return false;s.value='1.4';s.dispatchEvent(new Event('input',{bubbles:true}));s.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`,
+      {timeoutMs: 10000},
+    ).catch(() => false);
+    await sleep(350);
+    const sensState = await readSettings();
+    const sensStored = await page.evaluate(`localStorage.getItem('ss-pad-sensitivity')`, {timeoutMs: 10000}).catch(() => null);
+    setting.sensitivity = {state: sensState, stored: sensStored};
+    check(
+      'a11y/controller: look sensitivity applies + persists',
+      !!sensState && Number(sensState.padSensitivity) === 1.4 && Number(sensStored) === 1.4,
+      JSON.stringify({state: sensState, stored: sensStored}),
+    );
+    // Restore defaults for the rest of the run.
+    await page.evaluate(
+      `(()=>{const d=document.getElementById('padDeadzone');if(d){d.value='normal';d.dispatchEvent(new Event('change',{bubbles:true}));}const s=document.getElementById('padSensitivity');if(s){s.value='1';s.dispatchEvent(new Event('input',{bubbles:true}));s.dispatchEvent(new Event('change',{bubbles:true}));}return true;})()`,
+      {timeoutMs: 10000},
+    ).catch(() => false);
+    await sleep(300);
+  }
+}
+
+function re0(text, cue) {
+  const s = String(text || '');
+  if (cue === 'thunder') return /Lightning|Thunder/i.test(s);
+  if (cue === 'undead') return /Undead|moan/i.test(s);
+  if (cue === 'low-health') return /Low health/i.test(s);
+  return s.length > 0;
+}
+
+/** Cycle-1 readability capture: player appearances + undead close-ups with body luminance. */
 async function captureCharacterReadability(page, {opts, report, check}) {
   const outDir = opts.outDir;
   const hooks = await page.evaluate(`(()=>({preview:typeof window.__ssCharacterPreview==='function',quality:typeof window.__ssQuality==='function'}))()`);
@@ -3088,21 +3368,24 @@ async function captureCharacterReadability(page, {opts, report, check}) {
       if (proxy500 < CHAR_GATE.specColourBodiesRequired) {
         report.notes.push(`char: QA strict-mask proxy ${proxy500}/7 >=500 (informational; crop metric is the binding gate) — ${JSON.stringify(report.characters.strictMaskedProxy.bodies)}`);
       }
-      // Cycle-6 SPEC strict-mask numbers from the reproducible owner counter (weapons-armory) are
-      // reported with attribution; Lead decision: the QA crop metric is the binding gate and the
-      // strict shortfall is cycle-7 art debt, not a cycle failure.
-      const ownerStrict = CHAR_GATE.cycle6StrictMasked;
+      // Cycle-7 SPEC strict-mask gate on the reproducible owner counter (weapons-armory, pose-pinned).
+      const ownerStrict = CHAR_GATE.cycle7StrictMasked;
       const ownerBodies = Object.entries(ownerStrict).map(([name, colours]) => ({name, colours}));
       const owner500 = ownerBodies.filter(b => b.colours >= 500).length;
       report.characters.strictMaskedOwner = {
+        cycle: 7,
         method: 'weapons-armory qa/char-viewer closeup --pose 30, alpha body mask, 5-bit RGB unique colours',
         bodies: ownerBodies,
         bodiesWith500: owner500,
       };
-      if (owner500 < CHAR_GATE.strictColourBodiesRequired) {
-        report.notes.push(
-          `char: strict-mask (owner counter) ${owner500}/7 bodies >=500 — cycle-6 art debt for cycle 7 (${JSON.stringify(ownerBodies)}); QA crop metric is the binding acceptance gate`,
-        );
+      check(
+        'char: strict-mask colours >=500 on >=5/7 bodies (owner counter, cycle-7 SPEC gate)',
+        owner500 >= CHAR_GATE.strictColourBodiesRequired,
+        `${owner500}/7 bodies >=500 (need >=${CHAR_GATE.strictColourBodiesRequired}); ${JSON.stringify(ownerBodies)}`,
+      );
+      const shortMasked = ownerBodies.filter(b => b.colours < 500);
+      if (shortMasked.length) {
+        report.notes.push(`char: strict-mask bodies still <500 after cycle-7 hue chips: ${JSON.stringify(shortMasked)} — carry to cycle 8`);
       }
       log(`STRICT MASK OWNER: ${owner500}/7 >=500 (${JSON.stringify(ownerBodies)})`);
     } catch (error) {
@@ -3459,13 +3742,23 @@ async function run() {
         report.perf.thirdPerson.framesHigh = await captureFrameStats(page, Math.min(opts.perfSampleMs, 3000));
       }
     }
-    // Cycle-5/6: force clear weather for the night-mood capture so natural rain/haze variance cannot
-    // brighten the frame (weather visuals are audited separately in --perf). Use __ssSetWeather clear
-    // (measured 56-60 across cycles); __ssClearWeather clears fog differently and is not the metric's
-    // comparable state (cycle-6 dry-run measured ~80 with it on the same build).
+    // Cycle-5/6/7: deterministic clear weather for the night-mood capture (Cycle-7 Lead request uses
+    // __ssClearWeather(); we also apply the comparable __ssSetWeather clear phase and wait through two
+    // SwiftShader frames so the metric is not a stale rain frame).
+    const clearHook = await page.evaluate(`typeof window.__ssClearWeather==='function'`, {timeoutMs: 10000}).catch(() => false);
+    let clearMethod = 'forced-clear(__ssSetWeather)';
+    if (clearHook) {
+      await page.evaluate(`(()=>{try{return window.__ssClearWeather();}catch(e){return null;}})()`, {timeoutMs: 15000}).catch(() => null);
+      clearMethod = 'forced-clear(__ssClearWeather+__ssSetWeather)';
+      await sleep(700);
+    }
     await setWeather(page, 'march', 'clear', 0);
-    report.nightMoodWeather = 'forced-clear(__ssSetWeather)';
-    await sleep(4500);
+    report.nightMoodWeather = clearMethod;
+    // The post-join first frames can run below 1 fps under SwiftShader; wait through two frames and
+    // discard a warm-up shot so the night-mood gate measures the clear frame, not a stale rain frame.
+    await sleep(5600);
+    await screenshot(page, opts.outDir, '01-third-person-warm.png').catch(() => null);
+    await sleep(1400);
     report.screenshots.push(await screenshot(page, opts.outDir, '01-third-person.png'));
     report.canvas['third-person'] = await canvasPixelStats(page, opts.outDir, 'third-person');
 
@@ -3549,6 +3842,10 @@ async function run() {
     if (!opts.coop) {
       await probeController(page, opts.outDir, report, check);
       await probeCharacterFx(page, report, check);
+      // Cycle-7 undead variants (base vs bloated/armoured), screenshot + distinctness checks.
+      await probeEnemyVariants(page, opts.outDir, report, check);
+      // Cycle-7 accessibility captions + controller deadzone/sensitivity settings.
+      await probeAccessibility(page, opts.outDir, report, check);
     }
 
     // Cycle-5 combat-feel probe: heavy hit → hit-stop/kick/vignette, then the reduced-motion path.

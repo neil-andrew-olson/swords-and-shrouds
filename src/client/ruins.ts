@@ -158,6 +158,15 @@ export const CAMP_TENTS: readonly (readonly CampTentPlacement[])[] = [
  * every road centreline, > 13 m Chebyshev from every castle centre (outside wall footprints),
  * off every gate corridor, >= 24 m from camp anchors, >= 12 m apart (centre spacing).
  */
+// Cycle-7 plague-nest ritual precinct (existing shipped assets only; distance-culled like all other
+// dressing). The nest sits at (0,-664) with the approach road coming in from the south along x=0, so
+// the wall/grave/stake ring is open to the south and the ritual markers flank the road.
+export const NEST_WALLS: readonly StoneWallPlacement[] = [
+  {region: 2, x: -10.5, z: -664, rotY: Math.PI / 2, length: 6.0},
+  {region: 2, x: 10.5, z: -664, rotY: Math.PI / 2, length: 6.0},
+  {region: 2, x: 10, z: -653.5, rotY: 0, length: 6.4}
+];
+
 export const STONE_WALL_PLACEMENTS: readonly StoneWallPlacement[] = [
   // Green March: Castle 1 (0,0) -> Castle 2 (42,-67) road.
   {region: 0, x: 24.4, z: 6.7, rotY: 2.6, length: 5.6},
@@ -172,7 +181,9 @@ export const STONE_WALL_PLACEMENTS: readonly StoneWallPlacement[] = [
   {region: 1, x: 37.03, z: -254.85, rotY: 2.56, length: 5.6},
   // Frozen Crown repeats.
   {region: 2, x: 45.44, z: -503.92, rotY: 2.62, length: 5.2},
-  {region: 2, x: 50.05, z: -515.75, rotY: 2.57, length: 5.8}
+  {region: 2, x: 50.05, z: -515.75, rotY: 2.57, length: 5.8},
+  // Plague nest broken precinct.
+  ...NEST_WALLS
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -186,6 +197,53 @@ export interface DressingPlacement {
   /** Yaw applied to the instance. */
   yaw: number;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Cycle-7 plague-nest ritual precinct (existing shipped assets only, no new files). The nest sits at
+// (0,-664) with its approach road coming in along x=0 from the south, so the ring is open to the
+// south: braziers flank the entrance, graves/candles ring the core, broken walls close the sides and
+// north, and stakes/barrels/carts dress the ritual approach. Everything distance-culls like the rest
+// of the dressing; the walls join the existing Frozen Crown stone-wall layer (no new draw).
+// ---------------------------------------------------------------------------------------------
+export const NEST_BRAZIERS: readonly DressingPlacement[] = [
+  {x: 5.2, z: -675.5, yaw: 0.3},
+  {x: 9.5, z: -668, yaw: 0.2}
+];
+
+export const NEST_STAKES: readonly DressingPlacement[] = [
+  {x: -13, z: -657.5, yaw: 1.2},
+  {x: -13, z: -664, yaw: 0.0},
+  {x: -13, z: -670.5, yaw: -1.2},
+  {x: 13, z: -657.5, yaw: -1.2},
+  {x: 13, z: -664, yaw: 0.0},
+  {x: 13, z: -670.5, yaw: 1.2}
+];
+
+export const NEST_GRAVES: readonly DressingPlacement[] = [
+  {x: 6.5, z: -657.5, yaw: -2.7},
+  {x: 7.5, z: -663, yaw: -1.6},
+  {x: 7.5, z: -666, yaw: -1.2},
+  {x: 5, z: -672.5, yaw: -3.0},
+  {x: 10, z: -671.5, yaw: -2.2},
+  {x: 11, z: -675.5, yaw: -2.8},
+  {x: 8, z: -669.5, yaw: -1.8},
+  {x: 12, z: -660.5, yaw: -2.4}
+];
+
+export const NEST_BARRELS: readonly DressingPlacement[] = [
+  {x: -6.3, z: -672.8, yaw: 0.8},
+  {x: 7.6, z: -672.5, yaw: -0.8}
+];
+
+export const NEST_CARTS: readonly DressingPlacement[] = [{x: 0, z: -657, yaw: 2.5}];
+
+/** Candle glows on the nest floor (reuse the procedural flame cones; appended to the flames layer). */
+export const NEST_CANDLES: readonly {x: number; z: number; y: number; scale: number}[] = [
+  {x: 4.7, z: -661.5, y: 0.06, scale: 0.34},
+  {x: 4.7, z: -666.5, y: 0.06, scale: 0.3},
+  {x: 9, z: -660, y: 0.06, scale: 0.36},
+  {x: 10.5, z: -669, y: 0.06, scale: 0.32}
+];
 
 /**
  * Brazier pairs flanking every castle gate (inside the courtyard, either side of the gate corridor,
@@ -205,7 +263,9 @@ export const GATE_BRAZIERS: readonly DressingPlacement[] = [
   // Frozen Crown.
   {x: -5.8, z: -473.0, yaw: 2.2}, {x: 5.8, z: -473.4, yaw: -2.2},
   {x: 36.2, z: -540.0, yaw: 2.2}, {x: 47.8, z: -540.0, yaw: -2.2},
-  {x: -29.8, z: -608.0, yaw: 2.2}, {x: -16.6, z: -603.2, yaw: -2.2}
+  {x: -29.8, z: -608.0, yaw: 2.2}, {x: -16.6, z: -603.2, yaw: -2.2},
+  // Plague nest entrance pair (cycle 7).
+  ...NEST_BRAZIERS
 ];
 
 /**
@@ -247,20 +307,20 @@ export const ROADSIDE_STAKES: readonly DressingPlacement[] = [
   {x: 7.53, z: -476.7, yaw: ROAD_YAW - Math.PI / 2 + 0.04},
   {x: 11.73, z: -483.6, yaw: ROAD_YAW - Math.PI / 2 - 0.05},
   {x: 13.41, z: -486.36, yaw: ROAD_YAW - Math.PI / 2 + 0.03},
-  {x: 15.09, z: -489.12, yaw: ROAD_YAW - Math.PI / 2 - 0.02}
+  {x: 15.09, z: -489.12, yaw: ROAD_YAW - Math.PI / 2 - 0.02},
+  // Plague nest stake markers (cycle 7).
+  ...NEST_STAKES
 ];
 
 /** Barrel + cart clusters parked at the edge of every survivor camp (rescue-culled with the camp). */
-export const CAMP_BARRELS: readonly DressingPlacement[] = CAMPS.map((camp, index) => ({
-  x: camp.x,
-  z: camp.z - 11.8,
-  yaw: 0.6 + index * 0.7
-}));
-export const CAMP_CARTS: readonly DressingPlacement[] = CAMPS.map((camp, index) => ({
-  x: camp.x + 7.5,
-  z: camp.z - 10.5,
-  yaw: 0.9 + index * 0.55
-}));
+export const CAMP_BARRELS: readonly DressingPlacement[] = [
+  ...CAMPS.map((camp, index) => ({x: camp.x, z: camp.z - 11.8, yaw: 0.6 + index * 0.7})),
+  ...NEST_BARRELS
+];
+export const CAMP_CARTS: readonly DressingPlacement[] = [
+  ...CAMPS.map((camp, index) => ({x: camp.x + 7.5, z: camp.z - 10.5, yaw: 0.9 + index * 0.55})),
+  ...NEST_CARTS
+];
 
 /** Small grave field north-west of the Fallen Keep (region 0), outside the walls and off the roads. */
 export const KEEP_GRAVES: readonly DressingPlacement[] = [
@@ -273,18 +333,33 @@ export const KEEP_GRAVES: readonly DressingPlacement[] = [
   {x: -12.8, z: 13.5, yaw: 0.4},
   {x: -21.5, z: 5.0, yaw: 1.5},
   {x: -24.0, z: 12.0, yaw: 2.2},
-  {x: -16.0, z: 15.0, yaw: 3.0}
+  {x: -16.0, z: 15.0, yaw: 3.0},
+  // Plague nest grave ring (cycle 7).
+  ...NEST_GRAVES
 ];
 
 /** Counts for the Lead/QA report. */
 export const ENVIRONMENT_DRESSING = {
   braziers: GATE_BRAZIERS.length,
-  flames: GATE_BRAZIERS.length,
+  flames: GATE_BRAZIERS.length + NEST_CANDLES.length,
   banners: GATE_BANNERS.length,
   stakes: ROADSIDE_STAKES.length,
   campBarrels: CAMP_BARRELS.length,
   campCarts: CAMP_CARTS.length,
   keepGraves: KEEP_GRAVES.length
+} as const;
+
+/** Cycle-7 plague-nest ritual dressing counts (existing shipped assets + procedural flame cones). */
+export const NEST_DRESSING = {
+  walls: NEST_WALLS.length,
+  braziers: NEST_BRAZIERS.length,
+  brazierFlames: NEST_BRAZIERS.length,
+  candles: NEST_CANDLES.length,
+  graves: NEST_GRAVES.length,
+  stakes: NEST_STAKES.length,
+  barrels: NEST_BARRELS.length,
+  carts: NEST_CARTS.length,
+  totalProps: NEST_WALLS.length + NEST_BRAZIERS.length + NEST_CANDLES.length + NEST_GRAVES.length + NEST_STAKES.length + NEST_BARRELS.length + NEST_CARTS.length
 } as const;
 
 // ---------------------------------------------------------------------------------------------
@@ -527,6 +602,9 @@ export const CONTENT_QA_POSES = [
   contentPose('furnace-village', 48, 18, 2.8, 50, 5, 1.5),
   contentPose('furnace-camp', 40, -44, 2.6, 32, -41, 1.5)
 ] as const;
+
+/** QA framing for the cycle-7 plague-nest ritual precinct: south-west approach, nest core in frame. */
+export const NEST_QA_POSES = [contentPose('content-plague', -8, -680, 3.2, 0, -666, 1.2)] as const;
 
 const RACK_DX = 5.0;
 const RACK_DZ = 4.2;
@@ -1074,7 +1152,7 @@ export function addRuins(scene: THREE.Scene): {
     placements: readonly DressingPlacement[],
     targetHeight: number,
     layerName: string,
-    options: {campIndex?: readonly number[]; castleIndex?: readonly number[]; friendly?: boolean; y?: number; scaleVariance?: boolean; emissiveLift?: number} = {}
+    options: {campIndex?: readonly (number | undefined)[]; castleIndex?: readonly (number | undefined)[]; friendly?: boolean; y?: number; scaleVariance?: boolean; emissiveLift?: number} = {}
   ): Promise<void> {
     const gltf = await loadModel(`custom/${assetName}`);
     if (!gltf) return;
@@ -1098,8 +1176,10 @@ export function addRuins(scene: THREE.Scene): {
       const spec = baseSpec(p.x, p.z, p.yaw, (targetHeight / prepared.height) * variance);
       spec.y = options.y ?? 0;
       spec.cullRange = DRESSING_RANGE;
-      if (options.campIndex && options.campIndex[i] !== undefined) spec.campIndex = options.campIndex[i];
-      if (options.castleIndex && options.castleIndex[i] !== undefined) spec.castleIndex = options.castleIndex[i];
+      const campIndexValue = options.campIndex?.[i];
+      if (campIndexValue !== undefined) spec.campIndex = campIndexValue;
+      const castleIndexValue = options.castleIndex?.[i];
+      if (castleIndexValue !== undefined) spec.castleIndex = castleIndexValue;
       spec.requireFriendly = options.friendly === true;
       specs.push(spec);
     }
@@ -1179,6 +1259,13 @@ export function addRuins(scene: THREE.Scene): {
       spec.cullRange = DRESSING_RANGE;
       specs.push(spec);
     }
+    // cycle-7: ritual candle glows on the plague-nest floor (same layer, same draw).
+    for (const candle of NEST_CANDLES) {
+      const spec = baseSpec(candle.x, candle.z, 0, candle.scale);
+      spec.y = candle.y;
+      spec.cullRange = DRESSING_RANGE;
+      specs.push(spec);
+    }
     addCullableLayer(createLayer(scene, prepared, specs, 'dressing:flames', true));
   }
 
@@ -1191,8 +1278,8 @@ export function addRuins(scene: THREE.Scene): {
     loadWeaponSources(),
     placeDressingAsset('brazier', GATE_BRAZIERS, 1.35, 'dressing:braziers', {scaleVariance: true}),
     placeDressingAsset('stakes', ROADSIDE_STAKES, 1.0, 'dressing:stakes', {scaleVariance: true}),
-    placeDressingAsset('barrels', CAMP_BARRELS, 1.45, 'dressing:barrels', {campIndex: CAMP_BARRELS.map((_, i) => i), scaleVariance: true}),
-    placeDressingAsset('cart', CAMP_CARTS, 1.05, 'dressing:carts', {campIndex: CAMP_CARTS.map((_, i) => i)}),
+    placeDressingAsset('barrels', CAMP_BARRELS, 1.45, 'dressing:barrels', {campIndex: CAMP_BARRELS.map((_, i) => (i < CAMPS.length ? i : undefined)), scaleVariance: true}),
+    placeDressingAsset('cart', CAMP_CARTS, 1.05, 'dressing:carts', {campIndex: CAMP_CARTS.map((_, i) => (i < CAMPS.length ? i : undefined))}),
     placeDressingAsset('grave', KEEP_GRAVES, 1.13, 'dressing:graves', {scaleVariance: true}),
     placeRegionLandmarks(),
     placeRegionPropAsset('dead_tree', DEAD_TREES, 'regionprops:dead_tree'),

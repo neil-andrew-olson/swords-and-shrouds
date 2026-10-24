@@ -154,6 +154,38 @@ test('all nine animated bodies stay grounded through idle, movement, block and a
   for(const clip of ['idle','run','attack_1','attack_2','block_idle','death_forward'])assert.ok(clips.has(clip),name+' clip '+clip);
   rig.dispose();
  }
+ // Cycle-7 undead variants: reuse the base rig/clip set, add a rigid add-on prim, stay in budget.
+ const undeadVariantCases:[string,string,number,number][]=[['zombie','zombie-bloated',30,11000],['skeleton-soldier','skeleton-armoured',51,8500]];
+ for(const [base,variant,joints,budget] of undeadVariantCases){
+  const baseSource=await geometryAsset(base),variantSource=await geometryAsset(variant);
+  const baseActor={id:'a0',kind:'zombie',hp:52,maxHp:52,weapon:'sword',attackSerial:0} as Actor;
+  const variantActor={...baseActor,id:'a2'};
+  const baseRig=customCharacter(baseSource,baseActor,new Map()),variantRig=customCharacter(variantSource,variantActor,new Map());
+  const prims:THREE.SkinnedMesh[]=[];variantRig.model.traverse(o=>{if(o instanceof THREE.SkinnedMesh)prims.push(o);});
+  assert.ok(prims.length>=2,variant+' has body + add-on prims');
+  assert.equal(prims[0].skeleton.bones.length,joints,variant+' joint count');
+  const primTris=(prim:THREE.SkinnedMesh)=>(prim.geometry.index?prim.geometry.index.count:prim.geometry.attributes.position.count)/3;
+  const variantBody=prims.reduce((best,prim)=>primTris(prim)>primTris(best)?prim:best,prims[0]);
+  for(const prim of prims){
+   if(prim===variantBody)continue;
+   const rigidWeights=prim.geometry.attributes.skinWeight as THREE.BufferAttribute;
+   for(let i=0;i<rigidWeights.count;i++){
+    assert.ok(Math.abs(rigidWeights.getX(i)+rigidWeights.getY(i)+rigidWeights.getZ(i)+rigidWeights.getW(i)-1)<1e-3,variant+' add-on rigid weight sum');
+    assert.ok(Math.max(rigidWeights.getX(i),rigidWeights.getY(i),rigidWeights.getZ(i),rigidWeights.getW(i))>.99,variant+' add-on single joint');
+   }
+  }
+  let tris=0;
+  for(const prim of prims){tris+=(prim.geometry.index?prim.geometry.index.count:prim.geometry.attributes.position.count)/3;assert.ok(prim.geometry.attributes.skinIndex&&prim.geometry.attributes.skinWeight,variant+' '+prim.name+' JOINTS/WEIGHTS');}
+  assert.ok(tris<=budget,variant+' tri budget '+tris);
+  const variantClips=(variantSource.animations as {name:string}[]).map(clip=>clip.name),baseClips=(baseSource.animations as {name:string}[]).map(clip=>clip.name);
+  assert.equal(variantClips.length,baseClips.length,variant+' clip count matches base');
+  assert.ok(variantClips.every(name=>baseClips.includes(name)),variant+' reuses the base clip set');
+  for(const clip of ['idle','run','attack_1','attack_2','block_idle','death_forward'])assert.ok(variantClips.includes(clip),variant+' clip '+clip);
+  variantRig.update(variantActor,false,1/30);variantRig.model.updateMatrixWorld(true);
+  const idleBounds=meshBounds(variantRig.model);assert.ok(Math.abs(idleBounds.min.y)<.07,variant+' grounded idle '+idleBounds.min.y);assert.ok(idleBounds.max.y<2.35&&idleBounds.max.y>.8,variant+' idle height '+idleBounds.max.y);
+  variantActor.hp=0;for(let i=0;i<40;i++){variantRig.update(variantActor,false,1/30);const deadBounds=meshBounds(variantRig.model);assert.ok(Number.isFinite(deadBounds.min.y)&&Number.isFinite(deadBounds.max.y),variant+' finite death bounds');}
+  baseRig.dispose();variantRig.dispose();
+ }
 });
 
 import {WEAPON_GRIPS} from '../src/client/equipment';

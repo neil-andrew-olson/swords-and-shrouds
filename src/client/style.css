@@ -104,3 +104,10 @@ footer{text-shadow:0 1px 3px #000c;background:linear-gradient(90deg,transparent 
 #padHints span:first-child{border-color:#cba56866;color:#e9d6a8}
 body.pad-connected #device{color:#e9d6a8}
 @media(max-width:700px){#padHints{bottom:62px;font-size:9px;padding:5px 8px;gap:4px}#padHints span{font-size:9px;padding:2px 5px}}
+
+/* Accessibility captions (CC), created by main.ts: one subtle line above the hints bar, off by
+   default and toggled from the Guide/Settings row. Pointer-events:none so it never blocks play. */
+#captions{position:absolute;left:50%;bottom:118px;transform:translateX(-50%);max-width:min(640px,90vw);padding:7px 14px;background:#071012d9;border:1px solid #a5b4a32c;border-left:3px solid var(--gold);border-radius:6px;color:#f0e7d0;font-size:13px;line-height:1.4;letter-spacing:.2px;text-align:center;text-shadow:0 1px 3px #000;pointer-events:none;z-index:7;box-shadow:0 4px 16px #0008}
+#captions[hidden]{display:none!important}
+@media(max-width:700px){#captions{bottom:104px;font-size:11px;padding:6px 10px;max-width:92vw}}
+@media(prefers-reduced-motion:reduce){#captions{transition:none}}

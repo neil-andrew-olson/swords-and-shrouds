@@ -655,6 +655,75 @@ Staged mirrors validated before each install (76/76 armour v3, 78/78 props), ato
 `tests/armory` 5/5 after both phases. `tests/equipment` is 5/5 for the cycle-5 state; the cycle-6
 rebuild below changes the survivor staff weighting, so that assertion needs the cycle-6 update.
 
+## Batch 2026-10J — enemy variants + strict-mask palette (cycle 7)
+
+### Phase A — undead variants (installed, additional assets)
+
+Two new files reuse the existing enemy rigs/clips unchanged (base zombie / skeleton-soldier
+files are byte-identical, untouched). Builder: scripts/bake/bake-enemy-variants.mjs (append a
+skinning primitive to the base GLB; body indices/positions and animation hashes verified identical;
+every prim has JOINTS_0/WEIGHTS_0 with rigid single-joint weights; embedded 256 JPEG; gzip-9; no new
+extensions). Validator budgets added: zombie-bloated 11,000 tris, skeleton-armoured 8,500.
+
+| asset | tris | prims | joints | clips | gz | add-on |
+| --- | --- | --- | --- | --- | --- | --- |
+| zombie-bloated | 10,620 | 2 | 30 | 10 | 358.9 KB | +620 |
+| skeleton-armoured | 7,089 | 2 | 51 | 9 | 285.9 KB | +268 |
+
+zombie-bloated: obese belly/chest masses (spine_02/03), back hump (spine_04), shoulder/arm/neck
+tumours and hanging belly folds, all rigid to existing joints, plague-green pustule palette.
+skeleton-armoured: iron bucket helm with rim/crest (Head1), domed pauldrons (both UpperArms) and a
+kite shield on the left forearm (L_Forearm), aged-iron + bone palette. Preview:
+	emp_sketchlab/armour/enemies_sheet3.png.
+
+### Phase B — strict-mask palette (ranger / hero / fallen)
+
+Atlas-only rebuild of three bodies (other four untouched):
+- ranger: cloak base lightened from dark forest-green to mid-tone (0.16/0.22/0.13 →
+  0.34/0.42/0.26) with a brighter accent, un-crushing the hue panels under 5-bit quantisation.
+- hero: coarser paint chips (7×6 cells), full-strength cream/gold chips, dark trim bands beside the
+  coloured ones and bright rivet accents for two-way luminance separation.
+- fallen: stronger patina coverage plus a bright-rust blob pass (patinaBoost 1.9).
+
+| body | tris | prims | gz | wide-proxy colours (before → after) |
+| --- | --- | --- | --- | --- |
+| ranger | 9,021 | 3 | 811.2 KB | 520 → 895 |
+| hero | 9,433 | 2 | 780.9 KB | 1,228 → 1,348 |
+| fallen | 8,874 | 2 | 736.8 KB | 590 → 908 |
+Unchanged: templar 781.7 KB, berserker 743.1 KB, ally 783.8 KB, survivor 772.7 KB. Authority for the
+acceptance gate remains weapons-armory's strict silhouette mask; the wide local proxy is an indicator
+only. Preview: 	emp_sketchlab/armour/c7_close_{body}.png.
+
+### Final strict-mask result (cycle-7, weapons-armory pose-pinned mask)
+
+**7/7 bodies ≥500** after the polish pass: templar 561, hero **526** (was 491; gentle large-scale
+luminance blocks tipped it), berserker 721, ranger **651** (was 379), ally 694, survivor 1082,
+fallen **937** (was 460). SPEC target (≥5/7) exceeded. Hero close-up evidence:
+qa/char-viewer/shots/c7h2-base-closeup-hero.png.
+
+**Cycle-8 note (zombie-bloated)**: night-matching lowered the close-up body mean 131 → 126 and the
+finer mottle reduced the coarse blocking, but it still reads brighter than the base zombie (83) and the
+2.8 m belly shows some pale patch structure. Acceptable at gameplay distance as an intentional
+plague-pale blob; the remaining lever if cycle 8 touches it is the additive belly albedo's **overall
+level** (not more mottle). Variant contract unchanged: 10,620 tris / 2 prims / 30 joints / 10 clips /
+361.0 KB.
+
+### Polish pass (after weapons-armory's cycle-7 verification)
+
+- **hero**: strict mask came in at 491 (9 short of 500) because the large plate faces still quantise
+  down at night; added gentle large-scale luminance blocks over the biggest pauldron/cuirass faces
+  (brightened plates + slightly darkened ones, no hard blocks so the chip variation is preserved).
+  heroes file 783.4 KB (was 780.9).
+- **zombie-bloated**: the variant read much brighter than the base zombie at night (close-up body mean
+  131 vs 83) and its belly albedo was blocky at 2.8 m; the add-on plague texture was night-matched
+  (texture mean RGB 61.6 vs base 99.2) and given finer 2 px / 8 px mottle. Variant 361.0 KB (was 358.9).
+
+### Verification
+
+Staged mirrors 80/80 before both installs, atomic installs (2 new files for Phase A, 3 replaced for
+Phase B), live alidate-assets.mjs **80/80**, 	ests/assets 5/5, 	ests/equipment 5/5,
+	ests/armory 5/5. Custom payload 76 files / 14.68 MB.
+
 ## Batch 2026-10I — masked-palette hue chips + survivor staff stow (cycle 6)
 
 Rebuilt 4 of the 7 bodies (atlas-only for the palette work, plus the Lead-requested survivor staff

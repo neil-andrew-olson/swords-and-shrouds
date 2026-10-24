@@ -27,6 +27,7 @@ const BUDGETS = {
   watchtower_ruin: 10000, village_house_ruin: 8000,
   stone_well: 3000, blacksmith_stall: 5000,
   stone_altar: 4000, forge_furnace: 8000,
+  'zombie-bloated': 11000, 'skeleton-armoured': 8500,
   fortress_keep: 14000, castle_tower: 14000,
   well: 6000, chest: 6000, bench: 6000, rock_cluster: 6000, grass_tuft: 1500,
   camp_tent: 6000, stone_wall: 8000,

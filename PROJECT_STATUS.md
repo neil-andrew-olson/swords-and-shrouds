@@ -23,79 +23,79 @@ workspace-relative paths and/or use the `present` tool.
 broad `taskkill /IM node.exe`. One dist builder at a time; QA owns authoritative captures. If a
 teammate edits after the Lead's gate, the hash changes and QA must be given the definitive artifact.
 
-## Latest completed cycle — 2026-10I cycle 6: sixth appearance, controller polish, QA debts
+## Latest completed cycle — 2026-10J cycle 7: enemy variety, palette cleared, content captures, a11y
 
-Contract: `docs/BATCH-2026-10I-SPEC.md`; results: `docs/BATCH-2026-10I-RESULTS.md`; QA evidence in
-`docs/QA-REPORT.md`. Final bundle `index-BY6s-QI9.js` (883,369 B), deterministic across two builds.
+Contract: `docs/BATCH-2026-10J-SPEC.md`; results: `docs/BATCH-2026-10J-RESULTS.md`; QA evidence in
+`docs/QA-REPORT.md`. Final bundle `index-BF93HyxO.js` (889,821 B), deterministic across two builds.
 
-### Sixth playable appearance — Wandering Survivor
+### Enemy variety — two new undead variants
 
-`survivor` added to `PLAYER_CHARACTERS` (6 selectable appearances; landing + in-game selectors).
-Existing survivor rig has the Mixamo clip set and hand sockets; QA verified selection → authoritative
-appearance → third-person render with Longsword attached and feet grounded. The baked walking staff
-was re-weighted from RightHand to Spine2/Hips and authored stowed across the back (zero hand-rigid
-vertices) so it no longer swings with a held sword; equipment tests assert the new contract.
+- `zombie-bloated`: zombie 30-joint rig + 10 clips, 2 prims (10,000 + 620 rigid add-on), plague-bloated
+  silhouette, 10,620 tris / 361 KB.
+- `skeleton-armoured`: skeleton 51-joint rig + 9 clips, 2 prims (6,821 + 268 rigid helm/pauldrons/
+  shield), 7,089 tris / 286 KB.
+- `undeadVariant(a)` = `UNDEAD_ASSETS[idNumeric % 4]` (~25 % each variant per region, ~50 % bases);
+  players/soldiers/corrupted unchanged. `characterAssetFallback` + `assets.ts` fallback degrade to
+  base zombie/skeleton if a variant is missing; variants preload after playable.
+- QA: `__ssEnemyVariants()` availability, in-world variant captures, distinct silhouettes
+  (bloated 31.9/70.5 %, armoured 64.0/96.8 %), animations/grounding verified.
 
-### Controller polish
+### Strict-mask armour palette — debt cleared (7/7 ≥500)
 
-Rumble via `vibrationActuator` on hurt (weapon-weight-scaled), block and castle capture; guarded by
-reduced-motion/menu/pause/hidden and actuator presence, reset on blur/menu/disconnect. Controller
-glyph hints bar (`#padHints`: RT Attack, LT Block, B Sweep, X Heal, A Interact, Y View) shown only
-for standard-mapping pads with connect/disconnect toasts. QA hooks `__ssPad()` +
-`__ssCharacterSelect()`. Physical rumble is hardware debt (headless cannot vibrate).
+templar 561 · hero 526 · berserker 721 · ranger 651 · ally 694 · survivor 1,082 · fallen 937.
+Fixes: ranger cloak base lightened out of 5-bit crush, hero luminance-separated plate chips/trim,
+fallen brighter/larger patina-rust chips, plus a hero polish pass. Crop metric 7/7 (638–1033).
 
-### QA debts cleared
+### Content captures + plague dressing
 
-- Reduced-motion vignette residual: combat camera hard-clears every frame under reduced motion
-  (vignette 0, hit-stop 0, kick ≤0.002 in two QA samples; normal peaks unchanged).
-- Low-tier cloth-wind isolation via `__ssCharacterFx()` → `{quality, clothWind}`.
-- `landmark-crown` camera fully inside Frozen Crown (region reports crown).
-- Deterministic clear weather for QA: `__ssClearWeather()` + `weather` in `__ssPerf()`.
-- Altar night readability: 3 candle flames appended to the existing flames layer (0 draws, 0 lights)
-  + subtle warm emissive lift; isolated evidence `view-content-altar-close2.png`. Capture caveat:
-  content-altar QA poses move only the camera while the altar layer is player-distance-culled at
-  85 m — cycle-7 needs a teleport/spawn hook or QA-camera-following culling.
+`scene.ts` passes `ruinsUpdate` a debug-only synthetic actor at the QA camera while `__ssQAView` is
+active, so `content-altar`/`content-furnace-*` and a new `content-plague` pose render player-distance-
+culled dressing; normal play culling unchanged. `__ssPerf().contentFocus` reports QA focus.
+Plague nest (0,−664) dressed with existing assets only: 3 wall fragments, 2 braziers + flames,
+4 candles, 8 graves, 6 stakes, 2 barrel clusters, corpse cart — 0 new draws/layers/lights, ≈86 k tris
+only when visible (nest far beyond spawn far plane).
 
-### Masked-palette art debt (documented, not blocking)
+### Accessibility + controller settings
 
-QA crop gate **7/7 ≥500** (605–955). Strict silhouette mask **4/7 ≥500** (templar 559, ally 707,
-berserker 725, survivor 1077; hero 454, fallen 460, ranger 379). Fix directions in
-`ASSET-PIPELINE.md`: ranger lighten re-dyed cloak base; hero/fallen stronger luminance-separated
-plate chips/trim.
+- Captions (CC): persisted off-by-default toggle, subtle HUD line for thunder, nearby undead, siege
+  start/end, low health, castle captured; 2.2 s rate limit + priority interrupts; Sound-independent
+  by design. Hooks `__ssCaptions()`, `__ssCaptionDemo(cue)`.
+- Controller: deadzone presets (tight .10 / normal .18 / wide .28) + dedicated look sensitivity
+  (0.4–2.0) persisted and applied through `readPad` (default path unchanged); hints/rumble guards
+  intact. Hooks `__ssControllerSettings()`, extended `__ssPad()`.
 
 ### Verification (final artifact)
 
-- `npm test` **58/58**; `tsc` 0; deterministic build reproduced `index-BY6s-QI9.js` twice;
-  `validate-assets` **78/78**.
-- Fresh-build smoke **26/26** + hash proof, 0 errors/404s, 10 cards, WS 1/0.
-- Characters: crop palette 7/7 ≥500; torso 82.35/72.32; clip 0; elite 30.82/88.4 %.
-- Perf **206 calls / 1,726,578 tris** (gates <280/<2.05 M); FP 160/1.61 M; low 161/1.41 M;
-  payload **16.31 MiB**; HUD click→HUD 4.5 s / state 6.6 s / join 3.77 s.
-- Co-op **18/18**, live baseline **21/21**.
+- `npm test` **58/58**; `tsc` 0; deterministic build reproduced `index-BF93HyxO.js` twice;
+  `validate-assets` **80/80**.
+- Fresh-build smoke **38/38** + hash proof, 0 errors/404s, 10 cards, WS 1/0; night 53.7 forced-clear.
+- Perf **213 calls / 1,735,988 tris** (gates <290/<2.15 M); FP 165/1.62 M; low 164/1.42 M; payload
+  **17.02 MiB**; HUD click→HUD 157 ms / state 1.28 s / join 3.35 s.
+- Characters **58/58**, perf **60/60**, co-op **18/18**, live baseline **26/26**.
 
 ### Deployed state
 
-Live bundle is the hosting build of this commit sequence (`feat: AAA cycle 6 …` → hosting pin commit →
+Live bundle is the hosting build of this commit sequence (`feat: AAA cycle 7 …` → hosting pin commit →
 Cloudflare deploy → QA final live pass). Local play: `$env:PORT=3000; node --import tsx
 src/server/index.ts` from the game repo → http://localhost:3000/.
 
-### Cycle-7 (next) — from the audit
+### Cycle-8 (next) — from the audit
 
-1. Strict-mask palette: ranger (lighten dye base), hero/fallen (luminance-separated plate chips) —
-   target ≥5/7.
-2. Altar content capture: teleport/spawn QA hook or QA-camera-following dressing culling.
-3. Physical controller rumble + real hardware gamepad test; surface-audio ear check.
-4. Real-GPU/perceptual playtests and mobile support.
-5. Content depth: more enemy variety (warehouse models), campaign/siege objectives polish, balance.
+1. Zombie-bloated night tone (lever: additive belly albedo level); enemy QA framing/spawn hook.
+2. Physical controller rumble / real-hardware gamepad test; surface-audio ear check.
+3. Real-GPU/perceptual playtests and mobile support.
+4. Content depth: campaign/siege objectives polish, balance, more enemy types/props from warehouse.
 
 ## Previous cycles
 
+- **2026-10I cycle 6** (`docs/BATCH-2026-10I-RESULTS.md`): Wandering Survivor sixth appearance,
+  controller rumble/hints, reduced-motion vignette fix, cloth-wind isolation, altar candle glows.
 - **2026-10H cycle 5** (`docs/BATCH-2026-10H-RESULTS.md`): armour art v3 + survivor identity, cloth
-  wind, dense snowstorms, combat feel, altar/forge content, surface audio; 208 calls / 1.727 M tris.
+  wind, dense snowstorms, combat feel, altar/forge content, surface audio.
 - **2026-10G cycle 4** (`docs/BATCH-2026-10G-RESULTS.md`): armour v2, dynamic regional weather +
-  weather audio, tone/HUD fixes, wells/stalls; 206 calls / 1.728 M tris.
+  weather audio, tone/HUD fixes, wells/stalls.
 - **2026-10F cycle 3** (`docs/BATCH-2026-10F-RESULTS.md`): regional identity, warehouse foliage +
-  landmark ruins, elite undead, fire/smoke sprites, region audio; 195 calls / 1.667 M tris.
+  landmark ruins, elite undead, fire/smoke sprites, region audio.
 - **2026-10E cycle 2** (`docs/BATCH-2026-10E-RESULTS.md`): character material v2, quantised-ruin fix,
   trees/shadows, keep atlas, adaptive audio.
 - **2026-10D cycle 1** (`docs/BATCH-2026-10D-RESULTS.md`): fixed blacked-out characters, restored

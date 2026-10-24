@@ -161,7 +161,7 @@ const ARMOUR = {
     palette: {metal: [0.68, 0.70, 0.74], cloth: [0.32, 0.35, 0.42], accent: [0.62, 0.54, 0.36]},
     // cycle-6 masked-palette debt: all-plate body, so the hue variety must live on the plate itself
     // (coloured trim bands + paint chips across the large pauldron/cuirass faces)
-    atlas: {metalChips: 0.85, metalHueAmp: 2.4},
+    atlas: {metalChips: 1.0, metalHueAmp: 2.6, chipBoost: 1.5, chipBlocks: 1.0},
     pieces: ['visoredHelm', 'knightCuirass', 'layeredPauldrons', 'bracers', 'belt'],
   },
   ally: {
@@ -173,7 +173,7 @@ const ARMOUR = {
     pieces: ['hornedHelm', 'bracers', 'furShoulder', 'belt'],
   },
   ranger: {
-    palette: {metal: [0.30, 0.38, 0.20], cloth: [0.16, 0.22, 0.13], accent: [0.52, 0.38, 0.18]},
+    palette: {metal: [0.36, 0.44, 0.24], cloth: [0.34, 0.42, 0.26], accent: [0.64, 0.46, 0.20]},
     // cycle-6 masked-palette debt: the cloak EXTERIOR is a huge smooth cloth surface, so give the
     // cloth band strong hue-separated panels/dyed patches (hood already reads on the strict mask)
     atlas: {clothPatches: 1.0, clothHueAmp: 4.0},
@@ -188,7 +188,7 @@ const ARMOUR = {
   fallen: {
     palette: {metal: [0.34, 0.25, 0.44], cloth: [0.12, 0.10, 0.16], accent: [0.40, 0.34, 0.42]},
     // cycle-6 masked-palette debt: corrupted plate body ??? patina/rust hue chips across the big plates
-    atlas: {metalChips: 0.9, metalHueAmp: 3.0},
+    atlas: {metalChips: 1.0, metalHueAmp: 3.4, patinaBoost: 1.9},
     pieces: ['crestHelm', 'backPlate', 'spikedPauldrons', 'bracers'],
   },
 };
@@ -228,6 +228,7 @@ async function makeAtlas(palette, dim = 1024, opts = {}) {
   // cycle-6 per-body hue boost: hero/fallen need coloured trim chips on big plate faces, ranger
   // needs hue-separated panels on the cloak exterior (hood already reads) ??? atlas-only knobs.
   const metalChips = opts.metalChips ?? 0.0;
+  const chipBlocks = opts.chipBlocks ?? 0.0;
   const metalHueAmp = opts.metalHueAmp ?? 1.0;
   const clothPatches = opts.clothPatches ?? 0.0;
   const clothHueAmp = opts.clothHueAmp ?? 1.0;
@@ -289,23 +290,41 @@ async function makeAtlas(palette, dim = 1024, opts = {}) {
         const trim = false;
         let k = (0.92 + grain) * seam;
         base = [base[0] * k, base[1] * k, base[2] * k];
-        if (mott2 > 0.72) { const t = Math.min(1, (mott2 - 0.72) * 3.2); base = hueShift(base, 0, 0, 0).map((c, ci) => c * (1 - t) + hueShift(patina, 0.02 * metalHueAmp, 0.05 * metalHueAmp, -0.02)[ci] * t); }
-        if (mott3 > 0.78) { const t = Math.min(1, (mott3 - 0.78) * 3.0); base = base.map((c, ci) => c * (1 - t) + hueShift(rust, 0.01 * metalHueAmp, 0.12 * metalHueAmp, 0.02)[ci] * t); }
+        const patinaBoost = opts.patinaBoost ?? 1.0;
+        if (mott2 > 0.72 / patinaBoost) { const t = Math.min(1, (mott2 - 0.72 / patinaBoost) * 3.2 * patinaBoost); base = base.map((c, ci) => c * (1 - t) + hueShift(patina, 0.02 * metalHueAmp, 0.05 * metalHueAmp, 0.02 * patinaBoost)[ci] * t); }
+        if (mott3 > 0.80 / patinaBoost) { const t = Math.min(1, (mott3 - 0.80 / patinaBoost) * 3.0 * patinaBoost); base = base.map((c, ci) => c * (1 - t) + hueShift(rust, 0.01 * metalHueAmp, 0.12 * metalHueAmp, 0.06 * patinaBoost)[ci] * t); }
         if (mott2 < 0.16) { const t = Math.min(1, (0.16 - mott2) * 3.0); base = base.map((c, ci) => c * (1 - t) + oxide[ci] * t); }
-        if (grain > 0.055) { base = base.map((c, ci) => c * 0.9 + rustLight[ci] * 0.12); }
-        // cycle-6: broad coloured trim bands + paint chips on the big plate faces (hero/fallen)
+        if (mott3 > 0.88) { const t = Math.min(1, (mott3 - 0.88) * 6); base = base.map((c, ci) => c * (1 - t) + rustLight[ci] * t); }
+        // cycle-6/7: broad coloured trim bands + paint chips on the big plate faces (hero/fallen)
         if (metalChips > 0) {
+          const chipBoost = opts.chipBoost ?? 1.0;
           const bandY = Math.abs(((v - 0.02) * 3.2) % 1 - 0.5);      // wide horizontal trim bands
           if (bandY > 0.47) {
             const t = Math.min(1, (bandY - 0.47) * 12) * Math.min(1, metalChips * 1.6);
-            base = base.map((c, ci) => c * (1 - t * 0.7) + accentAlt[ci] * t * 0.7);
+            base = base.map((c, ci) => c * (1 - t * 0.85) + accentAlt[ci] * t * 0.85);
+          } else if (bandY > 0.40) {
+            const t = Math.min(1, (bandY - 0.40) * 14) * Math.min(1, metalChips);
+            base = base.map((c, ci) => c * (1 - t * 0.7) + accentDark[ci] * t * 0.5);
           }
-          const cell = Math.floor(u * 11) * 17 + Math.floor(v * 9) * 31;
+          const cell = Math.floor(u * 7) * 17 + Math.floor(v * 6) * 31;   // coarser = bigger chips
           const chip = hash(cell, 5);
-          if (chip > 0.86) {
-            const t = Math.min(1, (chip - 0.86) * 5) * Math.min(1, metalChips * 1.8);
-            const chipCol = chip > 0.94 ? accentCream : (chip > 0.9 ? accentLight : rivetGold);
+          if (chip > 0.80) {
+            const t = Math.min(1, (chip - 0.80) * 5) * Math.min(1, metalChips * 1.6) * Math.min(1, chipBoost);
+            const chipCol = chip > 0.93 ? accentCream : (chip > 0.87 ? accentLight : rustLight);
             base = base.map((c, ci) => c * (1 - t) + chipCol[ci] * t);
+          }
+          const rivetCell = Math.floor(u * 14) * 13 + Math.floor(v * 10) * 29;
+          if (hash(rivetCell, 7) > 0.93) base = base.map((c, ci) => c * 0.55 + accentCream[ci] * 0.55);
+          // cycle-7: large bright/dark contrast blocks on the biggest plate faces (the strict mask
+          // plateaus just under 500 on hero because subtle chips quantise away at night tone)
+          if (chipBlocks > 0) {
+            // gentle large-scale luminance blocks: brighten some big plate areas without replacing
+            // the chip variation (hard bright/dark blocks collapse the quantised colour count)
+            const bx = Math.floor(u * 6), by = Math.floor(v * 4);
+            const block = hash(bx * 13 + by * 29, 3);
+            const tb = Math.min(1, chipBlocks);
+            if (block > 0.62) base = base.map((c, ci) => c * 1.0 + accentCream[ci] * 0.22 * tb);
+            else if (block < 0.28) base = base.map((c, ci) => c * (1 - 0.18 * tb));
           }
         }
         if (rivet) base = base.map((c, ci) => c * 0.55 + rivetGold[ci] * 0.42);

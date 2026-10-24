@@ -1,4 +1,4 @@
-import {characterAsset} from '../shared/characters';
+import {characterAsset,characterAssetFallback,UNDEAD_ASSETS} from '../shared/characters';
 import {WEAPON_IDS} from '../shared/weapons';
 import {customCharacter} from './custom-character';
 import {GLTFLoader,type GLTF} from 'three/addons/loaders/GLTFLoader.js';
@@ -37,7 +37,9 @@ export class CharacterAssets {
    // join/first-frame work never competes with a 15-fetch burst.
    const starterWeapon=WEAPON_IDS[0]??'sword';
    const core:string[]=['hero','ally','survivor',starterWeapon,'shield'];
-   const extras:string[]=[...WEAPON_IDS.filter(id=>id!==starterWeapon),'fallen','berserker','ranger','templar','skeleton-soldier','zombie'];
+   // Cycle-7 undead variants stream after the join-critical core; missing assets are tolerated
+   // (weapons-armory maps a deterministic id subset and falls back to the base bodies).
+   const extras:string[]=[...WEAPON_IDS.filter(id=>id!==starterWeapon),'fallen','berserker','ranger','templar',...UNDEAD_ASSETS];
    this.progress.total=core.length+extras.length;
    const load=async(name:string)=>{
     try{this.custom.set(name,await loadAsset('custom/'+name));}
@@ -52,7 +54,9 @@ export class CharacterAssets {
  }
  create(a:Actor) {
   if(!this.customLoaded) return;
-  const source=this.custom.get(characterAsset(a));
+  const asset=characterAsset(a);
+  const fallback=characterAssetFallback(a);
+  const source=this.custom.get(asset)??(fallback?this.custom.get(fallback):undefined);
   if(source) return customCharacter(source,a,this.custom);
- }
+}
 }
