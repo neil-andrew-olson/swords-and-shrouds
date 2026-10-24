@@ -2033,3 +2033,45 @@ wind 3.316; HUD click→HUD **3.27 s** / state 6.29 s (both gates) / join **3.61
 intentional tone as cycle-9 notes. Cycle-9 candidates: physical-device mobile/real-GPU/perceptual
 passes, hardware controller rumble, hit-flash frame-sync capture, surface-audio ear check, content/
 campaign depth, further enemy variety. After deploy: final live pass + task-80 complete.
+
+### Final live deployment verification — cycle-8 (game `8c72d1bb`, hosting `f373932e`)
+
+Deployed after the Lead accepted the cycle-8 pass. Live verification runs:
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch11-deployed --expect-weapons 10 `
+    --expect-assets custom/templar.glb.gz,custom/hero.glb.gz,custom/berserker.glb.gz,custom/ranger.glb.gz,custom/ally.glb.gz,custom/survivor.glb.gz,custom/fallen.glb.gz,custom/stone_well.glb.gz,custom/blacksmith_stall.glb.gz,custom/stone_altar.glb.gz,custom/forge_furnace.glb.gz,custom/zombie-bloated.glb.gz,custom/skeleton-armoured.glb.gz
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --mobile --out qa/live-mobile-c8
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --perf --out qa/live-perf-c8
+```
+
+- **Results: PASS 27/27 (deployed pass) + PASS 22/22 (live mobile) + PASS 70/70 (live views/content/
+  heavy hooks).** Live serves **`assets/index-NAyaupV0.js` (898,394 B)** — hosting/base-path build of
+  authoritative `index-2pShR6WA.js` (898,219 B; +175 B); `/health` OK; **13/13 expected assets HTTP
+  200** (7 armour GLBs, stone_well, blacksmith_stall, stone_altar, forge_furnace, **zombie-bloated
+  367,162**, **skeleton-armoured 292,792**; hero 802,229); 10 cards; 0 page/console errors, 0
+  bad/404/failed requests; WS opens=1/closes=0. Only log: external Cloudflare-Insights beacon.
+- **Live payload:** 17,863,684 B = **17.04 MiB** across 89 assets (curl-verified) — +0.04 MB vs
+  cycle-7 live; CREDITS 4,697 B.
+- **Live mobile/touch:** `__ssDeviceProfile()` `{touch,coarse,smallScreen,suggestedQuality:'low',
+  appliedQuality:'low',maxDpr:1.25}`; `#touch` HUD, stick/lookpad/action buttons visible and
+  non-overlapping in portrait 390×844 **and** landscape 844×390; keyboard hints hidden; safe insets;
+  pinch/scroll scale stays 1; **3-pointer multi-touch** (`__ssTouch`: pointers 3, held.attack true,
+  player moved 4.5 m/yaw .36); touch look sensitivity 1.4 persists; mobile `__ssPerf()` **128 calls /
+  1,309,525 tris** (low tier). `mobile-portrait/landscape.png` captured live.
+- **Live feature hooks:** `__ssPreviewEnemy` frames all 4 undead at 2.8/10 m; `__ssEnemyHitFx`/
+  `__ssTriggerEnemyHit` flash+stagger live incl. reduced-motion suppression; captions + deadzone/
+  sensitivity settings live; `__ssEnemyVariants` availability true.
+- **Live content/weather:** `content-altar-close` differs strongly from the no-props reference
+  (**20.52 / 41.7 %**); `contentFocus` non-null for all content views; plague nest + ground decals
+  captured live (diff vs cycle-7 **9.21 / 33.5 %**, 1,987 colours); furnace/well props visible; snow
+  240→800, fog 0.01847→0.02196, low-tier 0; both crown cameras report crown; night TP **53.62**
+  (deployed pass) / **51.18** (perf run) ≤75.
+- **Live HUD/regression:** join 3.61 s local (≤3.8); live nav→HUD includes QA landing overhead;
+  10 cards; 0 404s; no page/console errors.
+
+**Cycle-8 live deployment is verified end-to-end: green**, with the hit-frame screenshot timing and
+intentional zombie-bloated tone carried as cycle-9 notes. task-80 complete; cycle-9 candidates:
+physical-device mobile/real-GPU/perceptual passes, hardware controller rumble, hit-flash frame-sync
+capture, surface-audio ear check, content/campaign depth, further enemy variety.
