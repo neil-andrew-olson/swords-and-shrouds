@@ -1418,3 +1418,43 @@ snowstorm density/visibility weak at high intensity (rain/ash fine); (b) `__ssPr
 body not rendering (camera framing) — QA used in-game fallbacks; (c) oversized flat/wood-grain armour
 plates at 2.8 m (asset-side); (d) survivor body identification uses a soldier rig (camp survivor
 specifics not isolated). `region-crown` is a border-blend capture, noted above.
+
+### Final live deployment verification — cycle-4 (game `abfa0d72`, hosting `923fd216`)
+
+Deployed after the Lead accepted the cycle-4 pass. Live verification runs:
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch7-deployed --expect-weapons 10 `
+    --expect-assets custom/templar.glb.gz,custom/hero.glb.gz,custom/berserker.glb.gz,custom/ranger.glb.gz,custom/ally.glb.gz,custom/survivor.glb.gz,custom/fallen.glb.gz,custom/stone_well.glb.gz,custom/blacksmith_stall.glb.gz
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --perf --out qa/live-views-b7
+```
+
+- **Results: PASS 19/19 (deployed pass) + PASS 25/25 (live views/perf/weather).** Live network log
+  shows **`assets/index-czSzE-EL.js`** (862,087 B) + `index-CnBWkizl.css`; `/health` OK; 10 weapon
+  cards; **9/9 expected assets HTTP 200** (7 armour v2 GLBs, stone_well, blacksmith_stall); 0 page/
+  console errors, 0 bad responses/404s, 0 failed requests; 94 internal requests (84 asset URLs); WS
+  opens=1/closes=0. Only log entries: external Cloudflare-Insights beacon (third-party, not gated).
+- **Live payload:** 15,734,966 B = **15.01 MiB** across 84 assets (curl-verified) — **+4.6 %** vs
+  cycle-3 live 14.34 MiB (armour v2 rich atlases + new props/weather). Verified live sizes: templar
+  704,344 / hero 694,601 / stone_well 222,207 / blacksmith_stall 16,279 / flame_soft 33,685 /
+  CREDITS 4,697 B. Live perf probe: **206 calls / 1,708,300 tris** (low 161/1,395,576, FP
+  160/1,591,562) — matches the local authoritative capture (206 / 1,708,376); `treeDebug` shows
+  pine card bark 316 + pine_leaves 956 tris (alphaTest 0.42).
+- **Live weather (QA force hook works on the deployed build):** march light-rain rain 138/splash 90 →
+  downpour rain 460/splash 90; moor ashfall haze 4 → haze 14; low quality tier downpour → rain 0
+  (qualityScale 0, splash 90 continues) — low/high particle gates PASS live. Crown snowstorm still
+  sparse visually (known debt; no snow counter).
+- **Live regions/views:** all 7 required + 8 optional views captured live; region fog follows the
+  camera (march #1e4038 / moor #243939 / crown blend #313e49), colour distance 4.96–12.76, wind diff
+  1.514; night mood TP canvas mean **51.28** (≤75); landing/third-person live screenshots show
+  armour-v2 party (distinct helms/cloaks), rain streaks + wet sheen, canopies, blacksmith stall and
+  night palette — matches local captures.
+- **Live HUD context:** join button enabled 3.71 s (<3.8 gate); nav→HUD is inflated by QA landing
+  steps (join offset ~19 s in the live views run); app-load evidence is the same click→HUD fast path
+  as local (the live deployed pass had join offset 10.6 s and firstGameFrame 11.86 s).
+
+**Cycle-4 live deployment is verified end-to-end: green, with the four visual debts + region-crown
+blend nit carried into cycle 5.** task-52 complete; cycle-5 candidates: armour art richness (plates),
+crown snowstorm density + snow particle counter, `__ssPreviewBody` framing, survivor identity,
+region-crown pose, real-GPU/controller/mobile.
