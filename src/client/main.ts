@@ -4,6 +4,7 @@ import {CombatAudio,combatCues,eventCues} from './combat-feedback';
 import {Ambience} from './ambience';
 import {WEAPON_IDS,WEAPONS,weaponStats} from '../shared/weapons';
 import {WorldView} from './scene';
+import {weaponCombatProfile} from './equipment';
 import {readPad} from './controller';
 import {dist,clamp,BOUNDS,REGIONS} from '../shared/world';
 import type {Game,Actor} from '../shared/types';
@@ -17,7 +18,7 @@ const $=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(
 const canvas=$<HTMLCanvasElement>('world');let view:WorldView;try{view=new WorldView(canvas);}catch(e){$('connection').textContent='WebGL could not start. Try a browser with hardware acceleration enabled.';throw e;}
 let game:Game|undefined,id='',code='',host='',token='',ws:WebSocket|undefined,seq=0,yaw=0,pitch=-.13,first=localStorage.getItem('ss-camera')==='first',sensitivity=Number(localStorage.getItem('ss-sensitivity'))||1,invert=localStorage.getItem('ss-invert')==='true';
 let attempts=0,everJoined=false,lastSend=0,lastHud=0,lastFrame=performance.now(),lastEvent=0,toastUntil=0,stopped=false;
-let padPrev:boolean[]=[],menuPrev:boolean[]=[],padIndex=-1,padName='',menuIndex=0;
+let padPrev:boolean[]=[],menuPrev:boolean[]=[],padIndex=-1,padName='',padWasConnected=false,menuIndex=0;
 const keys=new Set<string>(),mouse={attack:false,block:false},touch={mx:0,forward:0,attack:false,block:false,interact:false};
 const guide=$<HTMLDialogElement>('guide'),result=$<HTMLDialogElement>('result');
 const me=()=>game?.actors.find(a=>a.id===id);
@@ -39,6 +40,39 @@ function updateAudioPause(){
  if(context){try{if(paused)void context.suspend().catch(()=>{});else void context.resume().catch(()=>{});}catch{}}
 }
 $('sound').onchange=()=>{if(soundEnabled())unlockAudio();updateAudioPause();};
+
+// ---- Controller polish: rumble + glyph hints (Gamepad API already drives movement/actions) ----
+type RumbleActuator={playEffect?:(type:string,params:{duration:number;startDelay:number;strongMagnitude:number;weakMagnitude:number})=>Promise<unknown>;reset?:()=>Promise<unknown>};
+type RumblePad=Gamepad&{vibrationActuator?:RumbleActuator};
+const reducedMotionQuery=typeof matchMedia==='function'?matchMedia('(prefers-reduced-motion: reduce)'):undefined;
+let rumblePad:RumblePad|null=null;
+let lastRumbleAt=0;
+const padHints=document.createElement('div');
+padHints.id='padHints';padHints.hidden=true;padHints.setAttribute('aria-label','Controller controls');
+for(const label of ['RT Attack','LT Block','B Sweep','X Heal','A Interact','Y View']){
+ const hint=document.createElement('span');hint.textContent=label;padHints.append(hint);
+}
+$('hud')?.append(padHints);
+function setPadHints(visible:boolean){
+ padHints.hidden=!visible;
+ document.body.classList.toggle('pad-connected',visible);
+}
+function stopRumble(){
+ const actuator=rumblePad?.vibrationActuator;
+ try{void actuator?.reset?.().catch(()=>{});}catch{}
+}
+/** Short dual-rumble pulse: guarded by reduced-motion, menu/pause and pad connectivity. */
+function rumble(strength:number,duration=110){
+ if(reducedMotionQuery?.matches||guide.open||result.open||document.hidden)return;
+ const actuator=rumblePad?.vibrationActuator;
+ if(!actuator?.playEffect)return;
+ const now=performance.now();
+ if(now-lastRumbleAt<55)return;
+ lastRumbleAt=now;
+ const strong=clamp(strength,0,1),weak=clamp(strength*.6,0,1);
+ try{void actuator.playEffect('dual-rumble',{duration,startDelay:0,strongMagnitude:strong,weakMagnitude:weak}).catch(()=>{});}catch{}
+}
+window.addEventListener('gamepaddisconnected',()=>{rumblePad=null;stopRumble();setPadHints(false);});
 
 // ---- F3 performance overlay (DOM-only, pointer-events:none, persisted in localStorage 'ss-perf') ----
 const perfBox=document.createElement('pre');
@@ -82,8 +116,8 @@ function toast(text:string){$('toast').textContent=text;toastUntil=performance.n
 function cmd(action:string){send({type:'command',action});}
 function cameraToggle(){first=!first;localStorage.setItem('ss-camera',first?'first':'third');$('cameraBtn').textContent=`${first?'First':'Third'} person · V / Y`;}
 $('cameraBtn').textContent=`${first?'First':'Third'} person · V / Y`;
-function release(){keys.clear();mouse.attack=mouse.block=false;touch.mx=touch.forward=0;touch.attack=touch.block=touch.interact=false;send({type:'input',input:{mx:0,mz:0,yaw,attack:false,block:false,interact:false,seq:seq++}});}
-function openGuide(){release();document.exitPointerLock?.();guide.showModal();menuIndex=0;}
+function release(){stopRumble();keys.clear();mouse.attack=mouse.block=false;touch.mx=touch.forward=0;touch.attack=touch.block=touch.interact=false;send({type:'input',input:{mx:0,mz:0,yaw,attack:false,block:false,interact:false,seq:seq++}});}
+function openGuide(){stopRumble();release();document.exitPointerLock?.();guide.showModal();menuIndex=0;}
 $('armoryBtn').onclick=()=>{openGuide();$('armoryPanel').scrollIntoView({block:'center'});};
 $('manageCastle').onclick=()=>{openGuide();$('campMenu').scrollIntoView({block:'center'});};$('openRules').onclick=openGuide;$('guideBtn').onclick=openGuide;$('closeGuide').onclick=()=>guide.close();$('cameraBtn').onclick=cameraToggle;
 $('name').setAttribute('value',localStorage.getItem('ss-name')||'');$<HTMLInputElement>('sensitivity').value=String(sensitivity);$<HTMLInputElement>('invert').checked=invert;
@@ -116,6 +150,28 @@ for(const location of ['landing','armory']){
     if(game) cmd('character:'+selectedCharacter);
   };
 }
+
+// ---- Read-only QA hooks: character selector state + controller/pad state (no gameplay effect) ----
+const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown};
+qaHooks.__ssCharacterSelect=()=>({
+ appearanceField:'appearance',
+ landingSelectId:characterSelectors[0]?.id??null,
+ inGameSelectId:characterSelectors[1]?.id??null,
+ value:characterSelectors[0]?.value??null,
+ inGameValue:characterSelectors[1]?.value??null,
+ options:characterSelectors[0]?Array.from(characterSelectors[0].options).map(option=>({value:option.value,label:option.textContent})):[]
+});
+qaHooks.__ssPad=()=>({
+ connected:padWasConnected,
+ id:padName||null,
+ mapping:padWasConnected?'standard':null,
+ hintsVisible:!padHints.hidden,
+ hints:['RT Attack','LT Block','B Sweep','X Heal','A Interact','Y View'],
+ rumbleSupported:!!rumblePad?.vibrationActuator,
+ reducedMotion:!!reducedMotionQuery?.matches,
+ rumbleGuarded:!!reducedMotionQuery?.matches||guide.open||result.open||document.hidden
+});
+
 // ---- Progressive world loading: show real asset counts, gate joining on the core set only ----
 const defaultConnectionText=$('connection').textContent;
 let loadingTimer:number|undefined;
@@ -160,7 +216,7 @@ async function connect(mode:'create'|'join'|'resume'){
  ws.onopen=()=>{const name=$<HTMLInputElement>('name').value.trim()||'Knight';localStorage.setItem('ss-name',name);send({type:mode,name,code:mode==='resume'?code:$<HTMLInputElement>('code').value.trim().toUpperCase(),...(mode==='resume'?{token}:{})});};
  ws.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch{return;}
   if(m.type==='welcome'){cmd('character:'+selectedCharacter);id=m.id;code=m.code;token=m.token;everJoined=true;attempts=0;seq=0;sessionStorage.setItem('ss-session',JSON.stringify({code,token}));$('landing').hidden=true;$('hud').hidden=false;$('roomCode').textContent=code;toast('Campaign started. Clear the Fallen Keep, then hold E / A at its banner.');}
-  else if(m.type==='state'){if(!document.hidden){for(const cue of combatCues(game,m.game,id)){combatAudio.play(cue);if(cue.kind==='impact'||cue.kind==='hurt')ambience.duck(1);else if(cue.kind==='swing'||cue.kind==='block')ambience.duck(.55);if(cue.kind==='hurt'){$('hud').classList.remove('hurt-flash');void $('hud').offsetWidth;$('hud').classList.add('hurt-flash');view.shake=Math.max(view.shake,.24);}}for(const event of eventCues(game,m.game))combatAudio.playEvent(event);}game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;$('restart').hidden=host!==id;result.showModal();}else if(game!.status==='playing'&&result.open){result.close();lastEvent=0;cmd('character:'+selectedCharacter);}}
+  else if(m.type==='state'){if(!document.hidden){for(const cue of combatCues(game,m.game,id)){combatAudio.play(cue);if(cue.kind==='impact'||cue.kind==='hurt')ambience.duck(1);else if(cue.kind==='swing'||cue.kind==='block')ambience.duck(.55);if(cue.kind==='hurt'){const hudActor=m.game.actors.find((a:Actor)=>a.id===id);const weight=weaponCombatProfile(hudActor?.weapon).weight;rumble(clamp(.16+.24*weight,.2,.55),150);$('hud').classList.remove('hurt-flash');void $('hud').offsetWidth;$('hud').classList.add('hurt-flash');view.shake=Math.max(view.shake,.24);}else if(cue.kind==='block')rumble(.3,90);}for(const event of eventCues(game,m.game)){combatAudio.playEvent(event);if(event==='capture')rumble(.22,170);}}game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();stopRumble();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;$('restart').hidden=host!==id;result.showModal();}else if(game!.status==='playing'&&result.open){result.close();lastEvent=0;cmd('character:'+selectedCharacter);}}
   else if(m.type==='error'){if(!everJoined){sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;stopped=true;ws?.close();$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}else{toast(m.text);if(/expired|not found/.test(m.text)){stopped=true;sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;setTimeout(()=>location.reload(),2000);}}}
  };
  ws.onclose=e=>{release();if(stopped)return;if(e.code===4000||e.code===4001){stopped=true;sessionStorage.removeItem('ss-session');toast(e.reason);$('connection').textContent=e.reason;setTimeout(()=>location.reload(),2500);return;}if(everJoined&&attempts<8){toast('Connection lost. Reconnecting…');setTimeout(()=>connect('resume'),Math.min(8000,500*2**attempts++));}else{$('connection').textContent='Unable to connect. Try again shortly.';$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}};
@@ -170,7 +226,7 @@ $('create').onclick=()=>connect('create');$('join').onclick=()=>connect('join');
 $('invite').onclick=async()=>{const url=new URL(location.href);url.searchParams.set('room',code);try{await navigator.clipboard.writeText(url.href);toast('Invitation link copied. Send it to your fellowship.');}catch{toast(`Room code: ${code}. Friends can enter it on this site.`);}};
 for(const id of WEAPON_IDS){const w=WEAPONS[id],b=document.createElement('button');b.id='equip-'+id;b.dataset.command='equip:'+id;b.innerHTML=`<strong>${w.name}</strong><span>${w.style}</span><span>${w.damage} damage · ${w.reach} m reach · ${w.stamina} stamina · ${w.cooldown}s recovery</span><small>Join a campaign to equip</small>`;b.disabled=true;$('weaponCards').append(b);}
 document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach(b=>b.onclick=()=>cmd(b.dataset.command!));
-window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement||guide.open||result.open)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='KeyR')cmd('nextWeapon');if(e.code==='KeyI')$('armoryBtn').click();if(e.code==='KeyV')cameraToggle();if(e.code==='KeyH')cmd('heal');if(e.code==='KeyQ')cmd('sweep');if(e.code==='Digit1')cmd('follow');if(e.code==='Digit2')cmd('hold');if(e.code==='Digit3')cmd('attack');if(e.code==='KeyG')openGuide();if(e.code==='KeyB'){$('manageCastle').click();}});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release();updateAudioPause();});
+window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement||guide.open||result.open)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='KeyR')cmd('nextWeapon');if(e.code==='KeyI')$('armoryBtn').click();if(e.code==='KeyV')cameraToggle();if(e.code==='KeyH')cmd('heal');if(e.code==='KeyQ')cmd('sweep');if(e.code==='Digit1')cmd('follow');if(e.code==='Digit2')cmd('hold');if(e.code==='Digit3')cmd('attack');if(e.code==='KeyG')openGuide();if(e.code==='KeyB'){$('manageCastle').click();}});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden){release();stopRumble();}updateAudioPause();});
 canvas.addEventListener('click',()=>{if(game&&!guide.open&&!result.open&&matchMedia('(pointer:fine)').matches)canvas.requestPointerLock?.();});canvas.addEventListener('contextmenu',e=>e.preventDefault());canvas.addEventListener('mousedown',e=>{if(document.pointerLockElement===canvas){if(e.button===0){mouse.attack=true;}if(e.button===2)mouse.block=true;}});window.addEventListener('mouseup',e=>{if(e.button===0)mouse.attack=false;if(e.button===2)mouse.block=false;});document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas)release();});document.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas){yaw+=e.movementX*.0025*sensitivity;pitch=clamp(pitch-e.movementY*.0025*sensitivity*(invert?-1:1),-1.05,1.05);}});
 const stick=$('stick');let stickId=-1;function stickMove(e:PointerEvent){const rect=stick.getBoundingClientRect();let x=(e.clientX-rect.left-rect.width/2)/35,z=(e.clientY-rect.top-rect.height/2)/35;const len=Math.max(1,Math.hypot(x,z));touch.mx=x/len;touch.forward=-z/len;(stick.firstElementChild as HTMLElement).style.transform=`translate(${touch.mx*25}px,${-touch.forward*25}px)`;}
 stick.onpointerdown=e=>{stickId=e.pointerId;stick.setPointerCapture(stickId);stickMove(e);};stick.onpointermove=e=>{if(e.pointerId===stickId)stickMove(e);};const stopStick=()=>{stickId=-1;touch.mx=touch.forward=0;(stick.firstElementChild as HTMLElement).style.transform='';};stick.onpointerup=stopStick;stick.onpointercancel=stopStick;
@@ -248,6 +304,18 @@ $('playerName').textContent=p.name;$('hud').classList.toggle('low-health',p.hp>0
  }
 }
 function frame(now:number){const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame=now;let pads:Gamepad[]=[];try{pads=Array.from(navigator.getGamepads?.()??[]).filter((p):p is Gamepad=>!!p&&p.connected&&p.mapping==='standard');}catch{}const pad=pads.find(p=>p.index===padIndex)||pads[0];if(pad){padIndex=pad.index;padName=pad.id;}else{padName='';padPrev=[];menuPrev=[];}
+ const padConnected=!!pad;
+ if(padConnected!==padWasConnected){
+  padWasConnected=padConnected;
+  if(padConnected){
+   rumblePad=pad as RumblePad;setPadHints(true);
+   const label=(pad?.id||'Gamepad').replace(/\(.*?\)/g,' ').replace(/\s+/g,' ').trim().slice(0,32)||'Gamepad';
+   toast(`Controller connected: ${label}. RT Attack · LT Block · B Sweep · X Heal · A Interact.`);
+  }else{
+   rumblePad=null;stopRumble();setPadHints(false);
+   toast('Controller disconnected. Keyboard and mouse controls active.');
+  }
+ }else if(padConnected)rumblePad=pad as RumblePad;
  let strafe=touch.mx+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0),forward=touch.forward+(keys.has('KeyW')?1:0)-(keys.has('KeyS')?1:0),attack=mouse.attack||touch.attack,block=mouse.block||touch.block,interact=keys.has('KeyE')||touch.interact;
  if(pad){const d=readPad(pad,padPrev);if(!game||guide.open||result.open)menuGamepad(pad);else if(!document.hidden){strafe+=d.mx;forward+=d.forward;yaw+=d.lookX*dt*2.6*sensitivity;pitch=clamp(pitch-d.lookY*dt*1.8*sensitivity*(invert?-1:1),-1.05,1.05);attack ||=d.attack;block ||=d.block;interact ||=d.interact;if(pad.buttons.some(b=>b.pressed))combatAudio.unlock();if(d.toggle)cameraToggle();if(d.heal)cmd('heal');if(d.sweep)cmd('sweep');if(d.menu)openGuide();for(const action of d.commands)cmd(action);}padPrev=d.previous;}
  const p=me();if(game&&p){if(now-lastSend>=50){const inactive=guide.open||result.open||document.hidden;send({type:'input',input:{mx:inactive?0:Math.cos(yaw)*strafe+Math.sin(yaw)*forward,mz:inactive?0:Math.sin(yaw)*strafe-Math.cos(yaw)*forward,yaw,attack:!inactive&&attack,block:!inactive&&block,interact:!inactive&&interact,seq:seq++}});lastSend=now;}if(now-lastHud>100){updateHud(p);lastHud=now;}}

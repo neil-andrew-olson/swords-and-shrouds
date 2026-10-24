@@ -1640,3 +1640,114 @@ Deployed after the Lead accepted the cycle-5 pass. Live verification runs:
 palette ranger/hero/fallen, altar night readability, reduced-motion vignette residual, low-tier wind
 isolation, surface-audio ear check, real-GPU/perceptual/controller/mobile, content depth). task-59
 complete.
+
+---
+
+## Iteration cycle 2026-10I (AAA loop, cycle 6) — palette debt, sixth appearance, controller, reduced-motion, altar glow (in progress)
+
+Cycle 6 clears the remaining QA debts: strict-mask palette hue chips (ranger/hero/fallen), a sixth
+playable appearance **Wandering Survivor** (`survivor`), controller rumble/hints polish, exact
+reduced-motion vignette zero, a readable low-tier cloth-wind state, altar candle glows, and the
+`landmark-crown` camera move.
+
+### Harness additions (`scripts/smoke-browser.mjs`)
+
+- **Sixth appearance:** `PLAYER_APPEARANCES` now has 6 entries incl. `survivor`; the character run
+  reads the selector options and gates the 6 values + the **"Wandering Survivor"** label, then selects
+  it as the actual player, captures third-person (`char-survivor-thirdperson.png`), checks the server
+  snapshot appearance field, the equipped-weapon HUD, and that all 7 body close-ups/10 m silhouettes
+  still render.
+- **Strict-mask palette:** new QA-side strict proxy (`analyzeStrictMaskedPalette`) — preview-body frame
+  vs no-body baseline diff (>40) inside the central band, counting 5-bit RGB unique colours per body —
+  reported alongside the owner/weapons-armory strict counter and the existing crop metric. Acceptance
+  gate stays on the reproducible owner counter (≥500 on ≥5/7) with QA proxy/crop as corroboration.
+- **Controller:** deterministic synthetic-pad injection via `navigator.getGamepads` + a
+  `GamepadEvent('gamepadconnected')`, no `vibrationActuator` on the fake pad; checks connect clean, an
+  attack path with the rumble guard absent, hint-UI reaction (or documented hardware/debt), then
+  restores and disconnects. Uses `__ssPad()` when world-scene exposes it.
+- **Reduced-motion exact gate:** after enabling `__ssSetReducedMotion(true)`, the harness settles until
+  vignette/hit-stop are 0, runs **two** heavy-hit samples and requires vignette **exactly 0**,
+  hit-stop **0**, kick **≤0.013**, with normal-motion peaks still >0.
+- **Low-tier cloth-wind isolation:** `__ssCharacterFx()` (world-scene) read at high vs low quality;
+  gates `clothWind:true` high / `false` low and reports compile/console cleanliness.
+- **Altar glow + crown camera:** `content-altar-close` capture diffed against the cycle-5 reference
+  (night close-up must change/brighter from the candle glows); `landmark-crown` now also gates
+  `__ssRegionInfo().region === 'crown'` (in addition to `region-crown`).
+- **Perf gates:** cycle-6 SPEC **<280 calls / <2.05 M tris**; tiers/payload/views/HUD app path retained.
+
+### Cycle-5 reference values (before cycle-6)
+
+- Perf: 208 calls / 1,726,954 tris / geoms 171 / textures 181 / programs 99 / high quality; payload
+  16.25 MiB (live 16.22 MiB across 86 assets); live bundle `index-Dki3Ti_e.js` (879,643 B).
+- Armour: QA crop body-mask colours 618–941 (7/7 ≥500); strict owner counter 4/7 ≥500
+  (templar 606, berserker 739, survivor 1073, ally 697, hero 402, fallen 424, ranger 376); torso
+  68.89/61.16/black 8.95; elite 29.87/86.33.
+- Night/weather: night TP 51–63; snow 240→800, fog 0.0185→0.0242, crown reports crown.
+- Debts being fixed: strict-mask ranger/hero/fallen <500; sixth appearance not selectable; controller
+  rumble/hints missing; reduced-motion vignette residual (0.344–0.546 in one sample); low-tier wind
+  isolation not readable; altar night contrast; `landmark-crown` at border.
+
+### Cycle-6 authoritative capture + regression — final build `index-BY6s-QI9.js` (883,369 B): PASS (strict-mask palette debt deferred to cycle 7)
+
+**Artifact:** Lead-confirmed final hash **`index-BY6s-QI9.js` (883,369 B)**. My clean bundled-Node-24
+build reproduced it **exactly** (fresh-build smoke **26/26 PASS**, `qa/final-c6`; 0 page/console/log
+errors, 0 404s, 10 cards, WS 1/0, night TP **70.9** with forced clear). Authoritative runs on this
+artifact: `--characters` **45/45** (`qa/characters-c6`), `--perf` **47/47** (`qa/perf-c6`),
+`--coop` **18/18** (`qa/coop-c6`), live baseline **21/21** (`qa/live-batch9-pre`; controller hooks
+absent on the deployed cycle-5 build → controller checks skipped there and re-run on the deployed
+cycle-6 artifact).
+
+**1) Masked palette + armour v3 — PASS on the Lead-designated crop gate; strict-mask debt deferred.**
+QA crop metric: body-mask colours **605–955 on 7/7 bodies** (templar 757, hero 648, berserker 753,
+ranger 605, ally 732, survivor 810, fallen 949; full-frame 1,295–1,434) ✅. Strict silhouette-mask
+(weapons-armory, reproducible `qa/char-viewer --view closeup --pose 30`, alpha mask + 5-bit RGB):
+templar 559, ally 707, berserker 725, survivor 1077 = **4/7 ≥500**; hero 454, fallen 460, ranger 379
+still short (hero +52 / fallen +36 vs cycle-5; ranger +3) → **recorded cycle-7 art debt**, not a cycle
+failure per Lead decision. QA strict proxy (preview-body diff mask, 5-bit): **7/7 ≥500** (518–709) —
+reported for corroboration only; owner counter is authoritative. Tone: body-mask torso 82.35 / p50
+72.32 / black 4.62 %, clip 0 %; gradient 6.96–13.04 (avg 8.12); elite-undead diff 30.82 / 88.4 %.
+Survivor identity diff vs cycle-4 **31.93 / 55.18 %** (dramatic change; staff now back-mounted,
+hands free, weapon Longsword attached).
+
+**2) Sixth appearance "Wandering Survivor" — PASS.** Selector has **6 options incl. Wandering
+Survivor** (`__ssCharacterSelect`: `appearanceField:'appearance'`, landing `#characterChoice`, in-game
+`#characterChoiceInGame`); selecting `survivor` updates the authoritative snapshot **appearance:
+'survivor'**, renders the player in third person (`char-survivor-thirdperson.png`) with **Longsword**
+attached, grounded; other 6 bodies still render 7/7 close-ups + 10 m silhouettes; 0 errors.
+
+**3) Controller / rumble guard — PASS (physical rumble hardware debt).** Synthetic **standard-mapping**
+pad (17 buttons, no `vibrationActuator`) injected via `navigator.getGamepads` + `gamepadconnected`:
+`__ssPad()` reports connected/mapping standard/hintsVisible, `#padHints` shows **6 glyph hints**
+(RT Attack/LT Block/B Sweep/X Heal/A Interact/Y View) + `body.pad-connected` + connection toast;
+attack path with absent actuator → **0 errors**; reduced-motion emulation flips `reducedMotion/
+rumbleGuarded` true; disconnect hides hints/class and shows keyboard toast. Physical rumble timing on a
+real pad remains hardware debt.
+
+**4) Reduced-motion — PASS.** Settled to zero, then **two** heavy-hit samples under
+`__ssSetReducedMotion(true)`: vignette **exactly 0**, hit-stop **0**, kick **0** (both samples, all
+runs); normal path peaks positive (hit-stop 10–60 ms, vignette 0.749, kick 0.05–0.075) — cycle-5
+residual is fixed. `__ssCharacterFx()` reports high/medium `clothWind:true`, low `false` (low-tier
+wind isolation readable, 0 shader-compile errors).
+
+**5) Content / altar glow — implemented; capture caveat documented.** Furnaces unchanged/visible.
+Altar glow (`+3` candle cones on `dressing:flames`, 0 new draws/lights, warm emissive lift) is in code;
+ruins-builder supplied isolated-build evidence (`c6-build/captures-c6/view-content-altar-close2/3.png`).
+**QA caveat:** `content-altar` poses only move the camera while `dressing:altar/flames` are
+player-distance culled at 85 m (altar ~270 m from spawn), so the final artifact's content-altar frames
+cannot show the altar/candles — documented cycle-7 ask (make dressing culling follow the QA camera or
+add a teleport/`__ssSpawnAt` hook). `landmark-crown` now reports **crown** ✅ (alongside
+`region-crown` crown).
+
+**6) Perf / HUD / regression — PASS.** Spawn TP **206 calls** (<280 ✅) / **1,726,578 tris**
+(<2.05 M ✅), geoms 171, textures 181, programs 100, quality high; FP 160/1.61 M; low 161/1.41 M
+(−22 % calls); payload **17,100,027 B = 16.31 MiB** (+0.15 MB vs cycle-5 local). Night TP forced-clear
+**50.2–70.9** (≤75; Lead gate 68.55); regions 19.79–21.82 colour distance; snow **132→440**, fog
+**0.01848→0.02352**, low-tier snow **0**; HUD click→HUD 4.5 s / click→state 6.6 s / join **3.77 s**
+(≤3.8 gate, tight under SwiftShader); fresh-build **26/26** + exact hash, co-op **18/18**, live
+baseline **21/21**, 0 page/console/log errors and 0 404s throughout.
+
+**Cycle-6 verdict: PASS on all non-deferred gates**, with the Lead-deferred strict-mask palette debt
+(hero 454 / fallen 460 / ranger 379; 4/7) and the altar-culling capture caveat as the two carried
+items. Cycle-7 gaps: strict-mask palette (hero/fallen/ranger), altar culling/teleport capture hook,
+physical-gamepad rumble/hardware verification, surface-audio ear check, real-GPU/perceptual/controller/
+mobile passes, content depth. After deploy: final live pass + task-66 complete.

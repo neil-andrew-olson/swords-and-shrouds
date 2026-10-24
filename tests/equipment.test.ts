@@ -5,9 +5,25 @@ async function geometryAsset(name:string){const b=gunzipSync(readFileSync(`publi
  // Keep material names/indices (armour-prim classification) but drop texture references so no image decode is needed.
  j.materials=(j.materials??[{}]).map((m:any)=>({name:m.name||'mat',doubleSided:!!m.doubleSided,pbrMetallicRoughness:{metallicFactor:m.pbrMetallicRoughness?.metallicFactor??1,roughnessFactor:m.pbrMetallicRoughness?.roughnessFactor??1}}));
  for(const m of j.meshes)for(const p of m.primitives)if(p.material===undefined)p.material=0;let str=JSON.stringify(j);str+=' '.repeat((4-Buffer.byteLength(str)%4)%4);const jb=Buffer.from(str),bin=b.subarray(20+len),h=Buffer.alloc(20);h.write('glTF');h.writeUInt32LE(2,4);h.writeUInt32LE(20+jb.length+bin.length,8);h.writeUInt32LE(jb.length,12);h.writeUInt32LE(0x4e4f534a,16);const all=Buffer.concat([h,jb,bin]);return new GLTFLoader().parseAsync(all.buffer.slice(all.byteOffset,all.byteOffset+all.byteLength),'');}
-test('actual hand-mounted assets stay human-sized through idle, run, block and attacks',async()=>{const equipment=new Map([['sword',await geometryAsset('sword')],['shield',await geometryAsset('shield')]]);for(const name of ['hero','ally','fallen']){const a={id:'qa',kind:'player',hp:100,maxHp:100,attackSerial:0,armor:'light',block:false} as Actor;const rig=customCharacter(await geometryAsset(name),a,equipment);for(let i=0;i<90;i++){a.block=i>30&&i<45;if(i===50)a.attackSerial=1;rig.update(a,i>10&&i<30,1/30);rig.model.updateMatrixWorld(true);for(const part of ['sword','shield']){const o=rig.model.getObjectByName('equipment-'+part)!;assert.ok(o);const size=new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3());assert.ok(size.length()<1.5,`${name} ${part} ${size.toArray()}`);}}rig.dispose();}});
+test('actual hand-mounted assets stay human-sized through idle, run, block and attacks',async()=>{const equipment=new Map([['sword',await geometryAsset('sword')],['shield',await geometryAsset('shield')]]);for(const name of ['hero','ally','fallen','survivor']){const a={id:'qa',kind:'player',hp:100,maxHp:100,attackSerial:0,armor:'light',block:false} as Actor;const rig=customCharacter(await geometryAsset(name),a,equipment);for(let i=0;i<90;i++){a.block=i>30&&i<45;if(i===50)a.attackSerial=1;rig.update(a,i>10&&i<30,1/30);rig.model.updateMatrixWorld(true);for(const part of ['sword','shield']){const o=rig.model.getObjectByName('equipment-'+part)!;assert.ok(o);const size=new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3());assert.ok(size.length()<1.5,`${name} ${part} ${size.toArray()}`);}}rig.dispose();}
+// Cycle-6 sixth playable appearance (Wandering Survivor): the same equipment pipeline must mount the
+// sword/shield on the Mixamo hands and stay grounded through idle, run, attack, block and death.
+// Cycle-6: survivor is the sixth selectable appearance and must resolve through the real path.
+assert.equal(characterAsset({id:'survivor-select',kind:'player',appearance:'survivor'} as Actor),'survivor','survivor is a selectable appearance');
+const survivorSource=await geometryAsset('survivor');
+const survivorActor={id:'survivor-player',kind:'player',appearance:'survivor',hp:100,maxHp:100,weapon:'sword',attackSerial:0} as Actor;
+const survivorRig=customCharacter(survivorSource,survivorActor,equipment);
+const survivorSword=survivorRig.model.getObjectByName('equipment-sword'),survivorShield=survivorRig.model.getObjectByName('equipment-shield');
+assert.ok(survivorSword&&survivorShield,'survivor player mounts sword and shield');
+assert.match((survivorSword!.parent?.name??'').replace(/^mixamorig:?/i,''),/RightHand/i,'survivor sword parent right hand');
+assert.match((survivorShield!.parent?.name??'').replace(/^mixamorig:?/i,''),/LeftHand/i,'survivor shield parent left hand');
+for(let i=0;i<90;i++){survivorActor.block=i>20&&i<30;if(i===35)survivorActor.attackSerial=1;if(i===60)survivorActor.hp=0;survivorRig.update(survivorActor,i>5&&i<20,1/30);survivorRig.model.updateMatrixWorld(true);
+ const bounds=meshBounds(survivorRig.model);assert.ok(Number.isFinite(bounds.min.y)&&bounds.min.y>-.12&&bounds.min.y<.2,'survivor player ground '+i+' '+bounds.min.y);
+ for(const part of ['sword','shield']){const item=survivorRig.model.getObjectByName('equipment-'+part);assert.ok(item,'survivor '+part+' present frame '+i);const size=new THREE.Box3().setFromObject(item!,true).getSize(new THREE.Vector3());assert.ok(size.length()<1.6,'survivor '+part+' size frame '+i);}}
+survivorRig.dispose();});
 
 import {WEAPON_IDS,WEAPONS} from '../src/shared/weapons';
+import {characterAsset} from '../src/shared/characters';
 test('every supplied weapon fits the animated hero and two-handed loadouts omit shields',async()=>{const equipment=new Map();for(const id of [...WEAPON_IDS,'shield'])equipment.set(id,await geometryAsset(id));const source=await geometryAsset('hero');for(const weapon of WEAPON_IDS){const a={id:'qa',kind:'player',hp:100,maxHp:100,weapon,attackSerial:0} as Actor;const rig=customCharacter(source,a,equipment);for(let i=0;i<25;i++){if(i===5)a.attackSerial=1;rig.update(a,false,1/30);rig.model.updateMatrixWorld(true);const item=rig.model.getObjectByName('equipment-'+weapon)!;assert.ok(item);const size=new THREE.Box3().setFromObject(item,true).getSize(new THREE.Vector3());assert.ok(size.length()<2.2,weapon+' '+size.toArray());}assert.equal(!!rig.model.getObjectByName('equipment-shield'),WEAPONS[weapon].shield);rig.dispose();}});
 
 import {meshBounds} from '../src/client/grounding';
@@ -118,13 +134,15 @@ test('all nine animated bodies stay grounded through idle, movement, block and a
   assert.ok(plateCount>=1,name+' has an armour plate prim');
   assert.ok(armourHeadWeight>0,name+' armour prim includes head/neck weighting');
   if(name==='survivor'){
-   // Cycle-5 survivor identity: ragged cloth + plate/staff accents, walking staff rigid to the hand.
+   // Cycle-5/6 survivor identity: ragged cloth + plate/pack accents. The walking staff must be
+   // torso/back-mounted (Spine2/Hips), NOT hand-rigid, so an armed survivor never swings it.
    const survivorPrims=prims.filter(prim=>prim!==bodyPrim).map(prim=>({prim,mats:materialName(prim)}));
    assert.ok(survivorPrims.some(p=>/_plate/i.test(p.mats)),'survivor has plate accents');
    assert.ok(survivorPrims.some(p=>/_cloth/i.test(p.mats)),'survivor has ragged cloth');
-   let staff=false;
-   for(const {prim} of survivorPrims){const indices=prim.geometry.attributes.skinIndex as THREE.BufferAttribute,weights=prim.geometry.attributes.skinWeight as THREE.BufferAttribute;for(let i=0;i<indices.count&&!staff;i++){let best=0,bc=0;for(const c of [0,1,2,3]){const w=weights.getComponent(i,c);if(w>best){best=w;bc=c;}}if(best>.99&&/righthand/i.test((prim.skeleton.bones[indices.getComponent(i,bc)]?.name??'').replace(/^mixamorig:?/i,'')))staff=true;}}
-   assert.ok(staff,'survivor walking staff rigid-weighted to the right hand');
+   let torsoRigid=0,handRigid=0;
+   for(const {prim} of survivorPrims){const indices=prim.geometry.attributes.skinIndex as THREE.BufferAttribute,weights=prim.geometry.attributes.skinWeight as THREE.BufferAttribute;for(let i=0;i<indices.count;i++){let best=0,bc=0;for(const c of [0,1,2,3]){const w=weights.getComponent(i,c);if(w>best){best=w;bc=c;}}if(best<.99)continue;const bone=(prim.skeleton.bones[indices.getComponent(i,bc)]?.name??'').replace(/^mixamorig:?/i,'').toLowerCase();if(/spine|hips|pelvis|chest/.test(bone))torsoRigid++;if(/hand/.test(bone))handRigid++;}}
+   assert.ok(torsoRigid>0,'survivor staff/pack is torso-mounted');
+   assert.equal(handRigid,0,'survivor has no hand-rigid gear (no weapon-hand clash)');
   }
   if(name==='fallen')assert.ok(rig.model.getObjectByName('undead-elite-addon') instanceof THREE.SkinnedMesh,name+' elite add-on still present');
   assert.ok(totalTris<=16000,name+' total tri budget '+totalTris);

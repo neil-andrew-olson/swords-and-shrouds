@@ -652,4 +652,53 @@ Both ground-centred (min y = 0, centred x/z), single night-toned embedded base c
 
 Staged mirrors validated before each install (76/76 armour v3, 78/78 props), atomic install
 (copy-to-.tmp + single rename), live `validate-assets.mjs` **78/78**, `tests/assets` 5/5,
-`tests/equipment` 5/5, `tests/armory` 5/5 after both phases.
+`tests/armory` 5/5 after both phases. `tests/equipment` is 5/5 for the cycle-5 state; the cycle-6
+rebuild below changes the survivor staff weighting, so that assertion needs the cycle-6 update.
+
+## Batch 2026-10I — masked-palette hue chips + survivor staff stow (cycle 6)
+
+Rebuilt 4 of the 7 bodies (atlas-only for the palette work, plus the Lead-requested survivor staff
+reweight); the other three bodies are byte-unchanged.
+
+- **ranger**: cloth band driven with `clothHueAmp 4.0` + dyed/stitched patchwork panels and panel
+  seams, aimed at the large smooth cloak exterior (the hood/edges already read on the strict mask).
+- **hero**: plate band now carries broad coloured trim bands + paint chips (blue/gold/cream) via
+  `metalChips 0.85 / metalHueAmp 2.4` — the body is all plate, so the hue variety has to live on the
+  pauldron/cuirass/helm faces.
+- **fallen**: same plate-chip mechanism pushed to `metalChips 0.9 / metalHueAmp 3.0` for
+  patina/rust/trim chips across the corrupted plates.
+- **survivor**: the walking staff is no longer rigid-weighted to `mixamorigRightHand` (it swung with
+  a sword and clashed with shields once the survivor became a playable appearance). It is now rigid
+  to `mixamorigSpine2` and authored stowed diagonally across the back; `survivor_plate` dominant
+  joints are Hips 50 / Spine2 52 verts with zero RightHand-weighted armour vertices, so hands stay
+  free for weapons and no runtime change is needed.
+
+| body | tris | prims | gz | my-proxy masked colours (before → after) |
+| --- | --- | --- | --- | --- |
+| ranger | 9,021 | 3 | 761.6 KB | 509 → 520 |
+| hero | 9,433 | 2 | 779.6 KB | 1,047 → 1,228 |
+| fallen | 8,874 | 2 | 714.7 KB | 588 → 590 |
+| survivor | 8,989 | 3 | 772.7 KB | 1,048 → 1,058 (staff stowed) |
+Unchanged: templar 9,312 / 781.7 KB, berserker 8,749 / 743.1 KB, ally 9,267 / 783.8 KB.
+The acceptance counter is weapons-armory's strict body-silhouette mask (5-bit unique colours, 2.8 m
+close-up) — the local proxy above is a different, wider mask and is only an indicator. Evidence:
+`temp_sketchlab/armour/c6final_close_{body}.png`, `c6_survivor_staff.png`. Installed atomically;
+staged mirror 78/78 → live validator **78/78**; assets 5/5, equipment 5/5 (after the survivor staff
+assertion was updated to Spine2), armory 5/5.
+
+**Strict-mask result on the cycle-6 bytes** (weapons-armory, pose-pinned deterministic 30-step pose,
+2.8 m close-ups): templar 559 · ally 707 · berserker 725 · survivor 1,077 → **4/7 ≥500**;
+hero 454 (was 402), fallen 460 (was 424), ranger 379 (was 376). SPEC target of ≥5/7 is therefore not
+met on the strict mask this cycle; the Lead accepted the state and the remainder is a cycle-7 item.
+Plate geometry passes everywhere (max face 0.0028–0.0088 m², max edge ≤0.467 m) and the survivor
+staff reweight is confirmed (rigid only to Spine2/Hips, zero hand-rigid vertices).
+
+**Cycle-7 backlog (masked palette, per weapons-armory's dominant-prim analysis):**
+- **ranger** (379, cloth-dominant): the re-dyed cloak got darker — close-up black% rose 4.3 → 6.2,
+  which costs quantised colour. Fix is to **lighten the dye/panel base so the hue chips survive 5-bit
+  quantisation** (and/or add extra cloak-panel geometry), not more atlas tiling.
+- **hero** (454, plate-dominant): plate chips helped (+52) but need **stronger luminance-separated
+  chips/coloured trim** on the large pauldron/cuirass faces (5-bit quantisation collapses subtle
+  chromatic variation at night tone).
+- **fallen** (460, plate-dominant): same — **bigger, brighter patina/rust chips** across the corrupted
+  plates rather than more subtle mottling.

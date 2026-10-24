@@ -4,7 +4,8 @@ export const PLAYER_CHARACTERS = {
   hero:'Vanguard Champion',
   berserker:'Iron Berserker',
   ranger:'Scout Ranger',
-  ally:'Oathsworn Defender'
+  ally:'Oathsworn Defender',
+  survivor:'Wandering Survivor'
 } as const;
 export type PlayerCharacter = keyof typeof PLAYER_CHARACTERS;
 export function isPlayerCharacter(value:string):value is PlayerCharacter {

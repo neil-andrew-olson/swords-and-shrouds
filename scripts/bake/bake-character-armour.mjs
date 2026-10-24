@@ -159,6 +159,9 @@ const ARMOUR = {
   },
   hero: {
     palette: {metal: [0.68, 0.70, 0.74], cloth: [0.32, 0.35, 0.42], accent: [0.62, 0.54, 0.36]},
+    // cycle-6 masked-palette debt: all-plate body, so the hue variety must live on the plate itself
+    // (coloured trim bands + paint chips across the large pauldron/cuirass faces)
+    atlas: {metalChips: 0.85, metalHueAmp: 2.4},
     pieces: ['visoredHelm', 'knightCuirass', 'layeredPauldrons', 'bracers', 'belt'],
   },
   ally: {
@@ -171,6 +174,9 @@ const ARMOUR = {
   },
   ranger: {
     palette: {metal: [0.30, 0.38, 0.20], cloth: [0.16, 0.22, 0.13], accent: [0.52, 0.38, 0.18]},
+    // cycle-6 masked-palette debt: the cloak EXTERIOR is a huge smooth cloth surface, so give the
+    // cloth band strong hue-separated panels/dyed patches (hood already reads on the strict mask)
+    atlas: {clothPatches: 1.0, clothHueAmp: 4.0},
     pieces: ['hood', 'longCloak', 'leatherCuirass', 'quiver', 'bracers'],
   },
   survivor: {
@@ -181,6 +187,8 @@ const ARMOUR = {
   },
   fallen: {
     palette: {metal: [0.34, 0.25, 0.44], cloth: [0.12, 0.10, 0.16], accent: [0.40, 0.34, 0.42]},
+    // cycle-6 masked-palette debt: corrupted plate body ??? patina/rust hue chips across the big plates
+    atlas: {metalChips: 0.9, metalHueAmp: 3.0},
     pieces: ['crestHelm', 'backPlate', 'spikedPauldrons', 'bracers'],
   },
 };
@@ -216,7 +224,13 @@ function hueShift(rgb, dh, ds, dv) {
   return hsv(h, s, v);
 }
 
-async function makeAtlas(palette, dim = 1024) {
+async function makeAtlas(palette, dim = 1024, opts = {}) {
+  // cycle-6 per-body hue boost: hero/fallen need coloured trim chips on big plate faces, ranger
+  // needs hue-separated panels on the cloak exterior (hood already reads) ??? atlas-only knobs.
+  const metalChips = opts.metalChips ?? 0.0;
+  const metalHueAmp = opts.metalHueAmp ?? 1.0;
+  const clothPatches = opts.clothPatches ?? 0.0;
+  const clothHueAmp = opts.clothHueAmp ?? 1.0;
   const W = dim, H = dim;
   const NW = 256, NH = 256;
   const hash = (x, y) => {
@@ -275,10 +289,25 @@ async function makeAtlas(palette, dim = 1024) {
         const trim = false;
         let k = (0.92 + grain) * seam;
         base = [base[0] * k, base[1] * k, base[2] * k];
-        if (mott2 > 0.72) { const t = Math.min(1, (mott2 - 0.72) * 3.2); base = base.map((c, ci) => c * (1 - t) + patina[ci] * t); }
-        if (mott3 > 0.78) { const t = Math.min(1, (mott3 - 0.78) * 3.0); base = base.map((c, ci) => c * (1 - t) + rust[ci] * t); }
+        if (mott2 > 0.72) { const t = Math.min(1, (mott2 - 0.72) * 3.2); base = hueShift(base, 0, 0, 0).map((c, ci) => c * (1 - t) + hueShift(patina, 0.02 * metalHueAmp, 0.05 * metalHueAmp, -0.02)[ci] * t); }
+        if (mott3 > 0.78) { const t = Math.min(1, (mott3 - 0.78) * 3.0); base = base.map((c, ci) => c * (1 - t) + hueShift(rust, 0.01 * metalHueAmp, 0.12 * metalHueAmp, 0.02)[ci] * t); }
         if (mott2 < 0.16) { const t = Math.min(1, (0.16 - mott2) * 3.0); base = base.map((c, ci) => c * (1 - t) + oxide[ci] * t); }
         if (grain > 0.055) { base = base.map((c, ci) => c * 0.9 + rustLight[ci] * 0.12); }
+        // cycle-6: broad coloured trim bands + paint chips on the big plate faces (hero/fallen)
+        if (metalChips > 0) {
+          const bandY = Math.abs(((v - 0.02) * 3.2) % 1 - 0.5);      // wide horizontal trim bands
+          if (bandY > 0.47) {
+            const t = Math.min(1, (bandY - 0.47) * 12) * Math.min(1, metalChips * 1.6);
+            base = base.map((c, ci) => c * (1 - t * 0.7) + accentAlt[ci] * t * 0.7);
+          }
+          const cell = Math.floor(u * 11) * 17 + Math.floor(v * 9) * 31;
+          const chip = hash(cell, 5);
+          if (chip > 0.86) {
+            const t = Math.min(1, (chip - 0.86) * 5) * Math.min(1, metalChips * 1.8);
+            const chipCol = chip > 0.94 ? accentCream : (chip > 0.9 ? accentLight : rivetGold);
+            base = base.map((c, ci) => c * (1 - t) + chipCol[ci] * t);
+          }
+        }
         if (rivet) base = base.map((c, ci) => c * 0.55 + rivetGold[ci] * 0.42);
         if (trim) base = base.map((c, ci) => c * 0.78 + accentLight[ci] * 0.22);
         col = base;
@@ -299,13 +328,25 @@ async function makeAtlas(palette, dim = 1024) {
         // patchwork panels + stitch lines + hue-jittered weave: big smooth cloth surfaces (ranger
         // hood/cloak) otherwise shade into very few quantised colours at 2.8 m
         const panelId = Math.floor(u * 5) * 7 + Math.floor(v * 5) * 13;
-        const panelHue = (hash(panelId, 3) - 0.5) * 0.9;
+        const panelHue = (hash(panelId, 3) - 0.5) * 0.9 * clothHueAmp;
         const panelVal = 0.86 + hash(panelId, 9) * 0.3;
         const stitchU = Math.abs((u * 5) % 1 - 0.5) > 0.475;
         const stitchV = Math.abs((v * 5) % 1 - 0.5) > 0.478;
-        const weaveHue = (hash(Math.floor(x / 2), Math.floor(y / 2)) - 0.5) * 0.5;
-        base = hueShift(base, panelHue, 0.06, panelVal - 1.0);
+        const weaveHue = (hash(Math.floor(x / 2), Math.floor(y / 2)) - 0.5) * 0.5 * clothHueAmp;
+        base = hueShift(base, panelHue, 0.06 + 0.05 * clothHueAmp, panelVal - 1.0);
         base = hueShift(base, weaveHue, 0.04, 0);
+        // cycle-6 ranger: dyed patches stitched onto the big cloak panels (hue-separated, strong)
+        if (clothPatches > 0) {
+          const patchCell = Math.floor(u * 7) * 23 + Math.floor(v * 6) * 37;
+          const pchip = hash(patchCell, 11);
+          if (pchip > 0.84) {
+            const t = Math.min(1, (pchip - 0.84) * 4) * Math.min(1, clothPatches * 1.8);
+            const dye = pchip > 0.955 ? accentAlt : (pchip > 0.925 ? accentLight : stainBrown);
+            base = base.map((c, ci) => c * (1 - t * 0.8) + dye[ci] * t * 0.8);
+          }
+          const panelSeam = Math.abs((u * 7) % 1 - 0.5) > 0.482 || Math.abs((v * 6) % 1 - 0.5) > 0.484;
+          if (panelSeam) base = base.map((c, ci) => c * 0.7 + accentDark[ci] * 0.4);
+        }
         if (stitchU || stitchV) base = base.map((c, ci) => c * 0.62 + accentDark[ci] * 0.45);
         col = [base[0] * weave * fold, base[1] * weave * fold, base[2] * weave * fold];
         height[hi] = 0.5 + smooth(u, v, 5) * 0.22 + ((stitchU || stitchV) ? 0.16 : 0);
@@ -634,12 +675,16 @@ function buildPieces(name, cfg, piv) {
     push(g2, 'Hips', 'metal');
   };
   const addWalkingStaff = () => {
+    // cycle-6: the staff used to be rigid-weighted to RightHand, which swings with a sword once the
+    // survivor is a playable appearance. It is now STOWED ON THE BACK (rigid to Spine2, the same
+    // prim/material), so it reads as a carried staff for both the playable survivor and the camp NPC
+    // with no runtime change and no weapon-hand clash.
     const g = new Geo();
-    const hand = piv.pivot('RightHand');
-    const axis = norm(add(mul(up, 1.0), mul(forward, 0.18)));
-    const base = add(add(hand, mul(up, -1.6)), mul(forward, 0.55));
+    const axis = norm(add(mul(up, 1.0), mul(side, 0.42)));
+    const centre = add(spine2, add(mul(forward, -1.2), mul(up, -0.55)));
+    const base = add(centre, mul(axis, -2.1));
     frustum(g, base, add(base, mul(axis, 4.4)), 0.11, 0.085, 6);
-    push(g, 'RightHand', 'metal');
+    push(g, 'Spine2', 'metal');
   };
 
   const addBackPlate = () => {
@@ -860,7 +905,7 @@ async function processBody(name, cfg, opts = {}) {
     return skin.listJoints().findIndex((j) => (j.getName() || '') === k);
   };
   const buffer = root.listBuffers()[0];
-  const {albedoJpeg, normalJpeg, ormJpeg} = await makeAtlas(cfg.palette, opts.albedoDim || 1024);
+  const {albedoJpeg, normalJpeg, ormJpeg} = await makeAtlas(cfg.palette, opts.albedoDim || 1024, cfg.atlas || {});
   const tex = doc.createTexture(name + '_armour_alb').setImage(new Uint8Array(albedoJpeg)).setMimeType('image/jpeg');
   const nrmTex = doc.createTexture(name + '_armour_nrm').setImage(new Uint8Array(normalJpeg)).setMimeType('image/jpeg');
   const ormTex = doc.createTexture(name + '_armour_orm').setImage(new Uint8Array(ormJpeg)).setMimeType('image/jpeg');

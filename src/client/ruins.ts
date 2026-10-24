@@ -464,6 +464,28 @@ export const CYCLE5_PROPS = {
   furnaces: FORGE_FURNACES.length
 } as const;
 
+/**
+ * Cycle-6: candle flame glows sitting on the Ashen altar top. Positions are local offsets on the altar
+ * top (its yaw is 2.9208) resolved to world x/z here; they are appended to the existing
+ * `dressing:flames` instanced layer, so there is no new draw and only a few dozen extra triangles.
+ */
+export const ALTAR_CANDLES: readonly {x: number; z: number; y: number; scale: number}[] = (() => {
+  const altar = STONE_ALTARS[0];
+  const cos = Math.cos(altar.yaw);
+  const sin = Math.sin(altar.yaw);
+  // local (lx, lz) offsets near the back of the altar top, three staggered candles
+  const local: readonly [number, number, number, number][] = [
+    [-0.38, -0.5, 1.36, 0.42],
+    [0.04, -0.62, 1.36, 0.5],
+    [0.4, -0.44, 1.36, 0.38]
+  ];
+  return local.map(([lx, lz, y, scale]) => ({x: altar.x + lx * cos + lz * sin, z: altar.z - lx * sin + lz * cos, y, scale}));
+})();
+
+export const CYCLE6_PROPS = {
+  altarCandles: ALTAR_CANDLES.length
+} as const;
+
 function landmarkPose(key: LandmarkKey, cx: number, cz: number, height: number, tx: number, tz: number, ty: number) {
   const dx = tx - cx;
   const dz = tz - cz;
@@ -1052,12 +1074,23 @@ export function addRuins(scene: THREE.Scene): {
     placements: readonly DressingPlacement[],
     targetHeight: number,
     layerName: string,
-    options: {campIndex?: readonly number[]; castleIndex?: readonly number[]; friendly?: boolean; y?: number; scaleVariance?: boolean} = {}
+    options: {campIndex?: readonly number[]; castleIndex?: readonly number[]; friendly?: boolean; y?: number; scaleVariance?: boolean; emissiveLift?: number} = {}
   ): Promise<void> {
     const gltf = await loadModel(`custom/${assetName}`);
     if (!gltf) return;
     const prepared = prepareAsset(gltf.scene);
     if (!prepared) return;
+    if (options.emissiveLift !== undefined && options.emissiveLift > 0) {
+      // Subtle warm self-illumination so a dark stone prop still reads at night (no dynamic lights).
+      for (const primitive of prepared.primitives) {
+        const material = primitive.material;
+        if (material instanceof THREE.MeshStandardMaterial) {
+          material.emissive.setHex(0x2a1a0b);
+          material.emissiveIntensity = options.emissiveLift;
+          material.needsUpdate = true;
+        }
+      }
+    }
     const specs: PlacementSpec[] = [];
     for (let i = 0; i < placements.length; i++) {
       const p = placements[i];
@@ -1139,6 +1172,13 @@ export function addRuins(scene: THREE.Scene): {
       spec.cullRange = DRESSING_RANGE;
       specs.push(spec);
     }
+    // cycle-6: candle glows on the Ashen altar top, same instanced layer (no extra draw).
+    for (const candle of ALTAR_CANDLES) {
+      const spec = baseSpec(candle.x, candle.z, 0, candle.scale);
+      spec.y = candle.y;
+      spec.cullRange = DRESSING_RANGE;
+      specs.push(spec);
+    }
     addCullableLayer(createLayer(scene, prepared, specs, 'dressing:flames', true));
   }
 
@@ -1164,7 +1204,7 @@ export function addRuins(scene: THREE.Scene): {
     placeDressingAsset('barrels', SMITHY_BARRELS, 1.45, 'dressing:smithy-barrels', {scaleVariance: true}),
     placeDressingAsset('chest', SMITHY_CRATES, 0.57, 'dressing:smithy-crates', {scaleVariance: true}),
     // cycle 5: chapel altar + forge furnaces (new warehouse props)
-    placeDressingAsset('stone_altar', STONE_ALTARS, 1.4, 'dressing:altar'),
+    placeDressingAsset('stone_altar', STONE_ALTARS, 1.4, 'dressing:altar', {emissiveLift: 0.3}),
     placeDressingAsset('forge_furnace', FORGE_FURNACES, 2.4, 'dressing:furnaces')
   ]).catch((error) => console.warn('[ruins] asynchronous placement failed', error));
   buildBanners();
