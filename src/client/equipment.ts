@@ -1,11 +1,15 @@
 import * as THREE from 'three';
 // Measured in the supplied GLBs' scene coordinates: handle center and tip direction.
+// rapier/halberd/dane_axe are baked canonically (grip at origin, blade +Y), so no re-fit.
 export const WEAPON_GRIPS:Record<string,{grip:number[];blade:number[]}>= {
  sword:{grip:[.005,0,-.69],blade:[0,0,1]},
  bastard:{grip:[.005,.76,0],blade:[0,-1,0]},
  hammer:{grip:[.005,-.66,0],blade:[0,1,0]},
  poleaxe:{grip:[0,-.35,.48],blade:[0,.58,-.815]},
- zweihander:{grip:[0,-.65,.70],blade:[0,.682,-.731]}
+ zweihander:{grip:[0,-.65,.70],blade:[0,.682,-.731]},
+ rapier:{grip:[0,0,0],blade:[0,1,0]},
+ halberd:{grip:[0,0,0],blade:[0,1,0]},
+ dane_axe:{grip:[0,0,0],blade:[0,1,0]}
 };
 /** Imports may lie along any axis. Fit by longest extent, never thin Y thickness. */
 export function equipmentModel(source:THREE.Object3D,length:number,shield=false,asset?:string){

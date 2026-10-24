@@ -4,6 +4,9 @@ export const WEAPONS = {
  hammer: {name:'Warhammer', asset:'hammer', damage:64, reach:2.7, cooldown:1.15, stamina:30, arc:.5, length:.85, shield:true, style:'Crushing blow · short reach'},
  poleaxe: {name:'Poleaxe', asset:'poleaxe', damage:46, reach:4.5, cooldown:1, stamina:26, arc:.65, length:1.65, shield:false, style:'Long reach · narrow strike · weapon parry'},
  zweihander: {name:'Zweihander', asset:'zweihander', damage:52, reach:4, cooldown:1.2, stamina:32, arc:-.05, length:1.45, shield:false, style:'Wide cleave · weapon parry'},
+ rapier: {name:'Rapier', asset:'rapier', damage:26, reach:3.8, cooldown:.42, stamina:12, arc:.12, length:1, shield:true, style:'Swift thrust · shield guard'},
+ halberd: {name:'Halberd', asset:'halberd', damage:48, reach:5.2, cooldown:1.05, stamina:28, arc:.55, length:1.85, shield:false, style:'Longest reach · heavy hook · weapon parry'},
+ dane_axe: {name:'Dane axe', asset:'dane_axe', damage:58, reach:3.2, cooldown:1.05, stamina:26, arc:-.1, length:1.5, shield:false, style:'Heavy cleave · weapon parry'},
 } as const;
 export type WeaponId=keyof typeof WEAPONS;
 export const WEAPON_IDS=Object.keys(WEAPONS) as WeaponId[];

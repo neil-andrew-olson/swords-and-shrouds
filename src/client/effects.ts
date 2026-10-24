@@ -1,0 +1,304 @@
+import * as THREE from 'three';
+
+/**
+ * Pooled combat particles (sparks, blood, dust, embers).
+ *
+ * Everything is instanced: three InstancedMeshes total no matter how much combat is
+ * happening, no per-frame allocations (flat typed arrays, swap-remove compaction) and
+ * a hard cap per pool so the frame budget stays predictable. The caller passes a
+ * reusable vector (no cloning inside the hot path).
+ */
+
+export type SparkKind = 'metal' | 'flesh' | 'undead';
+
+const MAX_DT = 0.1;
+
+class ParticlePool {
+  readonly mesh: THREE.InstancedMesh;
+  private readonly capacity: number;
+  private alive = 0;
+  private readonly pos: Float32Array;
+  private readonly vel: Float32Array;
+  private readonly life: Float32Array;
+  private readonly maxLife: Float32Array;
+  private readonly size0: Float32Array;
+  private readonly size1: Float32Array;
+  private readonly gravity: Float32Array;
+  private readonly drag: Float32Array;
+  private readonly rot: Float32Array;
+  private readonly col: Float32Array;
+  private readonly aspect: THREE.Vector3;
+  private readonly fade: boolean;
+  private readonly bounce: boolean;
+  private readonly dummy = new THREE.Object3D();
+  private readonly color = new THREE.Color();
+
+  constructor(
+    scene: THREE.Scene,
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    capacity: number,
+    aspect: THREE.Vector3,
+    fade: boolean,
+    bounce = false
+  ) {
+    this.capacity = capacity;
+    this.aspect = aspect;
+    this.fade = fade;
+    this.bounce = bounce;
+    this.pos = new Float32Array(capacity * 3);
+    this.vel = new Float32Array(capacity * 3);
+    this.life = new Float32Array(capacity);
+    this.maxLife = new Float32Array(capacity);
+    this.size0 = new Float32Array(capacity);
+    this.size1 = new Float32Array(capacity);
+    this.gravity = new Float32Array(capacity);
+    this.drag = new Float32Array(capacity);
+    this.rot = new Float32Array(capacity);
+    this.col = new Float32Array(capacity * 3);
+    this.mesh = new THREE.InstancedMesh(geometry, material, capacity);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+    this.mesh.castShadow = false;
+    this.mesh.receiveShadow = false;
+    scene.add(this.mesh);
+  }
+
+  emit(
+    x: number, y: number, z: number,
+    vx: number, vy: number, vz: number,
+    life: number, size0: number, size1: number,
+    gravity: number, drag: number,
+    r: number, g: number, b: number
+  ) {
+    if (this.alive >= this.capacity) return;
+    const i = this.alive++;
+    const p3 = i * 3;
+    this.pos[p3] = x; this.pos[p3 + 1] = y; this.pos[p3 + 2] = z;
+    this.vel[p3] = vx; this.vel[p3 + 1] = vy; this.vel[p3 + 2] = vz;
+    this.life[i] = life;
+    this.maxLife[i] = life;
+    this.size0[i] = size0;
+    this.size1[i] = size1;
+    this.gravity[i] = gravity;
+    this.drag[i] = drag;
+    this.rot[i] = Math.random() * Math.PI * 2;
+    this.col[p3] = r; this.col[p3 + 1] = g; this.col[p3 + 2] = b;
+  }
+
+  update(dt: number) {
+    const {pos, vel, life, maxLife, size0, size1, gravity, drag, rot, col} = this;
+    for (let i = 0; i < this.alive; ) {
+      life[i] -= dt;
+      if (life[i] <= 0) {
+        // Swap-remove: keep the live particles packed at the front.
+        this.alive--;
+        const last = this.alive;
+        if (i !== last) this.copy(last, i);
+        continue;
+      }
+      const p3 = i * 3;
+      const damp = 1 - Math.min(0.95, drag[i] * dt);
+      vel[p3] *= damp;
+      vel[p3 + 2] *= damp;
+      vel[p3 + 1] += gravity[i] * dt;
+      pos[p3] += vel[p3] * dt;
+      pos[p3 + 1] += vel[p3 + 1] * dt;
+      pos[p3 + 2] += vel[p3 + 2] * dt;
+      if (this.bounce && pos[p3 + 1] < 0.05) {
+        pos[p3 + 1] = 0.05;
+        vel[p3] = 0; vel[p3 + 1] = 0; vel[p3 + 2] = 0;
+        gravity[i] = 0;
+      }
+      i++;
+    }
+
+    const mesh = this.mesh;
+    mesh.count = this.alive;
+    if (this.alive === 0) return;
+    for (let i = 0; i < this.alive; i++) {
+      const p3 = i * 3;
+      const t = 1 - Math.max(0, life[i]) / Math.max(0.0001, maxLife[i]);
+      const size = size0[i] + (size1[i] - size0[i]) * t;
+      this.dummy.position.set(pos[p3], pos[p3 + 1], pos[p3 + 2]);
+      this.dummy.rotation.set(0, rot[i], 0);
+      this.dummy.scale.set(size * this.aspect.x, size * this.aspect.y, size * this.aspect.z);
+      this.dummy.updateMatrix();
+      mesh.setMatrixAt(i, this.dummy.matrix);
+      const fade = this.fade ? 1 - t : 1;
+      mesh.setColorAt(i, this.color.setRGB(col[p3] * fade, col[p3 + 1] * fade, col[p3 + 2] * fade));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+
+  private copy(from: number, to: number) {
+    const f3 = from * 3;
+    const t3 = to * 3;
+    this.pos[t3] = this.pos[f3]; this.pos[t3 + 1] = this.pos[f3 + 1]; this.pos[t3 + 2] = this.pos[f3 + 2];
+    this.vel[t3] = this.vel[f3]; this.vel[t3 + 1] = this.vel[f3 + 1]; this.vel[t3 + 2] = this.vel[f3 + 2];
+    this.col[t3] = this.col[f3]; this.col[t3 + 1] = this.col[f3 + 1]; this.col[t3 + 2] = this.col[f3 + 2];
+    this.life[to] = this.life[from];
+    this.maxLife[to] = this.maxLife[from];
+    this.size0[to] = this.size0[from];
+    this.size1[to] = this.size1[from];
+    this.gravity[to] = this.gravity[from];
+    this.drag[to] = this.drag[from];
+    this.rot[to] = this.rot[from];
+  }
+
+  get active() { return this.alive; }
+}
+
+export class CombatEffects {
+  private readonly sparksPool: ParticlePool;
+  private readonly bloodPool: ParticlePool;
+  private readonly dustPool: ParticlePool;
+
+  constructor(scene: THREE.Scene) {
+    const sparkGeo = new THREE.BoxGeometry(1, 1, 1);
+    const sparkMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    this.sparksPool = new ParticlePool(scene, sparkGeo, sparkMat, 280, new THREE.Vector3(0.5, 1.9, 0.5), false);
+
+    const bloodGeo = new THREE.IcosahedronGeometry(0.5, 0);
+    const bloodMat = new THREE.MeshBasicMaterial({color: 0xffffff, depthWrite: false, transparent: true, opacity: 0.92});
+    this.bloodPool = new ParticlePool(scene, bloodGeo, bloodMat, 120, new THREE.Vector3(1, 1, 1), false, true);
+
+    const dustGeo = new THREE.IcosahedronGeometry(0.5, 0);
+    const dustMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.24,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    this.dustPool = new ParticlePool(scene, dustGeo, dustMat, 72, new THREE.Vector3(1.6, 1.0, 1.6), true);
+  }
+
+  /** Metallic ring-off / blood spray / spectral wisps on every landed hit. */
+  sparks(position: THREE.Vector3, kind: SparkKind = 'metal') {
+    const {x, y, z} = position;
+    const count = kind === 'undead' ? 11 : 9;
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.7 + Math.random() * (kind === 'metal' ? 3.4 : 2.4);
+      let r: number, g: number, b: number;
+      if (kind === 'metal') {
+        const white = Math.random() < 0.3;
+        r = 1; g = white ? 0.95 : 0.62 + Math.random() * 0.3; b = white ? 0.85 : 0.18 + Math.random() * 0.2;
+      } else if (kind === 'flesh') {
+        r = 0.78 + Math.random() * 0.2; g = 0.09 + Math.random() * 0.12; b = 0.08 + Math.random() * 0.1;
+      } else {
+        r = 0.32 + Math.random() * 0.18; g = 0.78 + Math.random() * 0.2; b = 0.42 + Math.random() * 0.3;
+      }
+      this.sparksPool.emit(
+        x + (Math.random() - 0.5) * 0.35,
+        y + (Math.random() - 0.5) * 0.4,
+        z + (Math.random() - 0.5) * 0.35,
+        Math.cos(angle) * speed,
+        1.1 + Math.random() * (kind === 'undead' ? 2.2 : 4.2),
+        Math.sin(angle) * speed,
+        kind === 'undead' ? 0.45 + Math.random() * 0.55 : 0.22 + Math.random() * 0.33,
+        0.055, 0.012,
+        kind === 'undead' ? 2.2 : 13,
+        0.7,
+        r, g, b
+      );
+    }
+  }
+
+  /** Splash of gore on damage (corruption = violet ichor for plague creatures). */
+  blood(position: THREE.Vector3, corruption: boolean, amount = 1) {
+    const {x, y, z} = position;
+    const count = Math.min(20, Math.round(10 * amount));
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.6 + Math.random() * 2.6;
+      const tint = Math.random();
+      const r = corruption ? 0.32 + tint * 0.16 : 0.42 + tint * 0.2;
+      const g = corruption ? 0.05 + tint * 0.1 : 0.035 + tint * 0.05;
+      const b = corruption ? 0.34 + tint * 0.2 : 0.05 + tint * 0.04;
+      this.bloodPool.emit(
+        x + (Math.random() - 0.5) * 0.4,
+        y + (Math.random() - 0.5) * 0.5,
+        z + (Math.random() - 0.5) * 0.4,
+        Math.cos(angle) * speed,
+        1.2 + Math.random() * 3.2,
+        Math.sin(angle) * speed,
+        0.5 + Math.random() * 0.45,
+        0.05 + Math.random() * 0.05,
+        0.03,
+        16,
+        0.2,
+        r, g, b
+      );
+    }
+  }
+
+  /** Ground dust kicked up by running actors or siege impacts. */
+  dust(position: THREE.Vector3, intensity: number) {
+    const {x, y, z} = position;
+    const count = Math.max(2, Math.min(9, Math.round(3 + intensity * 6)));
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const lift = 0.05 + Math.random() * 0.2;
+      this.dustPool.emit(
+        x + (Math.random() - 0.5) * 0.5,
+        y + lift,
+        z + (Math.random() - 0.5) * 0.5,
+        Math.cos(angle) * (0.25 + Math.random() * 0.8),
+        0.25 + Math.random() * 0.7,
+        Math.sin(angle) * (0.25 + Math.random() * 0.8),
+        0.65 + Math.random() * 0.7,
+        0.16 + Math.random() * 0.1,
+        0.42 + Math.random() * 0.34,
+        -0.45,
+        0.9,
+        0.085 + Math.random() * 0.025,
+        0.075 + Math.random() * 0.02,
+        0.062 + Math.random() * 0.015
+      );
+    }
+  }
+
+  /** Slow glowing motes drifting up from a nearby fire. */
+  embers(position: THREE.Vector3, count = 1) {
+    for (let i = 0; i < Math.min(3, count); i++) {
+      this.sparksPool.emit(
+        position.x + (Math.random() - 0.5) * 0.7,
+        position.y + 0.15 + Math.random() * 0.7,
+        position.z + (Math.random() - 0.5) * 0.7,
+        (Math.random() - 0.5) * 0.5,
+        0.5 + Math.random() * 0.8,
+        (Math.random() - 0.5) * 0.5,
+        0.8 + Math.random() * 1.3,
+        0.03 + Math.random() * 0.02,
+        0.01,
+        0.35,
+        0.35,
+        1,
+        0.52 + Math.random() * 0.25,
+        0.16 + Math.random() * 0.12
+      );
+    }
+  }
+
+  update(dt: number) {
+    const step = Math.min(MAX_DT, Math.max(0, dt));
+    if (step === 0) return;
+    this.sparksPool.update(step);
+    this.bloodPool.update(step);
+    this.dustPool.update(step);
+  }
+
+  /** Live particle count, exposed for the perf HUD / QA reporting. */
+  get active() {
+    return this.sparksPool.active + this.bloodPool.active + this.dustPool.active;
+  }
+}

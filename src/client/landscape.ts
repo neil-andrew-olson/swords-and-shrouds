@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import { CASTLES, CAMPS, dist } from '../shared/world';
 import { loadAsset } from './assets';
 
-/** Lush medieval vegetation: realistic grass tufts, dark spruce pines, and gnarled oaks. */
+/**
+ * Lush medieval vegetation: realistic grass tufts, dark spruce pines, gnarled oaks,
+ * mossy boulders and — batch 2026-10 — baked `grass_tuft` / `rock_cluster` scatter.
+ * Custom props are always instanced: +2 draw calls total for hundreds of props.
+ */
 export function addLandscape(scene: THREE.Scene) {
   let seed = 9821;
   const rand = () => {
@@ -14,19 +18,23 @@ export function addLandscape(scene: THREE.Scene) {
     CASTLES.some((c) => Math.abs(x - c.x) < 16 && Math.abs(z - c.z) < 18) ||
     CAMPS.some((c) => dist(c, { x, z }) < 8) ||
     Math.abs(x) < 5;
+  const castleFootprint = (x: number, z: number) =>
+    CASTLES.some((c) => Math.abs(x - c.x) < 13 && Math.abs(z - c.z) < 13);
 
-  const treePositions: { x: number; z: number; h: number; isPine: boolean; rot: number; scale: number }[] = [];
-  for (let i = 0; i < 360; i++) {
+  // Denser, more varied tree line than the original 360-slot pass.
+  const treePositions: { x: number; z: number; h: number; isPine: boolean; rot: number; scale: number; tint: number }[] = [];
+  for (let i = 0; i < 540; i++) {
     const x = rand() * 152 - 65;
     const z = 35 - rand() * 710;
     if (!clear(x, z)) {
       treePositions.push({
         x,
         z,
-        h: 4 + rand() * 4,
-        isPine: i % 3 !== 0,
+        h: 3.5 + rand() * 5.5,
+        isPine: rand() < 0.58,
         rot: rand() * Math.PI * 2,
-        scale: 0.75 + rand() * 0.5,
+        scale: 0.68 + rand() * 0.82,
+        tint: 0.78 + rand() * 0.34,
       });
     }
   }
@@ -92,11 +100,12 @@ export function addLandscape(scene: THREE.Scene) {
   });
   addWind(grassMat, 0.42, 1.3, 0.0);
 
-  const grass = new THREE.InstancedMesh(geom, grassMat, 7000);
+  const grass = new THREE.InstancedMesh(geom, grassMat, 7600);
   const dummy = new THREE.Object3D();
+  const tintColor = new THREE.Color();
   let count = 0;
 
-  for (let i = 0; i < 9000 && count < 7000; i++) {
+  for (let i = 0; i < 9800 && count < 7600; i++) {
     const x = rand() * 152 - 65;
     const z = 35 - rand() * 710;
     if (clear(x, z)) continue;
@@ -140,7 +149,7 @@ export function addLandscape(scene: THREE.Scene) {
   const needle = new THREE.MeshStandardMaterial({ color: 0x273b32, roughness: 0.9 });
   addWind(needle, 0.14, 1.2, 0.6);
   const placeholderTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.36, 1, 7), bark, treePositions.length);
-  const placeholderCrowns = new THREE.InstancedMesh(new THREE.ConeGeometry(1.6, 3.8, 5), needle, treePositions.length * 2);
+  const placeholderCrowns = new THREE.InstancedMesh(new THREE.ConeGeometry(1.6, 3.8, 5), needle, treePositions.length);
   let pti = 0;
   let pci = 0;
 
@@ -152,7 +161,8 @@ export function addLandscape(scene: THREE.Scene) {
     placeholderTrunks.setMatrixAt(pti++, dummy.matrix);
 
     dummy.position.set(t.x, t.h * 0.85, t.z);
-    dummy.scale.set(t.scale * 1.2, t.h * 0.5, t.scale * 1.2);
+    dummy.rotation.set(0, t.rot * 1.7, 0);
+    dummy.scale.set(t.scale * 1.2, t.h * (t.isPine ? 0.62 : 0.42), t.scale * 1.2);
     dummy.updateMatrix();
     placeholderCrowns.setMatrixAt(pci++, dummy.matrix);
   }
@@ -199,9 +209,13 @@ export function addLandscape(scene: THREE.Scene) {
         dummy.updateMatrix();
 
         if (t.isPine) {
-          pineInst.setMatrixAt(pi++, dummy.matrix);
+          pineInst.setMatrixAt(pi, dummy.matrix);
+          pineInst.setColorAt(pi, tintColor.setRGB(t.tint, t.tint * 1.02, t.tint * 0.96));
+          pi++;
         } else {
-          oakInst.setMatrixAt(oi++, dummy.matrix);
+          oakInst.setMatrixAt(oi, dummy.matrix);
+          oakInst.setColorAt(oi, tintColor.setRGB(t.tint * 1.02, t.tint, t.tint * 0.94));
+          oi++;
         }
       }
 
@@ -216,6 +230,99 @@ export function addLandscape(scene: THREE.Scene) {
     })
     .catch((err) => {
       console.warn('3D trees load error, keeping placeholders', err);
+    });
+
+  // 5. Batch 2026-10: baked grass tufts + rock clusters, two InstancedMeshes.
+  const nearTree = (x: number, z: number, radius: number) =>
+    treePositions.some((t) => (t.x - x) * (t.x - x) + (t.z - z) * (t.z - z) < radius * radius);
+  const firstMesh = (root: THREE.Object3D): THREE.Mesh | undefined => {
+    let found: THREE.Mesh | undefined;
+    root.traverse((o) => {
+      if (!found && o instanceof THREE.Mesh) found = o;
+    });
+    return found;
+  };
+  const firstMaterial = (mesh: THREE.Mesh): THREE.Material =>
+    (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.Material;
+
+  Promise.all([loadAsset('custom/grass_tuft'), loadAsset('custom/rock_cluster')])
+    .then(([grassGltf, rockGltf]) => {
+      const tuftMesh = firstMesh(grassGltf.scene);
+      const rockMesh = firstMesh(rockGltf.scene);
+      // Baked tufts cluster around survivor camps and along the forest edge.
+      if (tuftMesh) {
+        const tuftMat = firstMaterial(tuftMesh).clone() as THREE.MeshStandardMaterial;
+        addWind(tuftMat, 0.16, 1.1, 0.04);
+        const tuftCount = 440;
+        const tufts = new THREE.InstancedMesh(tuftMesh.geometry, tuftMat, tuftCount);
+        let ti = 0;
+        for (const camp of CAMPS) {
+          for (let i = 0; i < 22 && ti < tuftCount; i++) {
+            const angle = rand() * Math.PI * 2;
+            const radius = 5 + rand() * 13;
+            const x = camp.x + Math.cos(angle) * radius;
+            const z = camp.z + Math.sin(angle) * radius;
+            if (Math.abs(x) < 4.2 || castleFootprint(x, z)) continue;
+            dummy.position.set(x, 0.01, z);
+            dummy.rotation.set(0, rand() * Math.PI * 2, 0);
+            const s = 0.7 + rand() * 0.8;
+            dummy.scale.set(s, s * (0.85 + rand() * 0.4), s);
+            dummy.updateMatrix();
+            tufts.setMatrixAt(ti++, dummy.matrix);
+          }
+        }
+        for (let i = 0; i < tuftCount * 5 && ti < tuftCount; i++) {
+          const x = rand() * 152 - 65;
+          const z = 35 - rand() * 710;
+          if (clear(x, z) || !nearTree(x, z, 22) || castleFootprint(x, z)) continue;
+          dummy.position.set(x, 0.01, z);
+          dummy.rotation.set(0, rand() * Math.PI * 2, 0);
+          const s = 0.75 + rand() * 0.95;
+          dummy.scale.set(s, s * (0.85 + rand() * 0.45), s);
+          dummy.updateMatrix();
+          tufts.setMatrixAt(ti++, dummy.matrix);
+        }
+        tufts.count = ti;
+        tufts.receiveShadow = true;
+        tufts.computeBoundingSphere();
+        scene.add(tufts);
+      }
+      if (rockMesh) {
+        const rockMat = firstMaterial(rockMesh).clone() as THREE.MeshStandardMaterial;
+        const clusterCount = 96;
+        const clusters = new THREE.InstancedMesh(rockMesh.geometry, rockMat, clusterCount);
+        let ci = 0;
+        for (let i = 0; i < clusterCount * 6 && ci < clusterCount; i++) {
+          const nearCamp = i % 2 === 0 && CAMPS.length > 0;
+          let x: number;
+          let z: number;
+          if (nearCamp) {
+            const camp = CAMPS[Math.floor(rand() * CAMPS.length)];
+            const angle = rand() * Math.PI * 2;
+            const radius = 6 + rand() * 15;
+            x = camp.x + Math.cos(angle) * radius;
+            z = camp.z + Math.sin(angle) * radius;
+          } else {
+            x = rand() * 152 - 65;
+            z = 35 - rand() * 710;
+            if (!nearTree(x, z, 26)) continue;
+          }
+          if (clear(x, z) || castleFootprint(x, z)) continue;
+          dummy.position.set(x, 0, z);
+          dummy.rotation.set(rand() * 0.3, rand() * Math.PI * 2, rand() * 0.2);
+          const s = 0.45 + rand() * 0.85;
+          dummy.scale.set(s, s * (0.7 + rand() * 0.5), s);
+          dummy.updateMatrix();
+          clusters.setMatrixAt(ci++, dummy.matrix);
+        }
+        clusters.count = ci;
+        clusters.castShadow = clusters.receiveShadow = true;
+        clusters.computeBoundingSphere();
+        scene.add(clusters);
+      }
+    })
+    .catch((err) => {
+      console.warn('Scatter assets unavailable, keeping procedural grass/rocks', err);
     });
 
   return {
