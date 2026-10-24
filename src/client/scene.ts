@@ -69,6 +69,14 @@ const TRAIL_COLORS:Record<SwingStyle,[number,number,number]>={
 };
 /** Characters catch the night IBL more strongly so distant actors don't go pure black. */
 const ACTOR_ENV_INTENSITY=2.2;
+// Cycle-4 regional weather phases: 3–6 min dwell, smooth intensity transitions. Low quality uses
+// a tiny fraction of the particle budget; high intensity is the QA "storm" capture state.
+type WeatherRegion='march'|'moor'|'crown';
+const WEATHER_PHASES:{[K in WeatherRegion]:{name:string;target:number}[]}={
+ march:[{name:'clear',target:0.12},{name:'light-rain',target:0.62},{name:'downpour',target:1.0}],
+ moor:[{name:'calm',target:0.2},{name:'ashfall',target:0.62},{name:'haze',target:1.0}],
+ crown:[{name:'clear',target:0.18},{name:'snow',target:0.62},{name:'snowstorm',target:1.0}]
+};
 type QualityTier='low'|'medium'|'high';
 /** Graphics tiers (batch 3): pixel ratio, bloom, shadow map, pooled torch lights, particle scale. */
 const QUALITY_TIERS:Record<QualityTier,{dpr:number;bloom:boolean;shadow:number;lights:number;particles:number}> = {
@@ -148,6 +156,19 @@ export class WorldView{
   ambient!:THREE.AmbientLight;
   private exposureTarget=1.5;
   private lastSkyTint=new THREE.Color(0xffffff);private lastMoonTint=new THREE.Color(0xffffff);
+  // ---- cycle-4 weather state (pooled particles, region phase machine) ----
+  private weatherStates:{march:{phase:number;name:string;target:number;intensity:number;t:number;next:number};moor:{phase:number;name:string;target:number;intensity:number;t:number;next:number};crown:{phase:number;name:string;target:number;intensity:number;t:number;next:number}}={march:{phase:0,name:'clear',target:.12,intensity:.12,t:0,next:215},moor:{phase:0,name:'calm',target:.2,intensity:.2,t:0,next:240},crown:{phase:0,name:'clear',target:.18,intensity:.18,t:0,next:225}};
+  private weatherRegion:WeatherRegion='march';
+  private weatherForce:{region:WeatherRegion;phase:string;intensity:number}|null=null;
+  private weatherFlash=0;private weatherFogAdd=0;private weatherAnnouncedAt=0;
+  private rainMesh:THREE.InstancedMesh|null=null;private splashMesh:THREE.InstancedMesh|null=null;private hazeMesh:THREE.InstancedMesh|null=null;
+  private rainData:Float32Array|null=null;private splashData:Float32Array|null=null;private hazeData:Float32Array|null=null;
+  private readonly rainDummy=new THREE.Object3D();private readonly rainQuat=new THREE.Quaternion();
+  private landscapeWindSet:((gust:number)=>void)|null=null;
+  private roadWet={roughness:0.85,envMapIntensity:1,metalness:0}as{roughness:number;envMapIntensity:number;metalness:number};
+  private qaBody:THREE.Group|null=null;private qaBodyRig:ReturnType<typeof customCharacter>|null=null;private qaBodyActor:Actor|null=null;private qaBodyDistance=10;
+  private softwareRenderer=false;private weatherFlashCount=0;
+  private firstGameFrameMarked=false;
   private lastAmbientTint=new THREE.Color(0xffffff);private lastSaturation=1;
   /** Landmark coordinates per region for the QA landmark views (ruins-builder placements). */
   private landmarkCoords:{green:{x:number;z:number};ashen:{x:number;z:number};crown:{x:number;z:number}}={
@@ -187,7 +208,8 @@ export class WorldView{
  private readonly camTarget=new THREE.Vector3();private readonly camForward=new THREE.Vector3();private readonly camDesired=new THREE.Vector3();private readonly camDelta=new THREE.Vector3();
  private readonly camRay=new THREE.Raycaster();private readonly shieldTarget=new THREE.Vector3();
  constructor(canvas:HTMLCanvasElement){
-  this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});this.renderer.info.autoReset=false;this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFShadowMap;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.5;this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x1a2629);
+  this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+try{const gl=this.renderer.getContext();const ext=gl.getExtension('WEBGL_debug_renderer_info');const unmasked=ext?String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)):'';this.softwareRenderer=/swiftshader|llvmpipe|software|basic render|virtualbox/i.test(unmasked);}catch{}this.renderer.info.autoReset=false;this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFShadowMap;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.5;this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x1a2629);
   this.fog=new THREE.FogExp2(0x1c2a2e,0.015);this.scene.fog=this.fog;
   this.hemi=new THREE.HemisphereLight(0xc2d6ee,0x2e3a44,4.4);this.scene.add(this.hemi);this.ambient=new THREE.AmbientLight(0x243442,0.5);this.scene.add(this.ambient);
   this.moon=new THREE.DirectionalLight(0xcadff5,2.4);this.moon.position.set(-40,64,-30);this.moon.castShadow=true;this.moon.shadow.mapSize.set(2048,2048);this.moon.shadow.camera.left=-34;this.moon.shadow.camera.right=34;this.moon.shadow.camera.top=34;this.moon.shadow.camera.bottom=-34;this.moon.shadow.camera.near=1;this.moon.shadow.camera.far=150;this.moon.shadow.bias=-0.001;this.moon.shadow.normalBias=0.06;this.moon.shadow.radius=1.5;this.scene.add(this.moon);this.scene.add(this.moon.target);this.moon.name="sun";this.sky=createSkyAndMoon(this.scene);
@@ -199,6 +221,7 @@ export class WorldView{
   // Fixed pool of torch lights; sources are re-assigned to the nearest flames every frame.
   for(let i=0;i<MAX_TORCH_LIGHTS;i++){const light=new THREE.PointLight(0xff9d42,0,12,1.8);light.castShadow=false;this.scene.add(light);this.lightPool.push(light);}
   this.fx=new CombatEffects(this.scene);this.scene.add(this.legacyTowerGroup);this.legacyTowerGroup.visible=false;this.initFlameInstances();this.initDamageLabels();
+   this.initWeather();try{performance.mark('ss:sceneConstructStart');}catch{}
   for(const region of REGIONS){const ground=box(this.scene,5,-.3,region.offset-80,175,.6,250,region.color,true);ground.castShadow=false;const m=(ground.material as THREE.MeshStandardMaterial).clone();m.map=m.map!.clone();m.map.repeat.set(38,55);ground.material=m;tagSurface(ground,'ground');}
   const route=[START,...REGIONS.flatMap(r=>[{x:0,z:r.offset+12},{x:0,z:r.offset+24},{x:42,z:r.offset-45},{x:42,z:r.offset-55},{x:42,z:r.offset-43},{x:-24,z:r.offset-113},{x:-24,z:r.offset-123},{x:-24,z:r.offset-112},{x:0,z:r.offset-200}]),NEST];
   {
@@ -225,6 +248,7 @@ export class WorldView{
   // Plague glow joins the pooled lights instead of being a permanent extra point light.
   this.nestTorch=this.torchSources.length;this.torchSources.push({x:NEST.x,y:3,z:NEST.z,color:0xd15b92,intensity:22,distance:16,seed:11.3});
   const ls=addLandscape(this.scene);this.landscapeUpdate=ls?.update??null;this.landscapeTreeline=(ls as {treeline?:{x:number;z:number;lookX:number;lookZ:number}}|undefined)?.treeline??null;
+   this.landscapeWindSet=(ls as {setWindStrength?:(g:number)=>void}|undefined)?.setWindStrength??null;
   const ruins=addRuins(this.scene);this.ruinsUpdate=ruins?.update??null;
   // Mountains stay outside the navigable map.
   const mountainGeo=new THREE.ConeGeometry(1,1,5),mountainMat=mat(0x263941),mountainDummy=new THREE.Object3D();
@@ -235,12 +259,24 @@ export class WorldView{
   this.postfx=createPostFX(this.renderer,this.scene,this.camera);this.installPerfHooks();
   window.addEventListener('resize',()=>this.resize());this.resize();
   void this.survivorAssets();
+   // Early shader warmup while assets stream (overlaps compile with loading).
+   setTimeout(()=>{const compile=(this.renderer as unknown as {compileAsync?:(sc:THREE.Scene,cam:THREE.Camera)=>Promise<unknown>}).compileAsync;if(!compile)return;const parallel=!!(this.renderer.getContext().getExtension('KHR_parallel_shader_compile'));if(!parallel){try{performance.mark('ss:earlyCompileSkipped');}catch{}return;}try{performance.mark('ss:earlyCompileStart');}catch{}try{void compile.call(this.renderer,this.scene,this.camera).then(()=>{try{performance.mark('ss:earlyCompileEnd');}catch{}}).catch(()=>{});}catch{}},600);
   // Time-to-HUD: nothing world-size starts before the join-critical core player set is resident.
   // Fortress/terrain/surfaces/props/landmark streaming then runs in one ordered background queue.
   void this.characterAssets.coreReady.then(()=>{
+   try{performance.mark('ss:coreReady');}catch{}
    void this.startEnvironment();
    void this.applySurfaces();
    void this.environmentAssets();
+   // Shader warmup off the critical path: compile the post-streaming scene in the background.
+   setTimeout(()=>{
+    const compile=(this.renderer as unknown as {compileAsync?:(sc:THREE.Scene,cam:THREE.Camera)=>Promise<unknown>}).compileAsync;
+    if(!compile)return;
+    const parallel=!!(this.renderer.getContext().getExtension('KHR_parallel_shader_compile'));
+    if(!parallel){try{performance.mark('ss:compileSkipped');}catch{}return;}
+    try{performance.mark('ss:compileStart');}catch{}
+    try{void compile.call(this.renderer,this.scene,this.camera).then(()=>{try{performance.mark('ss:compileEnd');}catch{}}).catch(()=>{});}catch{}
+   },1200);
   });
  }
  /** Scanned road/cobblestone/dirt maps owned by terrain-surfaces.ts; never throws. */
@@ -551,7 +587,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    }else if(name==='region-ashen'){
     const c=CASTLES.find(x=>x.region==='moor')??CASTLES[3];pose=look(c.x+14,3.2,c.z+34,c.x,2,c.z);
    }else if(name==='region-crown'){
-    const c=CASTLES.find(x=>x.region==='crown')??CASTLES[6];pose=look(c.x+14,3.2,c.z+34,c.x,2,c.z);
+    const c=CASTLES.find(x=>x.region==='crown')??CASTLES[6];pose=look(c.x+30,3.8,c.z+58,c.x,2.4,c.z);
    }
    else if(name==='foliage'){
     pose=look(-58.4,2.1,-40.2,-57.3,1.6,-46.7);
@@ -637,23 +673,145 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    const info=this.renderer.info;let objects=0,meshes=0,lights=0,skinned=0;const materials=new Set<THREE.Material>();
    this.scene.traverse(o=>{objects++;if(o instanceof THREE.Mesh){meshes++;if(o instanceof THREE.SkinnedMesh)skinned++;for(const m of Array.isArray(o.material)?o.material:[o.material])materials.add(m);}else if(o instanceof THREE.Light)lights++;else if(o instanceof THREE.Points||o instanceof THREE.Sprite||o instanceof THREE.Line)meshes++;});
    let sum=0;for(let i=0;i<this.frameCount;i++)sum+=this.frameTimes[i];const frameMs=this.frameCount?sum/this.frameCount:0;
-   return {calls:info.render.calls,triangles:info.render.triangles,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
+   return {calls:info.render.calls,triangles:info.render.triangles,software:this.softwareRenderer,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
    win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
    win.__ssQAPose=(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{return view.qaViewpoint(pose?'custom':null,pose??undefined);};
    win.__ssRegionInfo=()=>view.regionInfo();
    win.__ssEliteUndeadIds=()=>view.eliteUndeadIds();
+   win.__ssWeather=()=>view.weatherInfo();
+   win.__ssSetWeather=(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>view.setWeatherForce(region===undefined?null:region,phase,intensity);
+   win.__ssWeatherForce=(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>view.setWeatherForce(region===undefined?null:region,phase,intensity);
+   win.__ssLoadTimings=()=>view.loadTimings();
+   win.__ssPreviewBody=(name?:string|null,distance?:number|{distance?:number})=>{const d=typeof distance==='number'?distance:(distance?.distance??10);return view.previewBody(name===undefined?null:name,d);};
    win.__ssEliteUndeadInfo=()=>view.eliteUndeadInfo();
    win.__ssSetLandmark=(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>view.setLandmarkCoords(region,x,z);
    win.__ssQuality=(tier?:string)=>{if(typeof tier==='string'&&tier)return {tier:view.quality,applied:view.setQuality(tier,true)};return {tier:view.quality};};
-   let initial:QualityTier='high';try{const stored=localStorage.getItem('ss-quality');if(stored==='low'||stored==='medium'||stored==='high')initial=stored;}catch{}
+   let initial:QualityTier=this.softwareRenderer?'low':'high';try{const stored=localStorage.getItem('ss-quality');if(stored==='low'||stored==='medium'||stored==='high')initial=stored;}catch{}
    this.setQuality(initial);
   }
   resize(){this.renderer.setSize(innerWidth,innerHeight,false);this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();this.postfx?.setSize(innerWidth,innerHeight);}
+  /** Pooled weather particles: rain streaks, ground splashes and moor haze banks. */
+  private initWeather(){
+   const rainGeo=new THREE.PlaneGeometry(.035,.7);
+   this.rainMesh=new THREE.InstancedMesh(rainGeo,new THREE.MeshBasicMaterial({color:0xbfd6e8,transparent:true,opacity:.32,depthWrite:false,blending:THREE.AdditiveBlending}),460);
+   this.rainMesh.frustumCulled=false;this.rainMesh.castShadow=false;this.rainMesh.count=0;this.scene.add(this.rainMesh);
+   this.rainData=new Float32Array(460*4);
+   for(let i=0;i<460;i++){this.rainData[i*4]=Math.random()*36-18;this.rainData[i*4+1]=Math.random()*16;this.rainData[i*4+2]=Math.random()*36-18;this.rainData[i*4+3]=14+Math.random()*8;}
+   const splashGeo=new THREE.RingGeometry(.16,.26,12);splashGeo.rotateX(-Math.PI/2);
+   this.splashMesh=new THREE.InstancedMesh(splashGeo,new THREE.MeshBasicMaterial({color:0xa9c4d6,transparent:true,opacity:.4,depthWrite:false,blending:THREE.AdditiveBlending}),90);
+   this.splashMesh.frustumCulled=false;this.splashMesh.castShadow=false;this.splashMesh.count=0;this.scene.add(this.splashMesh);
+   this.splashData=new Float32Array(90*3);
+   // Soft radial haze card for moor smoke banks.
+   const hc=document.createElement('canvas');hc.width=hc.height=128;const hctx=hc.getContext('2d')!;const hg=hctx.createRadialGradient(64,64,4,64,64,64);hg.addColorStop(0,'rgba(190,185,175,0.5)');hg.addColorStop(.55,'rgba(150,145,135,0.18)');hg.addColorStop(1,'rgba(120,115,110,0)');hctx.fillStyle=hg;hctx.fillRect(0,0,128,128);
+   const hazeTex=new THREE.CanvasTexture(hc);hazeTex.colorSpace=THREE.SRGBColorSpace;
+   this.hazeMesh=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({map:hazeTex,transparent:true,opacity:.14,depthWrite:false,blending:THREE.AdditiveBlending}),14);
+   this.hazeMesh.frustumCulled=false;this.hazeMesh.castShadow=false;this.hazeMesh.count=0;this.scene.add(this.hazeMesh);
+   this.hazeData=new Float32Array(14*3);
+   for(let i=0;i<14;i++){this.hazeData[i*3]=Math.random()*40-20;this.hazeData[i*3+1]=.6+Math.random()*1.6;this.hazeData[i*3+2]=90+Math.random()*40;}
+   if(this.roadMesh){const m=this.roadMesh.material as THREE.MeshStandardMaterial;if(m.isMeshStandardMaterial)this.roadWet={roughness:m.roughness,envMapIntensity:m.envMapIntensity??1,metalness:m.metalness??0};}
+  }
+  private weatherScale(){return this.quality==='low'?0:this.quality==='medium'?0.55:1;}
+  /** Advance regional weather phases, drive pooled particles + wet sheen + lightning. */
+  private updateWeather(dt:number,time:number,focusX:number,focusZ:number){
+   const region:WeatherRegion=focusZ<-405?'crown':focusZ<-165?'moor':'march';
+   if(region!==this.weatherRegion){this.weatherRegion=region;this.announceWeather();}
+   const force=this.weatherForce;
+   for(const id of ['march','moor','crown'] as WeatherRegion[]){
+    const st=this.weatherStates[id];
+    if(force&&force.region===id){st.name=force.phase;st.intensity=force.intensity;st.target=force.intensity;st.t=0;st.next=999999;continue;}
+    st.t+=dt;
+    if(st.t>=st.next){const list=WEATHER_PHASES[id];st.phase=(st.phase+1)%list.length;st.name=list[st.phase].name;st.target=list[st.phase].target;st.t=0;st.next=180+Math.random()*150;if(id===this.weatherRegion)this.announceWeather();}
+    st.intensity+=(st.target-st.intensity)*(1-Math.exp(-dt*0.55));
+   }
+   const st=this.weatherStates[region];
+   const intensity=st.intensity, scale=this.weatherScale();
+   // Lightning (Green March rain phases): meter a flash counter + delayed thunder cue.
+   if(region==='march'&&/rain|shower|downpour/i.test(st.name)&&intensity>.45&&!force&&Math.random()<dt*0.022){
+    this.weatherFlash=1;this.weatherFlashCount++;
+    window.dispatchEvent(new CustomEvent('ss-lightning',{detail:{region,intensity,count:this.weatherFlashCount}}));
+    const delay=1200+Math.random()*1400;
+    setTimeout(()=>{window.dispatchEvent(new CustomEvent('ss-thunder',{detail:{region,intensity,delay}}));},delay);
+   }
+   this.weatherFlash=Math.max(0,this.weatherFlash-dt*2.2);
+   // Fog density contribution by region/weather (crown storm closes visibility).
+   this.weatherFogAdd=(region==='crown'?0.0045*intensity:region==='moor'?0.0022*intensity:0.0012*intensity);
+   this.landscapeWindSet?.((region==='moor'?1+intensity*1.35:region==='crown'?1+intensity*1.2:1+intensity*0.5));
+   const q=this.camera.getWorldQuaternion(this.rainQuat);
+   // Rain streaks (march only; low tier almost none).
+   if(this.rainMesh&&this.rainData){
+    const cap=this.rainData.length/4, active=region==='march'?Math.min(cap,Math.floor(cap*intensity*scale)):0;
+    if(active>0){
+     const d=this.rainData;this.rainQuat.copy(q);
+     for(let i=0;i<cap;i++){const b=i*4;d[b+1]-=d[b+3]*dt;d[b]+=dt*1.4;if(d[b+1]<0){d[b]=focusX+Math.random()*44-22;d[b+1]=14+Math.random()*5;d[b+2]=focusZ+Math.random()*44-22;}if(Math.abs(d[b]-focusX)>26||Math.abs(d[b+2]-focusZ)>26){d[b]=focusX+Math.random()*44-22;d[b+2]=focusZ+Math.random()*44-22;}if(i<active){this.rainDummy.position.set(d[b],d[b+1],d[b+2]);this.rainDummy.quaternion.copy(this.rainQuat);this.rainDummy.rotation.z=-.12;this.rainDummy.scale.set(1,1,1);this.rainDummy.updateMatrix();this.rainMesh.setMatrixAt(i,this.rainDummy.matrix);}}
+     this.rainMesh.count=active;this.rainMesh.instanceMatrix.needsUpdate=true;
+    }else this.rainMesh.count=0;
+   }
+   // Road splashes (spawn at ground near player; short additively-fading rings).
+   if(this.splashMesh&&this.splashData&&region==='march'&&intensity>.28){
+    const d=this.splashData,cap=d.length/3,rate=dt*(6+20*intensity)*Math.max(scale,.05);
+    for(let n=0;n<rate;n++){let slot=-1;for(let i=0;i<cap;i++)if(d[i*3+2]<=0){slot=i;break;}if(slot<0)break;d[slot*3]=focusX+Math.random()*34-17;d[slot*3+1]=0.03;d[slot*3+2]=.32+Math.random()*.2;}
+    for(let i=0;i<cap;i++){const life=d[i*3+2];if(life<=0)continue;d[i*3+2]=life-dt;const s=Math.max(0.01,(.32-life)*2.2);this.rainDummy.position.set(d[i*3],d[i*3+1],d[i*3]);this.rainDummy.quaternion.identity();this.rainDummy.scale.set(s,s,s);this.rainDummy.updateMatrix();this.splashMesh.setMatrixAt(i,this.rainDummy.matrix);}
+    this.splashMesh.count=cap;this.splashMesh.instanceMatrix.needsUpdate=true;
+   }else if(this.splashMesh)this.splashMesh.count=0;
+   // Moor smoke haze banks + ash / crown snowstorm particles via the pooled flake system.
+   if(this.hazeMesh&&this.hazeData){
+    const active=region==='moor'?Math.min(14,Math.floor(14*intensity*scale)):0;
+    if(active>0){const d=this.hazeData;for(let i=0;i<active;i++){const b=i*3;d[b]+=dt*.35;if(d[b]>24)d[b]-=48;this.rainDummy.position.set(focusX+d[b],d[b+1],focusZ+d[b+2]);this.rainDummy.position.z=focusZ+((d[b+2]+time*2)%48)-24;this.rainDummy.quaternion.copy(this.rainQuat);this.rainDummy.scale.set(9+d[b]*.15,3.2,1);this.rainDummy.updateMatrix();this.hazeMesh.setMatrixAt(i,this.rainDummy.matrix);}this.hazeMesh.count=active;this.hazeMesh.instanceMatrix.needsUpdate=true;}
+    else this.hazeMesh.count=0;
+   }
+   if(region==='moor'&&intensity>.25){
+    if(this.weatherScale()>0&&Math.random()<dt*(3+8*intensity)*this.weatherScale()){this.tmpV.set(focusX+Math.random()*36-18,2+Math.random()*3,focusZ+Math.random()*36-18);this.fx.flake(this.tmpV,.62,.58,.55,1.1);}
+    if(this.weatherScale()>0&&Math.random()<dt*(1.2+2*intensity)*this.weatherScale()){this.tmpV.set(focusX+Math.random()*20-10,.6+Math.random()*1.2,focusZ+Math.random()*20-10);this.fx.embers(this.tmpV,1);}
+   }
+   if(region==='crown'&&intensity>.18){
+    const rate=dt*(2+18*intensity)*this.weatherScale();
+    for(let n=0;n<rate;n++){this.tmpV.set(focusX+Math.random()*30-15,2+Math.random()*4,focusZ+Math.random()*30-15);this.fx.flake(this.tmpV,.88,.93,1,1.2);}
+   }
+   // Wet-road sheen: rain lowers roughness / lifts reflections, then dries out.
+   if(this.roadMesh){const m=this.roadMesh.material as THREE.MeshStandardMaterial;if(m.isMeshStandardMaterial){const wet=region==='march'?intensity:0;const k=1-Math.exp(-dt*1.2);m.roughness+=(this.roadWet.roughness-wet*.42-m.roughness)*k;m.envMapIntensity+=((this.roadWet.envMapIntensity??1)+wet*.7-m.envMapIntensity)*k;m.metalness+=((this.roadWet.metalness??0)+wet*.06-m.metalness)*k;}}
+  }
+  private announceWeather(){
+   const st=this.weatherStates[this.weatherRegion];
+   try{window.dispatchEvent(new CustomEvent('ss-weather',{detail:this.weatherInfo()}));}catch{}
+   void st;
+  }
+  /** window.__ssWeather(): current region weather state for audio/QA. */
+  weatherInfo(){
+   const st=this.weatherStates[this.weatherRegion];
+   return {region:this.weatherRegion,phase:st.name,intensity:+st.intensity.toFixed(3),nextChangeAt:Date.now()+Math.max(0,(st.next-st.t))*1000,nextChangeIn:+Math.max(0,st.next-st.t).toFixed(1),flash:this.weatherFlashCount,flashing:this.weatherFlash>0.01,activeParticles:{rain:this.rainMesh?.count??0,splash:this.splashMesh?.count??0,haze:this.hazeMesh?.count??0},qualityScale:this.weatherScale()};
+  }
+  /** window.__ssSetWeather(region, phase, intensity): deterministic QA forcing; null restores. */
+  setWeatherForce(region:WeatherRegion|null,phase?:string|null,intensity?:number|null){
+   if(region===null||region===undefined){this.weatherForce=null;return {ok:true,cleared:true,weather:this.weatherInfo()};}
+   const list=WEATHER_PHASES[region];const target=(phase&&list.find(p=>p.name===phase))||list[list.length-1];
+   const value=typeof intensity==='number'?Math.max(0,Math.min(1,intensity)):target.target;
+   this.weatherForce={region,phase:target.name,intensity:value};
+   this.weatherRegion=region;this.announceWeather();
+   return {ok:true,weather:this.weatherInfo()};
+  }
+  /** window.__ssLoadTimings(): performance marks for HUD/state attribution. */
+  loadTimings(){
+   let marks:{name:string;at:number;ms:number}[]=[];
+   try{marks=performance.getEntriesByType('mark').filter(e=>e.name.startsWith('ss:')).map(e=>({name:e.name,at:+e.startTime.toFixed(1),ms:+e.startTime.toFixed(1)}));}catch{}
+   const get=(n:string)=>marks.find(m=>m.name===n)?.ms??null;
+   return {marks,summary:{sceneConstruct:get('ss:sceneConstructStart'),coreReady:get('ss:coreReady')??get('ss:coreReady'),firstGameFrame:get('ss:firstGameFrame'),earlyCompileEnd:get('ss:earlyCompileEnd'),compileEnd:get('ss:compileEnd')},software:this.softwareRenderer,quality:this.quality};
+  }
+  /** window.__ssPreviewBody(name,distance): build an armour-v2 rig for QA close-ups/silhouettes. */
+  previewBody(name:string|null,distance=10){
+   if(this.qaBody){this.scene.remove(this.qaBody);this.qaBody.traverse(o=>{if(o instanceof THREE.Mesh&&!o.userData.sharedAsset){o.geometry.dispose();}});this.qaBody=null;this.qaBodyRig=null;this.qaBodyActor=null;}
+   if(name===null)return {ok:true,character:null,distance:0};
+   const source=name?this.characterAssets.custom.get(name):undefined;if(!source)return {ok:false,character:name??null,distance,reason:'asset-not-loaded'};
+   const actor={id:'qa-preview-body',kind:'soldier',hp:100,maxHp:100,attackSerial:0,weapon:'sword',appearance:name} as unknown as Actor;
+   const rig=customCharacter(source,actor,this.characterAssets.custom);
+   const group=new THREE.Group();group.add(rig.model);this.scene.add(group);
+   this.qaBody=group;this.qaBodyRig=rig;this.qaBodyActor=actor;this.qaBodyDistance=Math.max(2,Math.min(30,distance));
+   return {ok:true,character:name,distance:this.qaBodyDistance};
+  }
   fire(x:number,z:number,isCamp=false){
    // Flames are drawn from 3 instanced cone meshes; only the data + pooled torch source are kept.
    this.flames.push({x,z,isCamp,seed:Math.random()*20});
@@ -693,7 +851,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.fogTarget.lerp(this.tmpColor.setHex(0x342d42),moor);
    this.fogTarget.lerp(this.tmpColor.setHex(0x6f93b0),crown);
    this.fogTarget.lerp(this.tmpColor.setHex(0x3a1a2e),corruption*0.45);
-   const targetDensity=0.0122*march+0.0208*moor+0.0172*crown+corruption*0.003;
+   const targetDensity=0.0122*march+0.0208*moor+0.0172*crown+corruption*0.003+this.weatherFogAdd;
    const colorBlend=1-Math.exp(-Math.max(0,dt)*1.6);
    this.fogCurrent.lerp(this.fogTarget,colorBlend);this.fog.color.copy(this.fogCurrent);
    this.fog.density+=(targetDensity-this.fog.density)*(1-Math.exp(-Math.max(0,dt)*1.1));
@@ -705,14 +863,18 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.hemi.color.lerp(this.tmpColor2,1-Math.exp(-Math.max(0,dt)*1.2));
    this.tmpColor2.setHex(0x2b3b34).lerp(this.tmpColor3.setHex(0x38323f),moor).lerp(this.tmpColor3.setHex(0x2c3a46),crown);
    this.hemi.groundColor.lerp(this.tmpColor2,1-Math.exp(-Math.max(0,dt)*1.2));
-   this.hemi.intensity=4.7*march+4.0*moor+4.5*crown;
+   this.hemi.intensity=(4.7*march+4.0*moor+4.5*crown)+this.weatherFlash*1.9;
    this.tmpColor2.setHex(0x2a4b40).lerp(this.tmpColor3.setHex(0x3a3446),moor).lerp(this.tmpColor3.setHex(0x334a5c),crown);
    this.ambient.color.lerp(this.tmpColor2,1-Math.exp(-Math.max(0,dt)*1.2));
    this.ambient.intensity=0.55*march+0.5*moor+0.6*crown;
    // Exposure + saturation grade (one cheap postfx pass): crisp March, flatter/desaturated Moor,
    // cooler high-contrast Crown.
-   this.exposureTarget=1.55*march+1.37*moor+1.62*crown;
+   // Keep Night night at every tier: low tier loses bloom/shadow contrast on software renderers,
+   // so pull exposure down slightly instead of letting the whole frame read daylight-flat.
+   const tierExposureBias=this.quality==='low'?-0.09:this.quality==='medium'?-0.03:0;
+   this.exposureTarget=1.55*march+1.37*moor+1.62*crown+tierExposureBias;
    this.renderer.toneMappingExposure+=(this.exposureTarget-this.renderer.toneMappingExposure)*(1-Math.exp(-Math.max(0,dt)*1.0));
+   if(this.weatherFlash>0)this.renderer.toneMappingExposure+=this.weatherFlash*.16;
    const grade=1-Math.exp(-Math.max(0,dt)*1.2);
    this.tmpColor2.setRGB(1.03,1.05,1.0);this.tmpColor3.setRGB(0.94,0.9,1.05);
    const tintR=1.03*march+0.94*moor+0.97*crown, tintG=1.05*march+0.9*moor+1.0*crown, tintB=1.0*march+1.05*moor+1.08*crown;
@@ -827,8 +989,9 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.renderer.info.reset();
    if(time-this.shadowTrimAt>1.5&&time<40){this.shadowTrimAt=time;this.trimShadowCasters();}
    for(const {rig,actor,camp} of this.campRigs)if(camp.visible)rig.update(actor,false,dt);
+   const focusX=this.qaView?this.qaView.x:(me?.x??this.camera.position.x),focusZ=this.qaView?this.qaView.z:(me?.z??this.camera.position.z);
+   this.updateWeather(dt,time,focusX,focusZ);
    this.atmosphere(me,time,dt);
-   const focusX=me?.x??this.camera.position.x,focusZ=me?.z??this.camera.position.z;
    // Billboarded additive flame cards (soft tongue + hot core) + a soft smoke puff card above;
    // per-fire variation, same three draw calls as the old flat cones.
    let flameCount=0;
@@ -939,6 +1102,8 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     this.camera.rotation.set(this.qaView.pitch,-this.qaView.yaw,0,'YXZ');
     this.weapon.visible=false;this.shield.visible=false;
    }
+   if(this.qaBody&&this.qaBodyActor){this.camera.getWorldDirection(this.tmpV);this.qaBody.position.set(this.camera.position.x+this.tmpV.x*this.qaBodyDistance,0,this.camera.position.z+this.tmpV.z*this.qaBodyDistance);this.qaBody.rotation.y=Math.atan2(this.camera.position.x-this.qaBody.position.x,this.camera.position.z-this.qaBody.position.z);this.qaBodyRig?.update(this.qaBodyActor,false,dt);}
+   if(g&&!this.firstGameFrameMarked){this.firstGameFrameMarked=true;try{performance.mark('ss:firstGameFrame');}catch{}}
    if(this.postfx)this.postfx.render();else this.renderer.render(this.scene,this.camera);
   }
 }

@@ -210,6 +210,9 @@ function uvSampleMean(geometry:THREE.BufferGeometry,texture:THREE.Texture):numbe
   const mean=count?sum/count:Infinity;perGeometry.set(texture,mean);return mean;
  }catch{return Infinity;}
 }
+// Armour-vs-cloth classification for cycle-4 character armour prims (materials keep their own
+// embedded baseColor/normal/ORM maps; only tint/rim/PBR factors differ per class).
+const ARMOUR_MATERIAL=/helm|helmet|cuirass|plate|pauldron|armour|armor|chain|mail|bracer|gauntlet|visor|greave|sabaton|gorget|shield|metal|iron|steel/i;
 function repairCharacterMaterials(root:THREE.Object3D){
  root.traverse(object=>{
   if(!(object instanceof THREE.SkinnedMesh))return;
@@ -217,10 +220,11 @@ function repairCharacterMaterials(root:THREE.Object3D){
   for(const material of list){
    if(!material||!material.isMeshStandardMaterial||material.userData.ssReadable)continue;
    material.userData.ssReadable=true;
-   // Sane night-PBR response for the character body (authored values were metal 0 / rough .8).
+   const armour=ARMOUR_MATERIAL.test(material.name||'');
+   // Sane night-PBR response; armour keeps a touch more env response, cloth stays matte.
    material.metalness=Math.min(material.metalness??0,.35);
-   material.roughness=Math.max(material.roughness??1,.65);
-   material.envMapIntensity=Math.max(material.envMapIntensity??1,2);
+   material.roughness=Math.max(material.roughness??1,armour?.6:.65);
+   material.envMapIntensity=Math.max(material.envMapIntensity??1,armour?2.3:2);
    // Non-destructive fallback: only when the map is genuinely black over this mesh's UVs while
    // the atlas itself has content. Kept reversible (originals stashed in userData).
    const map=material.map;
@@ -238,20 +242,21 @@ function repairCharacterMaterials(root:THREE.Object3D){
      material.emissive.copy(stats.color).multiplyScalar(.075);material.emissiveIntensity=1;
     }
    }
-   // Cycle-2 night tone: aim the body's sampled albedo at a fixed target, so a later, darker
-   // asset bake automatically reduces the scale instead of being darkened twice. 84/255 sRGB
-   // is the final calibrated target (≈ −16 % vs the 100 target) that brings the third-person
-   // torso to ~85 mean / ~95 p50 under the night key; the map (and normal/ao/roughness maps)
-   // are left untouched.
+   // Cycle-4 night tone: cloth/body albedo target 81/255 sRGB (cycle-3 was 84) brings the
+   // third-person torso p50 back under 100; armour gets a slightly brighter steel target 85 and
+   // a little more env response so plates read as metal next to darker cloth. Map, normal, AO and
+   // ORM maps are left untouched.
    if(!bypassedMap){
-    const tintSrgb=Math.min(1,Math.max(.62,84/Math.max(24,sampled)));
+    const tintSrgb=Math.min(1,Math.max(.62,(armour?85:81)/Math.max(24,sampled)));
     material.color.multiplyScalar(Math.pow(tintSrgb,2.2));
    }
-   // Cool dusk Fresnel rim, added to outgoing light in the standard material's fragment stage.
+   // Cool dusk Fresnel rim: cloth keeps the stronger silhouette rim, armour a slightly lower one
+   // (its env/specular already separates it); both are additive and scene-independent.
+   const rimColour=armour?'vec3(.30,.40,.55)':'vec3(.28,.36,.46)',rimWeight=armour?.2:.25;
    material.onBeforeCompile=shader=>{
-    shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>','float ssRim=pow(1.0-clamp(dot(normalize(normal),normalize(vViewPosition)),0.0,1.0),2.5);\noutgoingLight+=vec3(.28,.37,.48)*(ssRim*.28);\n#include <opaque_fragment>');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>',`float ssRim=pow(1.0-clamp(dot(normalize(normal),normalize(vViewPosition)),0.0,1.0),2.5);\noutgoingLight+=${rimColour}*(ssRim*${rimWeight});\n#include <opaque_fragment>`);
    };
-   material.customProgramCacheKey=()=>RIM_CACHE_KEY+(material.map?'m':'n');
+   material.customProgramCacheKey=()=>RIM_CACHE_KEY+(armour?'a':'c')+(material.map?'m':'n');
    material.needsUpdate=true;
   }
  });

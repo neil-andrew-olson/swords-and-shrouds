@@ -12,6 +12,10 @@ const REGION_MUSIC=[
 ];
 /** Border hysteresis band (metres around the region midpoint) so wind/foley doesn't flip-flop at seams. */
 const REGION_HYSTERESIS=14;
+/** Weather hook contract from world-scene (window.__ssWeather). All fields optional/defensive. */
+type WeatherState={region?:string;phase?:string;intensity?:number;nextChangeAt?:number;flash?:number};
+type WeatherWindow={__ssWeather?:()=>WeatherState|undefined};
+const WEATHER_VOLUMES=[.055,.06,.05];
 /**
  * Procedural WebAudio ambience + adaptive music. Every layer is synthesised at runtime — no audio
  * files: wind, a horde drone that rises with nearby undead, a plague-nest hum/pad (and a dissonant
@@ -20,6 +24,13 @@ const REGION_HYSTERESIS=14;
  * minor-mode music bed (low drone + detuned string-like pads), and per-region ambience layers:
  * Frozen Crown cold gusting wind/whistle/howl/ice cracks, Ashen Moor ash hiss/rumble/ember pops/
  * distant bells/groans, Green March leaf rustle/insect bed/bird chirps.
+ *
+ * Weather-reactive layers ride on top of that, driven by world-scene's `window.__ssWeather()` hook
+ * (region/phase/intensity/nextChangeAt/flash, polled at ~4 Hz): a rain loop with drop plips and
+ * delayed thunder after lightning (Green March), snowstorm wind howl + high-frequency snow hush
+ * with gusts (Frozen Crown), ash hiss/ember drift/distant groans with haze-driven bus muffling
+ * (Ashen Moor). Weather layers crossfade with the region ambience, duck under combat, fade when
+ * paused/Sound is off, and are lazily built/torn down.
  *
  * The music bed is adaptive: it fades in during exploration, swells near the plague nest and during
  * an active siege, eases down for a while after a castle capture, ducks under combat via duck()
@@ -79,6 +90,32 @@ export class Ambience{
  private emberTimer=4;
  private bellTimer=14;
  private birdTimer=4;
+ // Weather-reactive layers (rain/snow/ash), driven by window.__ssWeather and lazily built per kind.
+ private masterFilter?:BiquadFilterNode;
+ private weatherBus?:GainNode;
+ private weatherFilter?:BiquadFilterNode;
+ private weatherBuilt=false;
+ private weatherGains:(GainNode|undefined)[]=[undefined,undefined,undefined];
+ private weatherSources:AudioScheduledSourceNode[][]=[[],[],[]];
+ private weatherNodes:AudioNode[][]=[[],[],[]];
+ private weatherKindBuilt=[false,false,false];
+ private weatherKindIdle=[0,0,0];
+ private weatherKindActive=-1;
+ private weatherIntensity=0;
+ private weatherIntensityTarget=0;
+ private weatherPhase='';
+ private weatherRegion='';
+ private weatherPollTimer=0;
+ private weatherFlash=0;
+ private weatherFlashSeen=false;
+ private lastLightningAt=0;
+ private lastLightningCount=-1;
+ private thunderAt=0;
+ private thunderDelay=-1;
+ private thunderStrength=0;
+ private plipTimer=1.5;
+ private ashGroanTimer=8;
+ private coverLevel=0;
  private stepTimer=0;
  private beatTimer=0;
  private slowTimer=0;
@@ -86,7 +123,18 @@ export class Ambience{
  private prevZ=0;
  private hasPrev=false;
  private paused=false;
- constructor(private enabled:()=>boolean){}
+ constructor(private enabled:()=>boolean){
+  // Optional lighting hook: world-scene may dispatch 'ss-lightning' instead of (or as well as)
+  // exposing a flash counter; the poll in update() debounces so a strike only thunders once.
+  if(typeof window!=='undefined'){
+   try{
+    window.addEventListener('ss-lightning',((event:Event)=>{
+     const detail=(event as CustomEvent<{intensity?:number;delayMs?:number;count?:number}>).detail;
+     this.lightning(typeof detail?.intensity==='number'?detail.intensity:1,typeof detail?.delayMs==='number'?detail.delayMs:undefined,typeof detail?.count==='number'?detail.count:undefined);
+    }) as EventListener);
+   }catch{}
+  }
+ }
  /** Called from a user gesture. Creates/begins the graph at most once. */
  unlock(){
   if(!this.enabled())return;
@@ -124,7 +172,12 @@ export class Ambience{
   return buffer;
  }
  private build(c:AudioContext){
-  const master=c.createGain();master.gain.value=0;master.connect(c.destination);this.master=master;
+  const master=c.createGain();master.gain.value=0;
+  // Master low-pass is normally transparent, but weather/region haze and standing under castle
+  // stonework muffle the whole ambience bus (music included) for an "under cover" feel.
+  const masterFilter=c.createBiquadFilter();masterFilter.type='lowpass';masterFilter.frequency.value=20000;masterFilter.Q.value=.4;
+  master.connect(masterFilter);masterFilter.connect(c.destination);
+  this.master=master;this.masterFilter=masterFilter;
   this.noise=this.noiseBuffer(c,3,true);this.crackle=this.crackleBuffer(c);
   // Wind: looped pink noise through a slowly breathing low-pass.
   const windFilter=c.createBiquadFilter();windFilter.type='lowpass';windFilter.frequency.value=380;windFilter.Q.value=.6;
@@ -317,6 +370,162 @@ export class Ambience{
   this.regionSources[index]=[];this.regionNodes[index]=[];this.regionGain[index]=undefined;
   this.regionBuilt[index]=false;this.regionIdle[index]=0;
  }
+ // ---- weather-reactive layers (rain/snow/ash), driven by world-scene's window.__ssWeather hook ----
+ /** Poll the weather hook at ~4 Hz and remember its state; fully defensive if it is absent. */
+ private pollWeather(){
+  if(typeof window==='undefined')return;
+  const hook=(window as unknown as WeatherWindow).__ssWeather;
+  if(typeof hook!=='function')return;
+  let weather:WeatherState|undefined;
+  try{weather=hook();}catch{return;}
+  if(!weather)return;
+  this.weatherPhase=typeof weather.phase==='string'?weather.phase:'';
+  this.weatherRegion=typeof weather.region==='string'?weather.region:'';
+  this.weatherIntensityTarget=typeof weather.intensity==='number'?clamp01(weather.intensity):0;
+  const flash=typeof weather.flash==='number'?weather.flash:0;
+  if(!this.weatherFlashSeen){this.weatherFlashSeen=true;this.weatherFlash=flash;}
+  else if(flash<this.weatherFlash)this.weatherFlash=flash;
+  else if(flash>this.weatherFlash){this.weatherFlash=flash;if(this.weatherIntensityTarget>.02)this.lightning(this.weatherIntensityTarget,undefined,flash);}
+ }
+ private weatherKindForPhase(){
+  // Check snow/ash before rain so "snowstorm" classifies as snow, not rain.
+  const phase=this.weatherPhase.toLowerCase();
+  if(/snow|blizzard|frost|hail/.test(phase))return 1;
+  if(/ash|haze|smoke|dust|ember/.test(phase))return 2;
+  if(/rain|storm|shower|drizzle|downpour/.test(phase))return 0;
+  return -1;
+ }
+ private weatherRegionIndex(){
+  const id=this.weatherRegion.toLowerCase();
+  for(let i=0;i<REGIONS.length;i++)if(REGIONS[i].id===id)return i;
+  return this.regionIndex;
+ }
+ /** Schedule a thunder rumble a moment after a lightning flash (from the flash counter or the
+  * optional 'ss-lightning' event). Deduplicated by strike count/timestamp so the same strike only
+  * ever produces one rumble, whether it arrives as an event, a counter bump, or both. */
+ lightning(strength=1,delayMs?:number,count?:number){
+  const stamp=typeof performance!=='undefined'?performance.now():Date.now();
+  if(typeof count==='number'){
+   if(count===this.lastLightningCount)return;
+   this.lastLightningCount=count;
+  }else if(stamp-this.lastLightningAt<2200)return;
+  this.lastLightningAt=stamp;
+  const delay=typeof delayMs==='number'?Math.max(.2,delayMs/1000):1.2+Math.random()*1.4;
+  this.thunderStrength=Math.max(this.thunderStrength,clamp01(strength));
+  const c=this.context;
+  if(c&&this.weatherBuilt)this.thunderAt=Math.max(this.thunderAt,c.currentTime+delay);
+  else this.thunderDelay=Math.max(this.thunderDelay,delay);
+ }
+ private ensureWeather(){
+  const c=this.context,master=this.master;
+  if(!c||!master||this.weatherBuilt)return;
+  const bus=c.createGain();bus.gain.value=1;
+  const filter=c.createBiquadFilter();filter.type='lowpass';filter.frequency.value=20000;filter.Q.value=.4;
+  bus.connect(filter);filter.connect(master);
+  this.weatherBus=bus;this.weatherFilter=filter;this.weatherBuilt=true;
+ }
+ private ensureWeatherKind(kind:number){
+  const c=this.context,bus=this.weatherBus;
+  if(!c||!bus||this.weatherKindBuilt[kind])return;
+  const gain=c.createGain();gain.gain.value=0;gain.connect(bus);
+  const sources:AudioScheduledSourceNode[]=[];const nodes:AudioNode[]=[gain];
+  if(kind===0){
+   // Rain: broadband hiss + a high patter layer.
+   this.noiseLoop(c,'highpass',520,.7,.5,gain,sources,nodes);
+   this.noiseLoop(c,'bandpass',2600,.5,.32,gain,sources,nodes);
+  }else if(kind===1){
+   // Snowstorm: gusting band-passed howl + high-frequency snow hush.
+   const howl=this.noiseLoop(c,'bandpass',380,2.2,.5,gain,sources,nodes);
+   if(howl){
+    const gust=c.createOscillator();gust.type='sine';gust.frequency.value=.09;
+    const gustGain=c.createGain();gustGain.gain.value=130;
+    gust.connect(gustGain);gustGain.connect(howl.filter.frequency);gust.start();sources.push(gust);nodes.push(gustGain);
+   }
+   this.noiseLoop(c,'lowpass',1600,.7,.3,gain,sources,nodes);
+  }else{
+   // Ashen Moor: dry ash hiss + slow ash drift.
+   this.noiseLoop(c,'highpass',2200,.8,.4,gain,sources,nodes);
+   const drift=this.noiseLoop(c,'bandpass',700,1.5,.25,gain,sources,nodes);
+   if(drift){
+    const weave=c.createOscillator();weave.type='sine';weave.frequency.value=.05;
+    const weaveGain=c.createGain();weaveGain.gain.value=60;
+    weave.connect(weaveGain);weaveGain.connect(drift.filter.frequency);weave.start();sources.push(weave);nodes.push(weaveGain);
+   }
+  }
+  this.weatherGains[kind]=gain;this.weatherSources[kind]=sources;this.weatherNodes[kind]=nodes;this.weatherKindBuilt[kind]=true;
+ }
+ private stopWeatherKind(kind:number){
+  if(!this.weatherKindBuilt[kind])return;
+  for(const source of this.weatherSources[kind]){try{source.stop();}catch{}try{source.disconnect();}catch{}}
+  for(const node of this.weatherNodes[kind]){try{node.disconnect();}catch{}}
+  this.weatherSources[kind]=[];this.weatherNodes[kind]=[];this.weatherGains[kind]=undefined;
+  this.weatherKindBuilt[kind]=false;this.weatherKindIdle[kind]=0;
+ }
+ /** Delayed distant thunder rumble (long low tail), scaled by the flash intensity. */
+ private playThunder(strength:number){
+  const c=this.context,bus=this.weatherBus;
+  if(!c||!bus||!this.enabled()||this.paused)return;
+  const now=c.currentTime;
+  const voice=c.createGain();voice.gain.value=1;voice.connect(bus);
+  const nodes:AudioNode[]=[voice];
+  let pending=0;
+  const cleanup=()=>{if(--pending<=0)for(const node of nodes){try{node.disconnect();}catch{}}};
+  const roll=(delay:number,duration:number,peak:number)=>{
+   const noise=this.noise;if(!noise)return;
+   const start=now+delay,source=c.createBufferSource(),filter=c.createBiquadFilter(),gain=c.createGain();
+   source.buffer=noise;filter.type='lowpass';filter.Q.value=.7;
+   filter.frequency.setValueAtTime(200,start);
+   filter.frequency.exponentialRampToValueAtTime(70,start+duration);
+   gain.gain.setValueAtTime(.0001,start);
+   gain.gain.exponentialRampToValueAtTime(Math.max(.0002,peak),start+.08);
+   gain.gain.exponentialRampToValueAtTime(.0001,start+duration);
+   source.connect(filter);filter.connect(gain);gain.connect(voice);nodes.push(filter,gain);
+   pending++;source.onended=cleanup;source.start(start,Math.random()*.5);source.stop(start+duration+.02);
+  };
+  roll(0,1.6+strength*1.2,.006+.022*strength);
+  roll(.35+Math.random()*.6,2+strength*1.8,.004+.016*strength);
+  const osc=c.createOscillator(),oscGain=c.createGain();
+  osc.type='sine';osc.frequency.setValueAtTime(48,now);osc.frequency.exponentialRampToValueAtTime(28,now+2);
+  oscGain.gain.setValueAtTime(.0001,now);
+  oscGain.gain.exponentialRampToValueAtTime(.004+.018*strength,now+.1);
+  oscGain.gain.exponentialRampToValueAtTime(.0001,now+2.2);
+  osc.connect(oscGain);oscGain.connect(voice);nodes.push(oscGain);
+  pending++;osc.onended=cleanup;osc.start(now);osc.stop(now+2.3);
+ }
+ /** Sparse high drop plink on nearby surfaces during rain. */
+ private rainPlip(){
+  const c=this.context,bus=this.weatherBus;
+  if(!c||!bus||!this.enabled()||this.paused)return;
+  const now=c.currentTime,voice=c.createGain();voice.gain.value=1;
+  const nodes:AudioNode[]=[voice];
+  if(typeof c.createStereoPanner==='function'){const panner=c.createStereoPanner();panner.pan.value=Math.random()*1.6-.8;voice.connect(panner);panner.connect(bus);nodes.push(panner);}else voice.connect(bus);
+  const osc=c.createOscillator(),gain=c.createGain();
+  const f=2400+Math.random()*2000;
+  osc.type='sine';osc.frequency.setValueAtTime(f,now);osc.frequency.exponentialRampToValueAtTime(f*.7,now+.09);
+  gain.gain.setValueAtTime(.0001,now);
+  gain.gain.exponentialRampToValueAtTime(.004+.004*this.weatherIntensity,now+.006);
+  gain.gain.exponentialRampToValueAtTime(.0001,now+.1);
+  osc.connect(gain);gain.connect(voice);nodes.push(gain);
+  osc.onended=()=>{for(const node of nodes){try{node.disconnect();}catch{}}};
+  osc.start(now);osc.stop(now+.12);
+ }
+ /** Low distant groan in the ash haze. */
+ private ashGroan(){
+  const c=this.context,bus=this.weatherBus;
+  if(!c||!bus||!this.enabled()||this.paused)return;
+  const now=c.currentTime,voice=c.createGain();voice.gain.value=1;
+  const nodes:AudioNode[]=[voice];
+  if(typeof c.createStereoPanner==='function'){const panner=c.createStereoPanner();panner.pan.value=Math.random()*1.4-.7;voice.connect(panner);panner.connect(bus);nodes.push(panner);}else voice.connect(bus);
+  const osc=c.createOscillator(),gain=c.createGain(),filter=c.createBiquadFilter();
+  filter.type='lowpass';filter.frequency.value=240;
+  osc.type='sawtooth';osc.frequency.setValueAtTime(74+Math.random()*16,now);osc.frequency.exponentialRampToValueAtTime(46,now+1);
+  gain.gain.setValueAtTime(.0001,now);
+  gain.gain.exponentialRampToValueAtTime(.004+.002*this.weatherIntensity,now+.18);
+  gain.gain.exponentialRampToValueAtTime(.0001,now+1.1);
+  osc.connect(filter);filter.connect(gain);gain.connect(voice);nodes.push(filter,gain);
+  osc.onended=()=>{for(const node of nodes){try{node.disconnect();}catch{}}};
+  osc.start(now);osc.stop(now+1.15);
+ }
  /** Sparse, rate-limited regional one-shots (ice cracks, ember pops, distant bells, bird chirps,
   * groans), always very quiet and panned into the distance. */
  private oneShot(kind:'ice'|'ember'|'bell'|'bird'|'groan'){
@@ -449,10 +658,11 @@ export class Ambience{
     const nestD=dist(me,game.nest);
     if(nestD<170){const near=1-nestD/170;nestLevel=near*near*Math.sqrt(near);nestSwell=clamp01(near);}
     if(nestD<260){const near=1-nestD/260;nestPadLevel=near*near*.02;}
-    let fireD=Infinity;
-    for(const castle of game.castles){const d=dist(me,castle);if(d<fireD)fireD=d;}
+    let fireD=Infinity,archD=Infinity;
+    for(const castle of game.castles){const d=dist(me,castle);if(d<fireD)fireD=d;if(d<archD)archD=d;}
     for(const camp of game.camps){const d=dist(me,camp);if(d<fireD)fireD=d;}
     if(fireD<28){const near=1-fireD/28;fireLevel=near*near*(.62+Math.random()*.38);}
+    this.coverLevel=archD<14?clamp01((14-archD)/8):0;
    }
    this.nearbyUndead=undead;
    // Capture easing: the bed eases down for ~24 s after a castle is taken.
@@ -485,6 +695,42 @@ export class Ambience{
      const regionGain=this.regionGain[i];if(regionGain)regionGain.gain.setTargetAtTime(0,now,.4);
      this.regionIdle[i]+=.08;if(this.regionIdle[i]>2.5)this.stopRegion(i);
     }
+   }
+   // ---- weather-reactive layers: poll world-scene's hook, then crossfade the matching bed ----
+   this.weatherPollTimer+=.08;
+   if(this.weatherPollTimer>=.25){this.weatherPollTimer=0;this.pollWeather();}
+   this.weatherIntensity+=(this.weatherIntensityTarget-this.weatherIntensity)*.06;
+   const weatherKind=this.weatherKindForPhase();
+   this.weatherKindActive=weatherKind;
+   const weatherRegionWeight=clamp01(this.regionWeights[this.weatherRegionIndex()]??0);
+   const weatherLevel=enabled?this.weatherIntensity*weatherRegionWeight:0;
+   if(weatherKind>=0&&weatherLevel>.004){this.ensureWeather();this.ensureWeatherKind(weatherKind);}
+   for(let kind=0;kind<3;kind++){
+    const audible=weatherKind===kind&&weatherLevel>.004;
+    const weatherGain=this.weatherGains[kind];
+    if(audible){
+     this.weatherKindIdle[kind]=0;
+     const cover=kind===0?1-.35*this.coverLevel:1;
+     if(weatherGain)weatherGain.gain.setTargetAtTime(weatherLevel*WEATHER_VOLUMES[kind]*cover,now,.6);
+    }else if(this.weatherKindBuilt[kind]){
+     if(weatherGain)weatherGain.gain.setTargetAtTime(0,now,.5);
+     this.weatherKindIdle[kind]+=.08;
+     if(this.weatherKindIdle[kind]>2.5)this.stopWeatherKind(kind);
+    }
+   }
+   const weatherBus=this.weatherBus;
+   if(weatherBus)weatherBus.gain.setTargetAtTime(enabled?1-.7*this.duckLevel:0,now,.12);
+   // Region hue + weather haze muffle the whole ambience bus; castle stonework close by dulls it
+   // further ("under cover" during rain). Weather muffling only applies where that weather is local.
+   const weatherInfluence=weatherKind>=0?clamp01(weatherRegionWeight)*this.weatherIntensity:0;
+   const masterFilter=this.masterFilter;
+   if(masterFilter){
+    let cutoff=20000*(this.regionWeights[0]+this.regionWeights[1]*.55+this.regionWeights[2]*.8);
+    if(weatherKind===1)cutoff*=1-.45*weatherInfluence;
+    else if(weatherKind===2)cutoff*=1-.5*weatherInfluence;
+    else if(weatherKind===0)cutoff*=1-.12*weatherInfluence;
+    if(this.coverLevel>0)cutoff=Math.min(cutoff,2400-900*(1-this.coverLevel));
+    masterFilter.frequency.setTargetAtTime(Math.max(1200,cutoff),now,.4);
    }
    const wind=this.windGain,windFilter=this.windFilter;
    if(wind){
@@ -550,6 +796,21 @@ export class Ambience{
    if(this.iceTimer<=0){this.iceTimer=5+Math.random()*6;if(crownWeight>.35)this.oneShot('ice');}
    if(this.emberTimer<=0){this.emberTimer=3+Math.random()*4;if(moorWeight>.35)this.oneShot(Math.random()<.7?'ember':'groan');}
    if(this.bellTimer<=0){this.bellTimer=11+Math.random()*11;if(moorWeight>.35)this.oneShot('bell');}
+  }
+  // Delayed thunder after a lightning flash (one strike -> one rumble), then rain/ash one-shots.
+  if(this.thunderDelay>=0&&this.weatherBuilt){this.thunderAt=Math.max(this.thunderAt,now+this.thunderDelay);this.thunderDelay=-1;}
+  if(this.thunderAt>0&&now>=this.thunderAt){
+   const strength=this.thunderStrength;this.thunderAt=0;this.thunderStrength=0;
+   this.playThunder(strength);
+  }
+  if(enabled&&playing&&this.weatherKindActive>=0&&this.weatherIntensity>.08){
+   if(this.weatherKindActive===0){
+    this.plipTimer-=dt;
+    if(this.plipTimer<=0){this.rainPlip();this.plipTimer=(2.8-2.1*this.weatherIntensity)*(.6+Math.random()*.8);}
+   }else if(this.weatherKindActive===2){
+    this.ashGroanTimer-=dt;
+    if(this.ashGroanTimer<=0){this.ashGroan();this.ashGroanTimer=(8+Math.random()*10)*(1-.5*this.weatherIntensity);}
+   }
   }
   if(me){
    if(this.hasPrev){

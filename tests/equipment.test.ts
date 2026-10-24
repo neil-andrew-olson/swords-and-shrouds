@@ -1,7 +1,10 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import * as THREE from 'three';import {equipmentModel} from '../src/client/equipment';
 test('weapon fit handles sideways, flat and upright exports without oversized geometry',()=>{for(const dimensions of [[.01,100,.01],[100,.01,.01],[.01,.01,100]]){const source=new THREE.Group();const mesh=new THREE.Mesh(new THREE.BoxGeometry(...dimensions as [number,number,number]),new THREE.MeshStandardMaterial());mesh.position.set(4,8,-6);source.add(mesh);const fit=equipmentModel(source,.9);fit.updateMatrixWorld(true);const size=new THREE.Box3().setFromObject(fit).getSize(new THREE.Vector3());assert.ok(Math.abs(Math.max(size.x,size.y,size.z)-.9)<1e-5);assert.ok(size.y>.89);}});
 import {readFileSync} from 'node:fs';import {gunzipSync} from 'node:zlib';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {customCharacter,undeadEliteTier} from '../src/client/custom-character';import type {Actor} from '../src/shared/types';
-async function geometryAsset(name:string){const b=gunzipSync(readFileSync(`public/assets/custom/${name}.glb.gz`));const len=b.readUInt32LE(12),j=JSON.parse(b.toString('utf8',20,20+len));delete j.images;delete j.textures;delete j.samplers;j.materials=[{}];for(const m of j.meshes)for(const p of m.primitives)p.material=0;let str=JSON.stringify(j);str+=' '.repeat((4-Buffer.byteLength(str)%4)%4);const jb=Buffer.from(str),bin=b.subarray(20+len),h=Buffer.alloc(20);h.write('glTF');h.writeUInt32LE(2,4);h.writeUInt32LE(20+jb.length+bin.length,8);h.writeUInt32LE(jb.length,12);h.writeUInt32LE(0x4e4f534a,16);const all=Buffer.concat([h,jb,bin]);return new GLTFLoader().parseAsync(all.buffer.slice(all.byteOffset,all.byteOffset+all.byteLength),'');}
+async function geometryAsset(name:string){const b=gunzipSync(readFileSync(`public/assets/custom/${name}.glb.gz`));const len=b.readUInt32LE(12),j=JSON.parse(b.toString('utf8',20,20+len));delete j.images;delete j.textures;delete j.samplers;
+ // Keep material names/indices (armour-prim classification) but drop texture references so no image decode is needed.
+ j.materials=(j.materials??[{}]).map((m:any)=>({name:m.name||'mat',doubleSided:!!m.doubleSided,pbrMetallicRoughness:{metallicFactor:m.pbrMetallicRoughness?.metallicFactor??1,roughnessFactor:m.pbrMetallicRoughness?.roughnessFactor??1}}));
+ for(const m of j.meshes)for(const p of m.primitives)if(p.material===undefined)p.material=0;let str=JSON.stringify(j);str+=' '.repeat((4-Buffer.byteLength(str)%4)%4);const jb=Buffer.from(str),bin=b.subarray(20+len),h=Buffer.alloc(20);h.write('glTF');h.writeUInt32LE(2,4);h.writeUInt32LE(20+jb.length+bin.length,8);h.writeUInt32LE(jb.length,12);h.writeUInt32LE(0x4e4f534a,16);const all=Buffer.concat([h,jb,bin]);return new GLTFLoader().parseAsync(all.buffer.slice(all.byteOffset,all.byteOffset+all.byteLength),'');}
 test('actual hand-mounted assets stay human-sized through idle, run, block and attacks',async()=>{const equipment=new Map([['sword',await geometryAsset('sword')],['shield',await geometryAsset('shield')]]);for(const name of ['hero','ally','fallen']){const a={id:'qa',kind:'player',hp:100,maxHp:100,attackSerial:0,armor:'light',block:false} as Actor;const rig=customCharacter(await geometryAsset(name),a,equipment);for(let i=0;i<90;i++){a.block=i>30&&i<45;if(i===50)a.attackSerial=1;rig.update(a,i>10&&i<30,1/30);rig.model.updateMatrixWorld(true);for(const part of ['sword','shield']){const o=rig.model.getObjectByName('equipment-'+part)!;assert.ok(o);const size=new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3());assert.ok(size.length()<1.5,`${name} ${part} ${size.toArray()}`);}}rig.dispose();}});
 
 import {WEAPON_IDS,WEAPONS} from '../src/shared/weapons';
@@ -49,6 +52,71 @@ test('all nine animated bodies stay grounded through idle, movement, block and a
   for(let i=0;i<20;i++){rig.update(actor,i>6&&i<12,1/30);const b=meshBounds(rig.model);assert.ok(Math.abs(b.min.y)<.07,asset+' elite ground '+i+' '+b.min.y);assert.ok(b.max.y<2.35,asset+' elite height '+b.max.y);}
   rig.dispose();
   if(asset!=='fallen'){const normal=customCharacter(await geometryAsset(asset),{...actor,id:'plain',x:400,z:400,castle:undefined,maxHp:52},new Map());assert.equal(normal.model.getObjectByName('undead-elite-addon'),undefined,asset+' normal has no add-on');normal.dispose();}
+ }
+ // Cycle-4 armour v2: every body prim shares the one skin, keeps skinned bounds inside the body
+ // envelope (no floating/offset origins), preserves hand sockets + clips and the ≤16k tri budget.
+ for(const name of ['templar','hero','berserker','ranger','ally','survivor','fallen']){
+  const source=await geometryAsset(name);
+  const actor={id:'armour-'+name,name:'Armour',kind:name==='fallen'?'corrupted':'player',hp:100,maxHp:100,weapon:'sword',attackSerial:0} as Actor;
+  const rig=customCharacter(source,actor,new Map());
+  rig.update(actor,false,1/30);rig.model.updateMatrixWorld(true);
+  const prims:THREE.SkinnedMesh[]=[];rig.model.traverse(o=>{if(o instanceof THREE.SkinnedMesh)prims.push(o);});
+  assert.ok(prims.length>=2,name+' has body + armour prims ('+prims.length+')');
+  const skeleton=prims[0].skeleton;skeleton.update();
+  const trisOf=(prim:THREE.SkinnedMesh)=>{const g=prim.geometry;return (g.index?g.index.count:g.attributes.position.count)/3;};
+  const bodyPrim=prims.reduce((best,prim)=>trisOf(prim)>trisOf(best)?prim:best,prims[0]);
+  const skinnedBox=(prim:THREE.SkinnedMesh)=>{prim.skeleton.update();const box=new THREE.Box3(),v=new THREE.Vector3(),positions=prim.geometry.attributes.position;for(let i=0;i<positions.count;i++){prim.getVertexPosition(i,v);box.expandByPoint(v.applyMatrix4(prim.matrixWorld));}return box;};
+  const bodyBox=skinnedBox(bodyPrim);let totalTris=0,armourHeadWeight=0,plateCount=0;
+  const materialName=(prim:THREE.SkinnedMesh)=>(Array.isArray(prim.material)?prim.material:[prim.material]).map((material:{name?:string})=>material.name||'').join('|');
+  for(const prim of prims){
+   totalTris+=trisOf(prim);
+   assert.equal(prim.skeleton.bones.length,skeleton.bones.length,name+' armour prims share one skeleton');for(let bone=0;bone<skeleton.bones.length;bone++)assert.equal(prim.skeleton.bones[bone],skeleton.bones[bone],name+' shared joint '+bone);
+   const geometry=prim.geometry;
+   assert.ok(geometry.attributes.skinIndex&&geometry.attributes.skinWeight,name+' prim JOINTS/WEIGHTS');
+   const indices=geometry.attributes.skinIndex as THREE.BufferAttribute,weights=geometry.attributes.skinWeight as THREE.BufferAttribute;
+   const step=Math.max(1,Math.floor(indices.count/400));
+   for(let i=0;i<indices.count;i+=step){
+    assert.ok(Math.abs(weights.getX(i)+weights.getY(i)+weights.getZ(i)+weights.getW(i)-1)<2e-2,name+' prim weight sum '+i);
+    for(const component of [0,1,2,3])assert.ok(indices.getComponent(i,component)<skeleton.bones.length,name+' prim joint index');
+   }
+   const box=skinnedBox(prim),centre=box.getCenter(new THREE.Vector3());
+   // No floating/offset origins: each prim overlaps the actual body volume (not the union).
+   assert.ok(centre.x>bodyBox.min.x-.4&&centre.x<bodyBox.max.x+.4&&centre.z>bodyBox.min.z-.4&&centre.z<bodyBox.max.z+.4,name+' prim centre not floating xz');
+   assert.ok(box.min.y>-.08,name+' prim above ground '+box.min.y);
+   assert.ok(box.max.y<bodyBox.max.y+.25,name+' prim within body height '+box.max.y);
+   if(prim!==bodyPrim){
+    const mats=materialName(prim);
+    // Armour v2 folds the old small add-ons into these prims (no duplicate addon prims).
+    assert.ok(!/_addon/i.test(mats),name+' old add-on folded ('+mats+')');
+    assert.ok(box.intersectsBox(bodyBox),name+' '+(mats||'addon')+' overlaps the body');
+    if(/_plate/i.test(mats))plateCount++;
+    // Weighted-bone semantics: plates and cloth must ride upper-body/torso anthropomorphic joints.
+    let dominant=0,allowed=0;
+    for(let i=0;i<indices.count;i+=step){
+     let bestComponent=0,bestWeight=0;
+     for(const component of [0,1,2,3]){const weight=weights.getComponent(i,component);if(weight>bestWeight){bestWeight=weight;bestComponent=component;}}
+     if(bestWeight<.4)continue;
+     const bone=prim.skeleton.bones[indices.getComponent(i,bestComponent)];
+     const boneName=(bone?.name??'').replace(/^mixamorig:?/i,'').toLowerCase();
+     dominant++;
+     if(/arm|shoulder|spine|chest|head|neck|clavicle|forearm|hand|hips|pelvis/.test(boneName))allowed++;
+     if(/head|neck/.test(boneName))armourHeadWeight+=bestWeight;
+    }
+    if(/_plate/i.test(mats))assert.ok(dominant>0&&allowed/dominant>.8,name+' plate skinned to armour bones '+allowed+'/'+dominant);
+    if(/_cloth/i.test(mats))assert.ok(dominant>0&&allowed/dominant>.8,name+' cloth skinned to torso bones '+allowed+'/'+dominant);
+   }
+  }
+  assert.ok(plateCount>=1,name+' has an armour plate prim');
+  assert.ok(armourHeadWeight>0,name+' armour prim includes head/neck weighting');
+  if(name==='fallen')assert.ok(rig.model.getObjectByName('undead-elite-addon') instanceof THREE.SkinnedMesh,name+' elite add-on still present');
+  assert.ok(totalTris<=16000,name+' total tri budget '+totalTris);
+  for(const socket of ['mixamorigRightHand','mixamorigLeftHand']){
+   const found=rig.model.getObjectByName(socket)||rig.model.getObjectByName('mixamorig:'+socket.replace('mixamorig',''));
+   assert.ok(found,name+' hand socket '+socket);
+  }
+  const clips=new Set(source.animations.map((clip:{name:string})=>clip.name));
+  for(const clip of ['idle','run','attack_1','attack_2','block_idle','death_forward'])assert.ok(clips.has(clip),name+' clip '+clip);
+  rig.dispose();
  }
 });
 

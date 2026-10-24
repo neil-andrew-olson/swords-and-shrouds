@@ -397,6 +397,52 @@ export const REGION_IDENTITY = {
   standingStones: STANDING_STONES.length
 } as const;
 
+// ---------------------------------------------------------------------------------------------
+// Cycle-4 lived-in props: big stone wells (castle courtyards + camps) and blacksmith stalls (Green
+// March village landmark + a camp) with smithy dressing from the existing barrel/crate assets.
+// These reuse the same distance-culled instanced dressing path.
+// ---------------------------------------------------------------------------------------------
+
+export interface PropPlacement {
+  x: number;
+  z: number;
+  yaw: number;
+}
+
+/** Stone wells: one in each region's keep courtyard + one at a regional camp (two per region). */
+export const STONE_WELLS: readonly PropPlacement[] = [
+  {x: -6, z: -4, yaw: 0.4},
+  {x: 12, z: -30, yaw: 1.9},
+  {x: -6, z: -244, yaw: 2.6},
+  {x: 12, z: -270, yaw: 0.9},
+  {x: -6, z: -484, yaw: 4.1},
+  {x: -30, z: -446, yaw: 5.3}
+];
+
+/** Blacksmith stalls: beside the Green March village landmark and at the Green crossing camp. */
+export const BLACKSMITH_STALLS: readonly PropPlacement[] = [
+  {x: 48, z: 4, yaw: 2.4668},
+  {x: 32, z: -37, yaw: -Math.PI / 2}
+];
+
+/** Smithy dressing: one barrel cluster + one crate per stall (existing shipped assets). */
+export const SMITHY_BARRELS: readonly PropPlacement[] = [
+  {x: 43.5, z: -0.5, yaw: 0.6},
+  {x: 27.5, z: -41.5, yaw: 3.9}
+];
+
+export const SMITHY_CRATES: readonly PropPlacement[] = [
+  {x: 43.5, z: 2, yaw: 1.4},
+  {x: 27.5, z: -37, yaw: 4.7}
+];
+
+export const CYCLE4_PROPS = {
+  wells: STONE_WELLS.length,
+  blacksmithStalls: BLACKSMITH_STALLS.length,
+  smithyBarrels: SMITHY_BARRELS.length,
+  smithyCrates: SMITHY_CRATES.length
+} as const;
+
 function landmarkPose(key: LandmarkKey, cx: number, cz: number, height: number, tx: number, tz: number, ty: number) {
   const dx = tx - cx;
   const dz = tz - cz;
@@ -1069,7 +1115,12 @@ export function addRuins(scene: THREE.Scene): {
     placeRegionLandmarks(),
     placeRegionPropAsset('dead_tree', DEAD_TREES, 'regionprops:dead_tree'),
     placeRegionPropAsset('ice_shard', ICE_SHARDS, 'regionprops:ice_shard'),
-    placeRegionPropAsset('standing_stone', STANDING_STONES, 'regionprops:standing_stone')
+    placeRegionPropAsset('standing_stone', STANDING_STONES, 'regionprops:standing_stone'),
+    // cycle 4: lived-in wells + blacksmith stalls + smithy dressing (existing barrel/crate assets)
+    placeDressingAsset('stone_well', STONE_WELLS, 1.7, 'dressing:wells', {scaleVariance: true}),
+    placeDressingAsset('blacksmith_stall', BLACKSMITH_STALLS, 2.6, 'dressing:stalls'),
+    placeDressingAsset('barrels', SMITHY_BARRELS, 1.45, 'dressing:smithy-barrels', {scaleVariance: true}),
+    placeDressingAsset('chest', SMITHY_CRATES, 0.57, 'dressing:smithy-crates', {scaleVariance: true})
   ]).catch((error) => console.warn('[ruins] asynchronous placement failed', error));
   buildBanners();
   buildFlames();

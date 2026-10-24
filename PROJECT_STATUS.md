@@ -10,7 +10,7 @@ The user asked to keep cycling improvements until the game is AAA level. Every c
 defects, raise visual fidelity and performance, verify with the headless QA suite, deploy and
 verify live. Never relax these gates:
 `npm test` **58/58** (extend tests in place only), `npx tsc --noEmit` 0 errors, `vite build` green
-with bundled Node 24, `scripts/validate-assets.mjs` all pass, headless smoke 16/16 + perf capture +
+with bundled Node 24, `scripts/validate-assets.mjs` all pass, headless smoke 16+/16 + perf capture +
 co-op 18/18 + live-URL mode, QA inspects screenshots with read_image, Lead commits/pushes/deploys
 and verifies the live bundle.
 
@@ -19,87 +19,85 @@ and verifies the live bundle.
 `C:\Users\neil\Documents\deepseek-harness\default-workspace\swords-and-shrouds\`; always link
 workspace-relative paths and/or use the `present` tool.
 
-**Process discipline:** teammates must kill only their own PIDs (`Stop-Process -Id` / `/PID`), never
+**Process discipline:** teammates kill only their own PIDs (`Stop-Process -Id` / `/PID`), never
 broad `taskkill /IM node.exe`. One dist builder at a time; QA owns authoritative captures.
 
-## Latest completed cycle — 2026-10F cycle 3: regional identity, new content, foliage/fire fixes
+## Latest completed cycle — 2026-10G cycle 4: armour v2, weather systems, tone/HUD fixes
 
-Contract: `docs/BATCH-2026-10F-SPEC.md`; results: `docs/BATCH-2026-10F-RESULTS.md`; QA evidence in
-`docs/QA-REPORT.md`. Final bundle `dist/client/assets/index-j2KTUVMP.js` (840,799 B), reproduced by a
+Contract: `docs/BATCH-2026-10G-SPEC.md`; results: `docs/BATCH-2026-10G-RESULTS.md`; QA evidence in
+`docs/QA-REPORT.md`. Final bundle `dist/client/assets/index-CZ8DITNA.js` (861,937 B), reproduced by a
 fresh build.
 
-### Regional identity (QA's #1 gap)
+### Character / armour identity v2
 
-Per-region atmosphere/grading with smooth border lerps and QA-camera-aware `__ssRegionInfo()`:
-- Green March fog `#1e4038` d 0.0122, moon 2.7, exposure 1.55, sat 1.05 (pine/oak/maple, stones)
-- Ashen Moor fog `#342d42` d 0.0208, moon 2.1, exposure 1.37, sat 0.82 (dead trees, chapel, ash)
-- Frozen Crown fog `#6f93b0` d 0.0172, moon 2.55, exposure 1.62, sat 1.12 (snow pines, patches,
-  watchtower)
-QA numeric distinctness: pairwise RGB colour distance 9.36 / 31.5 / 32.2, luminance spread 15.1.
-Ground decals (snow/ash/grass, feathered alpha, 72 m cull), region grass/tuft tint, snow flakes.
+All 7 player/companion bodies now have distinct full armour silhouettes as extra skinned prims on the
+existing Mixamo rigs (single skin, 6 clips, hand sockets; body/anim data hash-identical):
+templar great-helm+cuirass+tabard, hero visored helm+knight cuirass, ally helm+tabard, berserker
+horned helm+fur shoulders, ranger hood+cloak+quiver, survivor ragged cloak+pack, fallen crest helm+
+spiked plate. `<body>_plate`/`<body>_cloth` prims with 512 albedo + 256 normal/ORM maps; runtime
+plate/cloth tone split. 8,749–9,388 tris/body, 652.8–687.8 KB. QA: 7/7 distinct 10 m silhouettes,
+body-mask torso mean 85.7 / p50 71.3, close-up body-mask colours 607–874 (gate ≥300), clip 0 %.
+
+### Dynamic regional weather
+
+180–330 s phase machines with pooled quality-tiered particles:
+- Green March clear → light-rain → downpour (228→550 rain streaks, splashes, wet-road sheen,
+  lightning + delayed thunder);
+- Ashen Moor calm → ashfall → haze (4→14 ash/haze banks, embers, gusts);
+- Frozen Crown clear → snow → snowstorm (pooled snow, fog +0.0045×intensity, gusts).
+`__ssWeather()` / `__ssSetWeather(region,phase,intensity)` + `ss-weather|ss-lightning|ss-thunder`
+window events drive weather-reactive audio (rain beds/plips/thunder, snow hush/howl, ash hiss/groans,
+under-cover muffling). Low tier = zero weather particles while state still publishes.
+
+### Tone / framing / night mood / HUD
+
+- Foliage desaturated (leaves HSL sat ×0.8 / light ×0.86; maple sat ×0.42, share 55 %→35 %).
+- `region-crown` camera moved out of the canopy; night mood verified (spawn TP canvas mean 51.6–60.9).
+- Software renderers default to LOW quality (unless user saved a choice) with a tier exposure bias so
+  night still reads; high tier keeps cycle-3 lighting.
+- `__ssLoadTimings()` marks + click→HUD **158 ms**, click→state **1,505 ms**, join **3.40 s**;
+  nav→HUD 17.84 s is QA landing idle, documented. Real-GPU async shader warmup engages where
+  `KHR_parallel_shader_compile` exists (SwiftShader can't).
 
 ### New content
 
-- Card foliage v2: `pine_v2` 1,272 tris, `snow_pine` 1,286, `oak_v2` 514, `maple` 514 (alpha-MASK
-  leaf cards; one band for all distances; no LOD seam). Two bugs fixed: leaf alpha was mostly below
-  the 0.42 MASK cutoff (re-baked near-binary alpha, 34–46 % coverage, pine +15 % brightness), and
-  the client filter dropped leaf prims (`__ssPerf().landscape.treeDebug` proves bark+leaves render).
-- Props: `dead_tree` 464 tris bark-only, `standing_stone` 63, `ice_shard` 108.
-- Landmarks: `chapel_ruin` 13,810 tris, `watchtower_ruin` 9,817, `village_house_ruin` 2,475 —
-  1 prim / 1 embedded 1024 night texture each, ground-centred. Placed one per region: Green village
-  house + 8-stone circle **(56, −6)** (65 m from spawn), Ashen chapel **(−36, −228)**, Frozen
-  watchtower **(−34, −472)** on an outcrop; scatter dead_tree ×12 / ice_shard ×12 / stones ×13.
-- Elite undead: procedural tiered crowns/crests/shoulder spikes + eye glow (one rigid-skinned add-on
-  per elite: 32/76/84 tris), eyes now render for shrouded undead; QA diff 31.1 luminance / 88.9 %.
-- Fire/smoke: additive sprite flames (soft+core), pale additive smoke plume, embers; corruption
-  decals feather-masked, nest-only.
-- Audio: region-specific ambience layers with hysteresis and crossfades (Frozen wind/ice, Ashen
-  ash/embers/bells, Green rustle/insects/birds) + per-region music tint; lazy build/teardown.
-- QA additions: `__ssRegionInfo`, `landmark-*`, `foliage`, `corruption`, `wind` views,
-  `__ssEliteUndeadIds/Info`, `landscape.treeDebug`, region-distinctness/wind/time-to-HUD gates.
+`stone_well` (warehouse scan) ×6 in courtyards/camps; `blacksmith_stall` ×2 (procedural forge) at the
+Green village landmark + camp with barrel/crate dressing; +4 instanced draws, ~52 k tris map-wide.
 
 ### Verification (final build)
 
-- `npm test` **58/58**; `tsc` 0; clean build reproduced `index-j2KTUVMP.js`; `validate-assets`
-  **74/74**.
-- Perf **195 calls / 1,666,828 tris** (gates <230 / <1.9 M); FP 153 / 1.55 M; low 153 / 1.36 M;
-  payload 15.06 MB. Fresh-build smoke **16/16** + hash proof; co-op **18/18**.
-- Visual re-verification: foliage canopies, soft moon, additive smoke, relocated landmark, decals,
-  regional identity all confirmed fixed (no giant planes, no opaque smoke domes, no grey moon disc).
-- **Debt (documented):** time-to-HUD still 18.5/17.1 s under SwiftShader (gate 15.0; landing improved
-  3.56→3.28 s, join 3.84 s; high sample variance); character torso p50 102.4 vs 100 (mean 91.5,
-  close-ups unchanged); green foliage reads bright/saturated; crown QA-view has a canopy over ~40 %
-  of frame.
+- `npm test` **58/58**; `tsc` 0; clean build reproduced `index-CZ8DITNA.js`; `validate-assets` **76/76**.
+- Perf spawn TP **206 calls / 1,708,376 tris** (gates <260 / <1.95 M); FP 160 / 1.59 M; low 160 /
+  1.40 M; payload **15.76 MB**. QA: armour+elite 27/27, weather pass (crown snow density weak),
+  tone/framing pass, perf 34/34, fresh-build 17/17 + hash proof, co-op 18/18, live baseline 18/18.
+- **Debts:** armour plate art richness (1024 atlas, triplanar UVs, sculpted detail), crown snowstorm
+  density/visibility, `__ssPreviewBody` synthetic-body framing bug, survivor identity, region-crown
+  camera sits in the moor↔crown blend band, real-GPU/perceptual/controller/mobile playtests.
 
-### Cycle-4 (next) — from the cycle-3 audit
+### Cycle-5 (next) — from the audit
 
-1. **Time-to-HUD / real-GPU profiling**: shader compile/warmup, code splitting, defer HUD-only work,
-   measure on a real GPU where possible; treat SwiftShader numbers with a variance band.
-2. **Regional tone refinement**: reduce green-pine/maple saturation for night (or tint maple), tune
-   crown QA camera framing.
-3. **New character/armour models** from the warehouse (character variety is the largest remaining
-   art gap), potentially one distinct armour set per archetype.
-4. **Weather systems** (rain/snowstorm/fog banks as regional events), more structures/content, and
-   richer combat/feedback polish.
-5. **Character torso p50** marginal gate re-baseline + smoke/flame close-up inspection.
+1. Armour art pass: 1024 atlas for low-variety bodies, hue-separated patina/trim, world-scale/triplanar
+   plate UVs, better plate silhouettes; survivor-specific rig identity.
+2. Frozen Crown snowstorm density + snow particle counter; weather polish.
+3. Fix `__ssPreviewBody` framing hook; region-crown pose fully inside crown.
+4. Combat/content depth: more enemy variety (warehouse models), siege/campaign objectives polish.
+5. Real-GPU profiling, controller/mobile support, perceptual audio pass.
 
 ## Previous cycles
 
+- **2026-10F cycle 3** (`docs/BATCH-2026-10F-RESULTS.md`): regional identity (fog/grading/foliage/
+  decals), warehouse card foliage + landmark ruins, elite undead, fire/smoke sprites, region audio,
+  loading rework; 195 calls / 1.667 M tris.
 - **2026-10E cycle 2** (`docs/BATCH-2026-10E-RESULTS.md`): character material v2 (normal/ORM maps,
   silhouettes), quantised-ruin geometry fix, near/far trees, tent/wall shadows, atmosphere, keep
-  atlas merge (45→9 draws), adaptive audio; 169 calls / 1.66 M tris.
+  atlas merge (45→9 draws), adaptive audio.
 - **2026-10D cycle 1** (`docs/BATCH-2026-10D-RESULTS.md`): fixed blacked-out characters (UV0 rebuild
-  + baked atlases + rim), restored shadows, 301→173 draw calls / 1.76 M→1.50 M tris, tree & tower
-  LODs, doc-link fix.
+  + baked atlases + rim), restored shadows, 301→173 draw calls, tree & tower LODs, doc-link fix.
 - **2026-10C performance & smoothness** (`docs/BATCH-2026-10C-RESULTS.md`): payload 43.5→9.47 MB,
-  initial preload 12.2→4.71 MB, draw calls 88,544→301, triangles 4.04 M→1.76 M, quality tiers,
-  progressive loading, tree/ruin instancing, prop atlas batching.
-- **2026-10B readability/combat feel/arsenal/co-op QA** (`docs/BATCH-2026-10B-RESULTS.md`):
-  night-sky fix, combat FX/trails, two new weapons (flamberge, mace — 10 total), camp tents and
-  ruined walls, audio stingers, co-op test harness.
-- **2026-10 objectives 1–5 battlefield overhaul** (`docs/BATCH-2026-10-RESULTS.md`): scanned
-  road/cobblestone surfaces, ruins/modular keeps, 3 new weapons (rapier/halberd/dane axe), scatter,
-  post-FX/atmosphere/audio. Asset pipeline + attribution in `docs/ASSET-PIPELINE.md`.
+  draw calls 88,544→301, triangles 4.04 M→1.76 M, quality tiers, progressive loading.
+- **2026-10B readability/combat/arsenal/co-op QA** (`docs/BATCH-2026-10B-RESULTS.md`) and the
+  **2026-10 objectives 1–5 battlefield overhaul** (`docs/BATCH-2026-10-RESULTS.md`); asset pipeline +
+  attribution in `docs/ASSET-PIPELINE.md`.
 
 ## Hosting / deployment
 
@@ -109,11 +107,11 @@ Ground decals (snow/ash/grass, feathered alpha, 72 m cull), region grass/tuft ti
 - Build locally with bundled Node v24.21.0
   (`C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe`; prepend its
   dir to PATH), then `& $node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build`
-  in the hosting repo. The system Node 22.11 is below Vite 7's floor.
+  in the hosting repo. System Node 22.11 is below Vite 7's floor.
 - Local play: `$env:PORT=3000; node --import tsx src/server/index.ts` from the game repo (serves
   `dist/client` at http://localhost:3000/). Because the hosting build can leave `.game-build` in
   detached HEAD, always `git checkout main` (and fast-forward `main`) before committing docs.
-- Cycle-3 deployment: see commit history (`feat: AAA cycle 3 …` then hosting pin commit).
+- Cycle-4 deployment: see commit history (`feat: AAA cycle 4 …` then hosting pin commit).
 
 ## Continuity procedure
 

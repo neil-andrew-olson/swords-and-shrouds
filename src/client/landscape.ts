@@ -39,15 +39,17 @@ export function addLandscape(scene: THREE.Scene) {
   }
 
   const windUniform = { value: 0 };
+  const gustUniform = { value: 1 };
   const addWind = (mat: THREE.Material, scale = 0.38, power = 1.3, minY = 0) => {
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uWindTime = windUniform;
-      shader.vertexShader = 'uniform float uWindTime;\n' + shader.vertexShader;
+      shader.uniforms.uWindGust = gustUniform;
+      shader.vertexShader = 'uniform float uWindTime;\nuniform float uWindGust;\n' + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         `
         #include <begin_vertex>
-        float sway = pow(max(0.0, position.y - ${minY.toFixed(2)}), ${power.toFixed(2)}) * ${scale.toFixed(2)};
+        float sway = pow(max(0.0, position.y - ${minY.toFixed(2)}), ${power.toFixed(2)}) * ${scale.toFixed(2)} * uWindGust;
         float windPhase = uWindTime * 2.6 + (transformed.x + position.x) * 0.35 + (transformed.z + position.z) * 0.35;
         transformed.x += sin(windPhase) * sway + cos(windPhase * 0.6) * sway * 0.3;
         transformed.z += cos(windPhase * 0.85) * sway * 0.65;
@@ -162,7 +164,20 @@ export function addLandscape(scene: THREE.Scene) {
       // Card atlases are authored for the night palette: keep canopies readable (no 0.32 crush).
       const leafMap = mat.map;
       if (leafMap) { leafMap.anisotropy = 4; leafMap.needsUpdate = true; }
-      if (foliage) { mat.color.multiplyScalar(1.28); mat.envMapIntensity = 1.35; mat.metalness = 0; mat.alphaTest = Math.max(mat.alphaTest, 0.42); mat.side = THREE.DoubleSide; if (mat.emissive) mat.emissive.copy(mat.color).multiplyScalar(0.05); addWind(mat, 0.12, 1.2, 0.8); }
+      if (foliage) {
+        mat.color.multiplyScalar(1.05);
+        const hsl = {h: 0, s: 0, l: 0};
+        mat.color.getHSL(hsl);
+        // Night tone: no neon canopies. Maple pulled harder toward muted autumn forest.
+        const maple = /maple/i.test(name);
+        mat.color.setHSL(hsl.h, hsl.s * (maple ? 0.42 : 0.8), hsl.l * (maple ? 0.64 : 0.86));
+        mat.envMapIntensity = 1.05;
+        mat.metalness = 0;
+        mat.alphaTest = Math.max(mat.alphaTest, 0.42);
+        mat.side = THREE.DoubleSide;
+        if (mat.emissive) mat.emissive.copy(mat.color).multiplyScalar(0.03);
+        addWind(mat, 0.12, 1.2, 0.8);
+      }
       else { mat.color.multiplyScalar(0.9); mat.envMapIntensity = 0.7; }
     } else if (foliage) { mat.color.multiplyScalar(0.32); mat.envMapIntensity = 0.22; mat.roughness = 1; mat.metalness = 0; mat.alphaTest = Math.max(mat.alphaTest, 0.42); const leafMap = mat.map; if (leafMap) { leafMap.anisotropy = 4; leafMap.needsUpdate = true; } addWind(mat, 0.12, 1.2, 0.8); }
     else { mat.color.multiplyScalar(0.72); mat.envMapIntensity = 0.45; mat.metalness = 0; }
@@ -227,7 +242,7 @@ export function addLandscape(scene: THREE.Scene) {
   const variantOf = (t: { x: number; z: number; isPine: boolean }): 'pine' | 'oak' | 'maple' | 'snow' => {
     if (t.z < -405) return 'snow';
     if (t.z < -245) return t.isPine ? 'pine' : 'oak';
-    if (!t.isPine && (Math.floor(Math.abs(t.x) * 7 + Math.abs(t.z) * 13) % 100) < 55) return 'maple';
+    if (!t.isPine && (Math.floor(Math.abs(t.x) * 7 + Math.abs(t.z) * 13) % 100) < 35) return 'maple';
     return t.isPine ? 'pine' : 'oak';
   };
 
@@ -462,6 +477,7 @@ export function addLandscape(scene: THREE.Scene) {
   const treelineVantage = {x: bestTree.x + ax * 7, z: bestTree.z + az * 7, lookX: cx, lookZ: cz};
   return {
     treeline: treelineVantage,
+    setWindStrength: (g: number) => { gustUniform.value = Math.max(0.4, Math.min(2.6, g)); },
     update: (time: number, focusX = 0, focusZ = 0) => {
       windUniform.value = time;
       // Reassign instance matrices only when the camera has moved a few metres (or every 2.5 s as a

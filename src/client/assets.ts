@@ -44,7 +44,8 @@ export class CharacterAssets {
     catch(error){this.loadError=error;console.warn('Character asset failed',name,error);}
     finally{this.progress.loaded++;}
    };
-   this.coreReady=Promise.all(core.map(load)).then(()=>{this.customLoaded=true;});
+   try{performance.mark('ss:coreStart');}catch{}
+   this.coreReady=Promise.all(core.map(load)).then(()=>{this.customLoaded=true;try{performance.mark('ss:coreReady');}catch{}});
    this.customReady=this.coreReady.then(async()=>{
     for(const name of extras){await load(name);await new Promise<void>(resolve=>setTimeout(resolve,0));}
    }).then(()=>undefined);

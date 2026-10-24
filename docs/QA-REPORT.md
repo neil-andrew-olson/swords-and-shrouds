@@ -1257,3 +1257,164 @@ torso p50 documented above). Live verification runs:
 **Cycle-3 live deployment is verified end-to-end: green, with the Lead-approved time-to-HUD debt.**
 task-45 complete; cycle-4 candidates: regional tone refinement (maple/green saturation), real-GPU
 HUD profiling, torso-p50 tone, `region-crown` QA-view framing, content expansion.
+
+---
+
+## Iteration cycle 2026-10G (AAA loop, cycle 4) — armour v2, weather, tone/HUD debt (in progress)
+
+Cycle 4 targets character/armour identity v2 (7 distinct bodies), regional dynamic weather, the
+cycle-3 tone debts (foliage/maple saturation, crown framing, torso p50), new props (stone well,
+blacksmith stall), weather audio, and time-to-HUD.
+
+### Harness additions (`scripts/smoke-browser.mjs`)
+
+- **Weather audit (new):** captures each region at **low + high intensity** via
+  `__ssWeather()` + a QA forcing hook (`__ssSetWeather`/`__ssWeatherForce`-family, `null` restores),
+  plus a **low-quality-tier high-intensity** screenshot to prove weather particles are quality-gated.
+  Records weather state + particle counts (low < high and low-tier minimal gates when the hook
+  exposes counts); saves `weather-<rain|ash|snow>-<low|high>.png` + `weather-lowtier-snow-high.png`.
+- **Character armour v2:** cycles **all 7 bodies** (`templar|hero|berserker|ranger|ally|survivor|fallen`);
+  the 5 playable appearances use the in-game character select, survivor/fallen use world-scene's QA
+  `__ssPreviewBody(assetName,{distance})` hook (reported if absent). Captures a **close-up** and a
+  **10 m third-person silhouette** per body (`char-<name>-closeup.png` / `char-<name>-10m.png`),
+  keeps the cycle-2 tone gates; keyed to the Lead's cycle-4 decision the close-up gate is
+  **body-mask unique colours ≥300**, the **full close-up frame colour count is the headline detail
+  metric**, and the SPEC ≥500 body-mask target is documented as deferred art debt (asset-forge 1024
+  atlas in cycle 5 — not worth +1.3 MB payload now); elite-undead regression retained.
+- **Tone metrics:** region/foliage stats now include **mean saturation** (`meanSat`, `p90Sat`) so the
+  green/maple desaturation and crown framing fixes can be measured against cycle-3 references.
+- **Torso-tone re-baseline (Lead-approved):** the primary in-game torso gate now measures the
+  **character body-mask** (background sampled from the crop's edge strips; character pixels selected
+  by colour/luminance difference; reports mean/p50/p90/black %/maskPct/unique colours). The fixed
+  centre crop is **informational only** — cycle-4 background/foliage dominates it (weapons-armory
+  measured fixed-crop p50 124.5 while body-mask close-ups were mean 82–100 / p50 77–100). Gate window
+  unchanged: mean 65–95 / p50 60–100 / black<25 %.
+- **Night-mood gate (Lead):** `night: third-person scene stays a night scene (canvas mean <= 75, not
+  daylight)` — reports canvas mean/RGB/black % (cycle-3 was ~52–62); a daylight-looking build is a
+  blocker routed to world-scene.
+- **Time-to-HUD attribution:** captures `__ssLoadTimings()` + raw performance marks/measures and
+  prints them on the HUD/state gate result so any remaining time can be attributed; gates unchanged
+  (HUD ≤15.0 s, state ≤16.2 s, join ≤3.8 s).
+- **Perf gates:** cycle-4 SPEC **<260 calls / <1.95 M tris** (+tiers/loading/payload/all views).
+- **Final hook shapes (world-scene, candidate `index-CZ8DITNA.js`)**: `__ssWeather()` →
+  `{region, phase, intensity, nextChangeAt/In, flash/flashing, activeParticles:{rain,splash,haze},
+  qualityScale}` with phases march `clear|light-rain|downpour`, moor `calm|ashfall|haze`, crown
+  `clear|snow|snowstorm`; **positional** `__ssSetWeather(region, phase, intensity)` (alias
+  `__ssWeatherForce`; `null` clears) — the harness now calls it positionally, forces **quality high**
+  for beauty/weather captures (SwiftShader defaults low) and uses **low** only for the minimal-weather
+  proof (expected 0 particles, qualityScale 0); `__ssLoadTimings()` →
+  `{marks:[{name,at,ms}], summary:{sceneConstruct,coreReady,firstGameFrame,earlyCompileEnd,compileEnd},
+  software, quality}` (compileAsync skipped/marked on SwiftShader); `__ssPreviewBody(name,
+  distance|{distance})` for all 7 body ids with `null` restore. Weather hook expected counts e.g.
+  green downpour high → 460 rain / 90 splash; ashen haze high → 14 haze banks; crown snowstorm high;
+  low tier → 0 particles. Candidate perf reference: **205 calls / 1,706,992 tris**, FP 159/1.59 M,
+  low 116/1.29 M, spawn TP canvas mean **58.23** (night), first-state ~11.89 s.
+- **Quality forcing note:** SwiftShader defaults to quality low unless `ss-quality` is saved; the
+  harness therefore forces `__ssQuality('high')` for beauty/perf/weather captures and low only for
+  the low-tier weather proof, restoring high afterwards.
+
+### Cycle-3 reference values (before cycle-4)
+
+- Perf: 195 calls / 1,666,828 tris / 160 geoms / textures 160 / programs 73 / 17 lights / 53 skinned;
+  payload 15.06 MB.
+- Time-to-HUD (SwiftShader, two samples): landing 3.28–3.32 s, **HUD 17.14–18.54 s**, **state
+  18.55–20.06 s**, **join 3.84–3.85 s** (accepted debt; gates 15.0/16.2/3.8).
+- Characters: close-ups pass (min colours 545, clip 0); in-game torso mean 91.5, **p50 102.4**
+  (debt target ≤100); elite tier-3 vs normal diff 31.08 / 88.9 %.
+- Regions/foliage: distinct fog per region (`march #1e4038 d0.0122 / moor #243839 d0.0139 /
+  crown #425968 d0.0158`), colour distance 9.36–32.2; maple/green bright-saturated at night (tone
+  debt); `region-crown` snow-pine canopy covers ~40 % of the right frame (framing debt).
+- Landmarks: green village_house_ruin (56,−6) + 8-stone circle; ashen chapel_ruin (−36,−228);
+  crown watchtower_ruin (−34,−472).
+- **Armour-v2 reference (weapons-armory; assets re-installed 07:14 with richer albedo + new armour
+  normal/ORM maps):** per body — templar 9,276 tris / 3 prims / 3 mats; hero 9,388/2/2; berserker
+  8,749/3/3; ranger 9,021/3/3; ally 9,231/3/3; survivor 8,857/3/3; fallen 8,838/2/2 (+76-tri elite
+  add-on when corrupted). Rich-atlas gz sizes **654.6–704.3 KB** (tris unchanged), all ≤15,500 tris /
+  ≤900 KB, one 91-joint skin, hand sockets + 12 clips, armour rigid-weighted inside the body envelope,
+  old `*_addon` prims folded away; equipment/armory/assets tests 5/5, 58 blocks. Cross-reference
+  sheets: `qa/char-viewer/shots/c4rich-base-closeup-{templar,hero,berserker,ranger,ally,survivor,fallen}.png`
+  and `c4richsil-base.png` (all 7 at 13 m). **Palette richness (Lead decision):** body-mask unique
+  colours on the rich atlases measured templar 515, hero 378, berserker 426, ranger 462, ally 333,
+  survivor 250, fallen 303 (full close-up frame 809–1,029). Cycle-4 gate is **body-mask ≥300**;
+  the ≥500 body-mask target is **deferred art debt** (asset-forge 1024 atlas in cycle 5 — not worth
+  +1.3 MB payload now); full-frame colour counts are reported as the headline detail metric.
+  **Art risk flagged by weapons-armory:** the new armour shows oversized flat/wood-grain-looking
+  plates at 2.8 m (visible in asset-forge's own previews; silhouettes at 10–13 m read fine) — QA
+  will confirm in the authoritative close-ups and route as asset-side art debt if reproduced.
+  **Tone:** runtime frozen; fixed-crop is background-dominated (WIP mean 115.6/p50 124.5), character
+  body-mask mean 82–100 / p50 77–100 → Lead-approved QA body-mask re-baseline above.
+- **Cycle-4 props (ruins-builder, integrated + validated)**: `stone_well` (2,968 tris, 1.82×1.60×1.72
+  native) ×6 — Green keep courtyard (−6,−4) + crossing camp (12,−30); Ashen (−6,−244) + (12,−270);
+  Crown (−6,−484) + (−30,−446); `blacksmith_stall` (196 tris, 3.80×3.05×2.38) ×2 — Green village
+  landmark (48,4) + crossing camp (32,−37), each with barrel/crate clusters. Four distance-culled
+  instanced dressing layers, receive-only shadows, 85 m compaction, defensive missing-asset skip;
+  all placements/framing validated (wells road 17.1–30 m, stalls road 30.6/4.4 m, clear of
+  walls/towers/camps/landmarks/scatter); cost +4 draws / ~51.6 k tris map-wide. QA captures optional
+  smithy poses (`prop-stall-village` cam (40,−2,h2.4)→(48,4,1.5); `prop-stall-camp` cam
+  (26,−31,h2.4)→(32,−37,1.5)) in addition to the required 7 views.
+
+### Cycle-4 authoritative capture + regression — final build `index-CZ8DITNA.js` (functional green; visual caveats)
+
+**Final bundle:** `dist/client/assets/index-CZ8DITNA.js` (861,937 B). A fresh bundled-Node-24 build
+**reproduced the exact hash** and fresh-build smoke passed **17/17** (`qa/final-batch7`; night-mood
+gate included, TP canvas mean 58.77). Authoritative runs on this hash: `--characters --skip-build`
+(`qa/characters-b7`, 27/27), `--perf --skip-build` (`qa/perf-b7`, 34/34 incl. views/weather/night),
+`--coop --skip-build` (`qa/coop-b7`, 18/18), live baseline `qa/live-batch7` (18/18 vs deployed
+cycle-3). Quality was forced **high** for beauty/character/weather/perf captures (software default is
+low) and low only for the minimal-weather proof.
+
+**1) Character/armour v2 — PASS.** 7 body close-ups + **7/7 10 m silhouettes** captured
+(`char-<name>-closeup.png` / `char-<name>-10m.png`): 5 playable via character select, `fallen` via a
+corrupted knight, `survivor` via a soldier rig. Body-mask torso gate (Lead-approved re-baseline):
+mean **85.73** / p50 **71.31** / black **2.37 %** (gate 65–95 / 60–100 / <25 %) ✅; fixed-crop
+informational mean 100.01 / p50 97.76 (background-dominated, now under 100 due darker night scene).
+Close-up body-mask colours **607–874** (gate ≥300) with **full-frame headline 1,288–1,863**; clipping
+0 %; total runtime cost visible in assets (9,276/9,388/8,749/9,021/9,231/8,857/8,838 tris, ≤900 KB
+gz per body). Elite-undead regression PASS (`__ssEliteUndeadInfo`: 25 elites; tier-3 vs normal diff
+meanAbsLum **29.76**, changed **86.1 %**). Night mood 50–58. **Caveats:** `__ssPreviewBody` exists
+but its synthetic body did not render in a probe screenshot (camera framing) → fallback captures
+used; numeric mean-RGB distinctness across the 5 knight bodies is small (overlapping palettes, min
+0.93) though helms/cloaks differ visually; weapons-armory's flagged **oversized flat/wood-grain
+plates at 2.8 m** are visible on the close-ups → asset-side art debt.
+
+**2) Regional weather — PASS with a snowstorm caveat.** `__ssWeather()`/`__ssSetWeather` (positional,
+region keys march/moor/crown) verified. Particle gates: march light-rain **228** → downpour **550**;
+moor ashfall **4** → haze **14** (both high>low ✅); low quality tier on a high downpour → rain **0**,
+qualityScale **0** (splash 90 still runs) ✅; visuals: rain streaks + wet-road sheen clearly visible,
+ash/haze visible. **Snowstorm caveat:** crown `snow` vs `snowstorm` screenshots are nearly identical
+and show only sparse flakes (no exposed snow particle counter; qualityScale 0.55) — the SPEC's
+"dense snow / reduced visibility" reads weak in the authoritative capture → routed to world-scene as
+cycle-4 visual debt, non-blocking for rain/ash.
+
+**3) Tone/framing/regions — PASS.** `region-crown` framing fixed (no canopy covering ~40 %; snow
+pines + soft moon + castle tower composition). Region fog follows the QA camera: march #1e4038
+d0.0123 / moor #243939 d0.0141; `region-crown` camera sits in the moor↔crown border band (camera
+z≈−432; band −485…−405) so it reports a blended `moor` #313e49 d0.0166 — visually distinct snow/cold
+region, but note the blend when reading the numbers. Pairwise colour distance 5.03–12.69, luminance
+spread 5.22 (distinctness PASS, softened vs cycle-3 but still distinct). Foliage/maple saturation is
+toned down (TP canvas meanSat 0.50; region means 41–42 with maple orange distinct) and night mood
+holds (TP canvas mean **51.58**, ≤75).
+
+**4) Time-to-HUD — PASS on the app metric with attribution.** The perf run spends **17.7 s on
+landing QA** before clicking join, so nav→HUD (17.84 s) includes QA idle time; measured from the join
+click: **click→HUD 158 ms**, **click→state 1,505 ms**, join button enabled 3.40 s (gate 3.8 s) ✅.
+`__ssLoadTimings()` exposes `{marks, summary{sceneConstruct,coreReady,firstGameFrame...},software,
+quality}` (SwiftShader compileAsync skipped/marked); marks show coreStart 196 ms, sceneConstruct
+583 ms, coreReady 2,983 ms, compileSkipped 5,149 ms. firstGameFrame 18.3 s is nav-relative and
+includes the same landing idle. No gate failure on the app metric; documented for real-GPU follow-up.
+
+**5) Performance — PASS.** Spawn TP: **206 calls** (<260 ✅), **1,708,376 tris** (<1.95 M ✅),
+geoms 168, meshes 677, objects 3,417, materials 262, textures 178, programs 96, lights 17, skinned 74;
+FP 160 calls / 1,591,286 tris; low tier 160/1,395,804 (−22 % calls vs high 206). Payload **15.76 MB**
+(assetTransferBytes 15,760,016; 84 asset requests, +0.71 MB vs cycle-3 = armour v2 + props + weather
+audio). Tiers/loading/persistence pass; wind PASS (meanAbsLum 1.464); 7 required + 9 optional views
+(landmarks/foliage/corruption/wind/char-lineup/smithy stalls) captured.
+
+**6) Regression — PASS.** Fresh-build 17/17 + exact hash reproduced; co-op 18/18; live baseline 18/18
+(10 cards, 0 404s; external Cloudflare beacon only); 0 page/console/log errors throughout.
+
+**Cycle-4 verdict: PASS on all gates**, with four non-blocking visual debts logged for cycle 5: (a)
+snowstorm density/visibility weak at high intensity (rain/ash fine); (b) `__ssPreviewBody` synthetic
+body not rendering (camera framing) — QA used in-game fallbacks; (c) oversized flat/wood-grain armour
+plates at 2.8 m (asset-side); (d) survivor body identification uses a soldier rig (camp survivor
+specifics not isolated). `region-crown` is a border-blend capture, noted above.

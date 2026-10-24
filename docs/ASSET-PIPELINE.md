@@ -525,3 +525,67 @@ scene[0] and sets it as default; worth remembering for any Blender-exported GLB 
 Staged mirrored set validated before every install (72/72 after Phase A, 74/74 after Phase B), atomic
 install (copy-to-.tmp + single rename), live `validate-assets.mjs` 74/74, `tests/assets` 5/5,
 `tests/equipment` 5/5, `tests/armory` 5/5. Custom payload 11.13 → 12.46 MB (70 files).
+
+## Batch 2026-10G — character armour identity v2 + new props
+
+### Phase A — full armour silhouettes (7 bodies, installed)
+
+Each player/companion body gained **two extra skinned primitives** on the existing Mixamo rig:
+`<name>_plate` (hard armour: helm/cuirass/pauldrons/bracers/belt/spikes, roughness 0.62, metalness 0.3)
+and `<name>_cloth` (tabard/cloak/hood/fur/pack/quiver, roughness 0.85, metalness 0). Body geometry,
+weights, skin and all 12 clips are untouched (hash-verified per body); the cycle-2 small add-ons are
+folded into this set (no duplicates). All pieces are authored procedurally in the mesh's bind space
+around joint pivots solved from the inverse-bind matrices and rigid-weighted to the matching joint;
+each body gets its own 512 procedural armour atlas (metal / cloth / accent bands, night palette).
+
+| body | armour pieces | armour tris | total tris | prims | gz |
+| --- | --- | --- | --- | --- | --- |
+| templar | great-helm, cuirass, tabard, large pauldrons, bracers, belt | +827 | 9,276 | 3 | 687.8 KB |
+| hero | visored helm, knight cuirass, layered pauldrons, bracers, belt | +939 | 9,388 | 2 | 678.3 KB |
+| ally | helm, cuirass, tabard, large pauldrons, bracers | +782 | 9,231 | 3 | 670.5 KB |
+| berserker | horned helm, bracers, fur shoulders, belt (bare torso) | +300 | 8,749 | 3 | 654.6 KB |
+| ranger | hood, long cloak, leather cuirass, quiver, bracers | +572 | 9,021 | 3 | 660.1 KB |
+| survivor | hood, ragged cloak, pack, bracers | +408 | 8,857 | 3 | 660.8 KB |
+| fallen | crest helm, back plate, spiked pauldrons, bracers | +389 | 8,838 | 2 | 652.8 KB |
+
+All ≤15,500 tris/body and ≤900 KB; every prim has JOINTS_0/WEIGHTS_0 on the single skin, and the six
+required clips + hand sockets are preserved. Builder: `scripts/bake/bake-character-armour.mjs`
+(reads the cycle-2 Phase-A body with the repaired UVs/atlases, so body material detail is kept).
+Armour materials carry a 512 albedo + 256 normal + 256 packed ORM atlas each (band-aligned: plate
+metalness ~0.6/roughness ~0.45, cloth 0/0.85, with seam/rivet/weave relief in the normal), plus a
+richer palette (two-tone metal with patina/seams/rivets/scratch grain, two-tone cloth with weave,
+folds and stains, three-tone heraldry) — unique RGB in the armour atlas rose 15–53 % per body after
+weapons-armory's close-up audit (templar 9,050→10,745, hero 5,810→7,872, ally 5,899→6,772,
+survivor 3,519→4,346, fallen 3,191→4,889).
+Runtime note: the material names follow `<body>_plate` (hard armour) / `<body>_cloth` (soft) so
+`custom-character.ts` can tint the two classes separately.
+
+**Cycle-4 freeze (Lead accepted this state) and cycle-5 backlog.** The shipped armour set is the
+654.6–704.3 KB / normal+ORM-equipped build above; no further character asset changes in cycle 4.
+Deferred to cycle 5 as an art task: (a) body-mask close-up colour variety is 250–515 on
+weapons-armory's 5-bit alpha-mask metric vs the ≥500 target — next steps are a 1024 armour atlas
+(tight at ~884 KB for templar under the 900 KB cap, so likely only for the low-variety bodies
+survivor/ally/fallen) plus strongly *hue*-separated patina/trim variation rather than luminance
+mottling, because at night tone + ACES the quantised colour count is dominated by lighting range;
+(b) plate faces read as oversized flat panels with stretched "wood grain" at 2.8 m — needs tighter
+UV texel density (triplanar/world-scale mapping instead of the current per-piece 0–1 band mapping),
+trimmed plate shapes that follow the body curves, and eventually sculpted/hand-made armour detail.
+
+### Phase B — stone well + blacksmith stall (installed)
+
+| asset | tris | prims | gz | bbox (x × y × z) | source |
+| --- | --- | --- | --- | --- | --- |
+| `stone_well` | 2,968 | 1 | 217.0 KB | 1.82 × 1.60 × 1.72 | medieval-stone-well scan (1.9 M tris simplified, scaled to 1.6 m) |
+| `blacksmith_stall` | 196 | 1 | 15.9 KB | 3.80 × 3.05 × 2.38 | procedural forge hearth + anvil + canopy + tool rack |
+
+Both are ground-centred (min y = 0, centred x/z), single 512 embedded night-toned base colour,
+`KHR_mesh_quantization`, gzip-9, atomically installed. Note: the warehouse `medieval-props-asset`
+candidate turned out to be a wooden chest rather than a stall, so the blacksmith stall is built
+procedurally in the same night palette (cheap, 196 tris) pending a better warehouse stall asset.
+Preview: `temp_sketchlab/armour/props_sheet.png`; armour sheets `temp_sketchlab/armour/m10_sheet.png`.
+
+### Verification
+
+Staged mirrors validated before every install (74/74 after the armour pass, 76/76 after the props),
+atomic install (copy-to-.tmp + single rename), live `validate-assets.mjs` **76/76**,
+`tests/assets` 5/5, `tests/equipment` 5/5, `tests/armory` 5/5 (all after both phases).
