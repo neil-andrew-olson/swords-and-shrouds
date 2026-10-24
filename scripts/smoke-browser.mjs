@@ -43,6 +43,25 @@ const DEFAULT_CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.e
 const BUNDLED_NODE = 'C:\\Users\\neil\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\node\\bin\\node.exe';
 const VIEWPORT = {width: 1600, height: 900};
 const CANVAS_GATE = {minStd: 2, minNonDarkPct: 2, minColors: 32};
+// Injected before the app boots: records every WebSocket lifecycle so the report can tell a real
+// server disconnect/reconnect from a transient toast (e.g. "Connection lost. Reconnecting...").
+const WS_INSTRUMENT = `(()=>{
+  if(window.__qaWs)return;
+  const O=window.WebSocket;
+  window.__qaWs={instances:0,opens:0,closes:[],errors:[],urls:[]};
+  class QAWebSocket extends O {
+    constructor(...args){
+      super(...args);
+      const state=window.__qaWs;
+      state.instances++;
+      state.urls.push(String(args[0]||''));
+      this.addEventListener('open',()=>{state.opens++;});
+      this.addEventListener('close',event=>{state.closes.push({code:event.code,reason:event.reason,wasClean:event.wasClean,at:Date.now()});});
+      this.addEventListener('error',()=>{state.errors.push({at:Date.now()});});
+    }
+  }
+  window.WebSocket=QAWebSocket;
+})();`;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const round = n => Math.round(n * 100) / 100;
 const nowIso = () => new Date().toISOString();
@@ -801,6 +820,9 @@ async function run() {
     try {
       await page.send('Page.bringToFront', {}, 5000);
     } catch {}
+    // Install the WebSocket lifecycle recorder before the app's first script runs.
+    await page.send('Page.addScriptToEvaluateOnNewDocument', {source: WS_INSTRUMENT});
+    log('CDP: WebSocket lifecycle instrumentation installed');
     log('CDP: Page/Runtime/Log/Network enabled');
 
     /* 5. navigate + landing */
@@ -842,6 +864,8 @@ async function run() {
     report.fps = await measureFps(page, 1500);
     log(`FPS: ${JSON.stringify(report.fps)}`);
     report.renderer = await rendererInfo(page);
+    report.websocket = await page.evaluate(`window.__qaWs ? JSON.parse(JSON.stringify(window.__qaWs)) : null`);
+    log(`WS: ${JSON.stringify(report.websocket)}`);
     log(`RENDERER: ${report.renderer?.renderer || 'unknown'} | vendor ${report.renderer?.vendor || 'unknown'}`);
     report.hud = await hudSnapshot(page);
     report.screenshots.push(await screenshot(page, opts.outDir, '01-third-person.png'));
@@ -927,6 +951,15 @@ async function run() {
     // Final HUD snapshot after all interactions, then assertions.
     report.hudAfter = await hudSnapshot(page);
     report.pageErrorsFinal = report.pageErrors.length;
+    report.websocketFinal = await page.evaluate(`window.__qaWs ? JSON.parse(JSON.stringify(window.__qaWs)) : null`);
+    if (report.websocketFinal?.closes?.length) {
+      const closures = report.websocketFinal.closes.map(c => `${c.code}${c.reason ? `:${c.reason}` : ''}`).join(', ');
+      report.notes.push(
+        `WebSocket closed/reconnected ${report.websocketFinal.closes.length}x during the run (${closures}); ` +
+          `${report.websocketFinal.opens} successful open(s) — check whether the client recovered.`,
+      );
+    }
+    log(`WS final: ${JSON.stringify(report.websocketFinal)}`);
 
     /* 10. assertions */
     lastStage = 'assert';
@@ -1041,6 +1074,7 @@ async function run() {
   console.log(`console errors: ${report.consoleErrors.length}${report.consoleErrors.length ? ` -> ${JSON.stringify(report.consoleErrors.slice(0, 3))}` : ''}`);
   console.log(`log errors: ${report.logErrors.length}${report.logErrors.length ? ` -> ${JSON.stringify(report.logErrors.slice(0, 3))}` : ''}`);
   console.log(`bad responses: ${report.badResponses.length}`);
+  console.log(`websocket: ${report.websocketFinal ? `opens=${report.websocketFinal.opens} closes=${report.websocketFinal.closes.length} errors=${report.websocketFinal.errors.length}` : 'n/a'}`);
   console.log(`renderer:  ${report.renderer?.renderer || 'n/a'}`);
   console.log(`canvas:    ${JSON.stringify(report.canvas)}`);
   console.log(`fps:       ${JSON.stringify(report.fps)}`);

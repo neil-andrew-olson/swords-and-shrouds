@@ -1,15 +1,14 @@
 # QA Report — Headless Browser Smoke (Batch 2026-10)
 
 Owner: **qa-verifier**. Harness: `scripts/smoke-browser.mjs`. Screenshots: `qa/<run>/`.
-This report is updated after integration; see the **Final integration run** section for the
-current status.
+Both the pre-batch baseline and the final integrated run are recorded below.
 
 ## TL;DR
 
 | Run | When (local) | Command | Result |
 | --- | --- | --- | --- |
 | Baseline (pre-batch HEAD) | 2026-10-23 22:17–22:18 | `node scripts/smoke-browser.mjs --out qa/baseline --skip-build` | **PASS 16/16**, 0 page errors, 0 console errors, 0 failed/4xx internal requests |
-| Final integration | _pending_ | `node scripts/smoke-browser.mjs --out qa/final` | _pending_ |
+| Final integration | 2026-10-23 22:38–22:39 | `& $node scripts/smoke-browser.mjs --out qa/final` (bundled Node 24, fresh build) | **PASS 16/16**, 0 page errors, 0 console errors, 0 asset 404s, WS opens=1/closes=0, 8 weapon cards |
 
 ## Harness
 
@@ -27,7 +26,9 @@ current status.
    state → screenshots → `V` first person → `V` back → hold `W` → mouse attack (when pointer
    lock is available) → `Q` sweep / `H` heal → screenshots.
 5. Collects `Runtime.exceptionThrown`, `Runtime.consoleAPICalled`, `Log.entryAdded`,
-   `Network.responseReceived` (4xx/5xx), `Network.loadingFailed`.
+   `Network.responseReceived` (4xx/5xx), `Network.loadingFailed`, and a pre-injected
+   `window.__qaWs` WebSocket recorder (open/close code+reason/errors) so a transient
+   "Connection lost. Reconnecting…" toast can be distinguished from a real server disconnect.
 6. Measures the rendered canvas itself (HUD/vignette temporarily hidden, screenshot decoded
    in-page): mean luminance, std-dev, non-dark pixel %, unique quantised colours.
 7. Always kills Chrome + server (`taskkill /T /F`), frees the port, removes the temp Chrome
@@ -73,9 +74,10 @@ failure, `2` harness crash. Machine-readable report + logs are written to
   runs use the same flags, so baseline/final screenshots are directly comparable.
 - WebGL renderer (from `WEBGL_debug_renderer_info` on `#world`):
   `ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)`,
-  vendor `Google Inc. (Google)`, WebGL 2.0. **Software rasterisation** — frame rate is ~3.3 fps,
-  so it is not representative of player GPU performance; it is only enough to prove the scene
-  renders and is interactive.
+  vendor `Google Inc. (Google)`, WebGL 2.0. **Software rasterisation** — 3.3 fps on the baseline,
+  1.6 fps on the final build (post-FX composer + PMREM + denser trees), so it is not
+  representative of player GPU performance; it is only enough to prove the scene renders and is
+  interactive.
 - Audio is muted headless. Audio/ambience cannot be verified by this harness.
 
 ### Gates asserted (16)
@@ -202,23 +204,105 @@ Concrete defects seen in the baseline (baseline comparisons for the batch):
    intended dark steel, but it reads as unlit.
 6. `/favicon.ico` 404 (cosmetic; excluded from gates).
 
-## Final integration run (pending)
+Status after integration: 1 **fixed**, 2 **fixed**, 3 **improved** (scene much brighter, see
+final run), 4 **fixed / not reproducible** (no pure-white or pure-black NPCs in any final shot),
+5 **improved** (blade catches light), 6 **unchanged** (cosmetic).
 
-Run after the Lead hands over the integrated tree:
+## Final integration run — 2026-10-23 22:38:37 → 22:39:52 (PASS)
 
 ```bat
 cd C:\Users\neil\Desktop\AIprojects\neilandrew.dev\.game-build
-node scripts/smoke-browser.mjs --out qa/final
+$node = "C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
+& $node scripts/smoke-browser.mjs --out qa/final
 ```
 
-This rebuilds from source (`vite build`), so it validates the integrated production bundle
-including every new `public/assets/**` file, post-FX, ruins, terrain surfaces, effects and HUD
-changes. Acceptance for this run:
+- **Result: PASS — 16/16 gates** (74.8 s total). Fresh `vite build` from the integrated working
+  tree in 1.6 s with bundled Node v24.21.0 → `dist/client/assets/index-CS9GEA8s.js` (758,526 B) +
+  `index-DSURmr1-.css`.
+- Page errors: **0**. Console errors: **0**. Log-level errors: **0**. Bad responses: **0**;
+  failed requests: **0**. Internal requests: 53, of which 52 are `/assets/**`.
+- Console warning (1, informational): `THREE.GLTFLoader: Unknown extension
+  "KHR_materials_pbrSpecularGlossiness"` — comes from the **pre-existing** `custom/gatehouse.glb.gz`
+  (the baseline run logged the same warning; none of the 14 new assets use that extension).
+- WebSocket lifecycle: `instances=1, opens=1, closes=0, errors=0, url ws://…/ws?room=6B6C7A` —
+  **no disconnect/reconnect**, so the "Connection lost. Reconnecting…" toast seen at ~1.4 fps on
+  the software renderer did not reproduce.
+- Pointer lock: granted; real mouse attack + `W` movement + `Q` sweep exercised. Camera modes
+  toggled `Third person · V / Y` → `First person · V / Y` → back.
+- HUD observed: `QA Knight` · `120 / 120 HEALTH` · `100 STAMINA · LIGHT ARMOR` ·
+  `Longsword · Ready · R / LB`; `#weaponCards` = **8**; `WOOD 24 IRON 14 HEAL 5 RECRUITS 0` ticked
+  to `WOOD 28 IRON 16 …` during the run (live authoritative sim); `◇ Fallen Keep LOST …`;
+  wayfinder `← WEAPON · Warhammer · 4m` → `8m`; end-of-run event toast
+  `An Oathsworn has fallen. Corruption rises in 7 seconds.` (a companion was downed during combat).
+- FPS: 1.6 (SwiftShader; baseline 3.3). Software-render cost of bloom/PMREM/denser trees,
+  expected; the 150 s HUD budget and all canvas gates were comfortably met.
+- Canvas pixel stats (HUD hidden, decoded in-page) — brighter and richer than baseline:
 
-- 16/16 gates, zero page errors, zero console errors, zero internal 4xx/5xx (including all new
-  `.glb.gz` assets), canvas pixel stats comparable to or better than baseline.
-- HUD shows **8 weapon cards** in the armory (5 baseline + rapier/halberd/dane_axe) and the
-  hardcoded "five weapons" copy is gone.
-- Visual diff against `qa/baseline/`: new ruins/keeps/grass/rock scatter, scanned road/cobble
-  texture variation, bloom/atmosphere, combat sparks/blood, subtle HUD changes; no regression
-  of the baseline defects above (especially label occlusion and darkness).
+| Shot | mean lum | std | non-dark | unique colours | baseline std |
+| --- | --- | --- | --- | --- | --- |
+| third person | 77.1 | 59.2 | 98.0 % | 1558 | 34.2 |
+| first person | 100.9 | 60.8 | 97.9 % | 1695 | 41.9 |
+| combat | 102.4 | 63.5 | 97.3 % | 1343 | 49.5 |
+
+### Asset load log (all new batch files fetched, HTTP 200, no 404s)
+
+- Models: `custom/rapier`, `halberd`, `dane_axe`, `fortress_keep`, `castle_tower`, `chapel_ruin`,
+  `aqueduct_ruin`, `bridge_ruin`, `courtyard_ruin`, `well`, `chest`, `bench`, `grass_tuft`,
+  `rock_cluster` (all `.glb.gz`).
+- Textures: `textures/road_country_basecolor.jpg`, `road_country_normal.png`,
+  `cobblestone_basecolor.jpg`, `cobblestone_normal.png`.
+
+### Screenshots (final)
+
+All in `qa/final/` (1584 × 805 PNG):
+
+- `00-landing.png` — landing over the upgraded scene (chapel ruin, keeps, towers, grass).
+- `01-third-person.png` — spawn, third person (label band gone, readable characters).
+- `02-first-person.png` — first person, sword/shield, bright cobbled road, fortress keep.
+- `03-combat.png` — first person at the gate facing skeleton defenders.
+- `04-third-person-return.png` — third person, downed companion + combat particles, ruins/scatter.
+
+### Visual assessment of the final run (inspected with image tooling)
+
+Checks requested by the Lead:
+
+- **(a) WARHAMMER rack-label band: GONE.** The giant text plane + translucent backing that hid
+  the spawn view in the baseline is gone; only a dim, small label remains near the foreground
+  rack. The player, rack and courtyard are unobstructed. ✅
+- **(b) Characters: fixed.** No pure-white untextured humanoid anywhere (the baseline white
+  silhouette is gone); no pure-black bodies. Skeletons are bone-textured, companions are dark
+  armoured knights with readable rim/fill light. Combat particles (white sparks) render around
+  hits. ✅
+- **(c) New content renders.** The Fallen Keep now uses `fortress_keep` instead of dark boxes,
+  `castle_tower` crenellated masonry towers replace the old blue cone tops, and the gothic chapel
+  ruin, aqueduct/arch ruins and broken walls are visible on the landing scene and along the road.
+  Cobblestone road + road texture, `grass_tuft` and `rock_cluster` scatter, wells/benches/camp
+  props and 3D weapon racks are present. Torches/lanterns glow, ground materials read as stone
+  rather than flat grey. ✅
+- **(d) 8 weapon cards:** DOM snapshot reports `#weaponCards = 8`. ✅
+- **(e) Landing footer overlap: fixed.** At 1584 × 805 the join box ends above the features row
+  and the footer (`REAL-TIME COOPERATIVE SURVIVAL` / `WOOD. IRON. A LITTLE COURAGE.`) is fully
+  visible with no collision or clipping against the ROOM CODE row. ✅
+
+Still worth a look (blunt):
+
+1. **Terrain reads as a patchwork.** Bright green grass polygons sit with hard, straight edges
+   against near-black ground on either side of the cobbled road (clearest in `01` and `04`).
+   Likely a surface-tagging/tint-boundary or lighting issue rather than a texture problem — it
+   looks like only some ground regions receive the lit material. Not a blocker, but it is the
+   most noticeable visual seam in the final build.
+2. **Atmosphere is now pale grey-green / overcast rather than the established dark night.** The
+   whole sky/fog/horizon is washed light and bloom haze lifts the distance; the night mood of the
+   baseline is largely gone. Deliberate or not, this is a stylistic shift worth a product call
+   (the brightness itself is an improvement; the "washed" sky is the questionable part).
+3. Player/NPC bodies are still on the dark side in third person — readable now (unlike baseline),
+   but faces/armour detail only resolves up close.
+4. `03-combat.png` was captured after the swing had already finished (1.6 fps software renderer
+   timing), so it shows the gate and defenders rather than a mid-swing blade; combat itself was
+   exercised and fired. Not a game defect.
+5. Pre-existing, unchanged: `gatehouse.glb.gz` spec-gloss extension warning and `/favicon.ico`
+   404 (cosmetic).
+
+No missing models, no page errors, no asset 404s, HUD fully readable. **Green for the Lead's
+commit/deploy gate.**

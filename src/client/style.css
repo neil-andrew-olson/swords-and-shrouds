@@ -66,54 +66,25 @@ dialog#guide{width:min(940px,94vw)}
 
 /* Landing: short-laptop viewports (700–900px tall, desktop widths) were cramped enough that the
    join box's room-code row and the features row sat underneath the absolutely-positioned footer.
-   These three height ranges compact the vertical rhythm in steps (and give the footer a little more
-   room) without touching the desktop design above 900px tall. */
-@media(min-width:701px) and (min-height:700px) and (max-height:770px){
- footer{height:40px}
- nav{height:64px}
- .hero{padding-top:10px}
- h1{font-size:56px;line-height:.84;margin:12px 0 12px}
- .intro{font-size:19px;line-height:1.2;margin:0 0 7px}
- .subintro{line-height:1.55;margin:6px 0}
- .joinbox{margin-top:12px;gap:6px}
- .joinbox input{padding:10px}
- #characterChoice{display:block;width:100%;padding:9px;margin:6px 0 10px}
- .joinbox .primary{padding:10px}
- .divider{margin:3px 0}
- #connection{font-size:9px;line-height:1.5;min-height:12px;margin:2px 0}
- .features{margin-top:10px}
+   This height range scales the vertical rhythm with the viewport (clamped so type stays readable),
+   which keeps the hero above the footer all the way through 700–900px without touching the desktop
+   design above 900px tall. */
+@media(min-width:701px) and (min-height:700px) and (max-height:900px){
+ footer{height:clamp(36px,5.5vh,48px)}
+ nav{height:clamp(56px,8.4vh,76px)}
+ .hero{padding-top:clamp(8px,2vh,20px)}
+ h1{font-size:clamp(50px,8.9vh,80px);line-height:.85;margin:clamp(10px,2.2vh,20px) 0}
+ .intro{font-size:clamp(17px,2.6vh,23px);line-height:1.2;margin:0 0 clamp(6px,1.2vh,11px)}
+ .subintro{line-height:1.55;margin:clamp(5px,1vh,8px) 0}
+ .joinbox{margin-top:clamp(10px,2vh,16px);gap:clamp(5px,1vh,8px)}
+ .joinbox input{padding:clamp(9px,1.4vh,13px)}
+ #characterChoice{display:block;width:100%;padding:clamp(9px,1.4vh,12px);margin:clamp(6px,1vh,8px) 0 clamp(8px,1.6vh,14px)}
+ .joinbox .primary{padding:clamp(10px,1.7vh,14px)}
+ .divider{margin:clamp(3px,.6vh,5px) 0}
+ #connection{font-size:clamp(9px,1.2vh,10px);line-height:1.5;min-height:14px;margin:2px 0}
+ .features{margin-top:clamp(8px,1.8vh,16px)}
 }
-@media(min-width:701px) and (min-height:771px) and (max-height:830px){
- footer{height:44px}
- nav{height:72px}
- .hero{padding-top:16px}
- h1{font-size:70px;line-height:.85;margin:16px 0 16px}
- .intro{font-size:22px;line-height:1.2;margin:0 0 9px}
- .subintro{line-height:1.6;margin:8px 0}
- .joinbox{margin-top:15px;gap:7px}
- .joinbox input{padding:12px}
- #characterChoice{display:block;width:100%;padding:11px;margin:8px 0 12px}
- .joinbox .primary{padding:12px}
- .divider{margin:4px 0}
- #connection{font-size:10px;line-height:1.5;min-height:14px;margin:2px 0}
- .features{margin-top:14px}
-}
-@media(min-width:701px) and (min-height:831px) and (max-height:900px){
- footer{height:46px}
- nav{height:74px}
- .hero{padding-top:22px}
- h1{font-size:86px;line-height:.86;margin:22px 0 20px}
- .intro{font-size:23px;line-height:1.25;margin:0 0 11px}
- .subintro{line-height:1.6;margin:8px 0}
- .joinbox{margin-top:16px;gap:7px}
- .joinbox input{padding:12px}
- #characterChoice{display:block;width:100%;padding:12px;margin:8px 0 13px}
- .joinbox .primary{padding:13px}
- .divider{margin:4px 0}
- #connection{font-size:10px;line-height:1.5;min-height:14px;margin:2px 0}
- .features{margin-top:14px}
-}
-/* Keep the footer labels legible where they cross the bright 3D scene, and stop them wrapping
-   into each other on narrower desktop widths. */
+/* Keep the footer labels legible where they cross the bright 3D scene (right-hand text was washing
+   out over foliage/rocks) and stop them wrapping into each other on narrower desktop widths. */
 footer span{white-space:nowrap}
-footer{text-shadow:0 1px 3px #000c}
+footer{text-shadow:0 1px 3px #000c;background:linear-gradient(90deg,transparent 28%,#08101570 60%,#081015b8 100%)}

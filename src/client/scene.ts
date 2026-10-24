@@ -28,21 +28,26 @@ function createSkyAndMoon(scene:THREE.Scene){ const c=document.createElement('ca
  const grad=ctx.createLinearGradient(0,0,0,256);
  grad.addColorStop(0,'#060a12');grad.addColorStop(.35,'#0d1722');grad.addColorStop(.75,'#152329');grad.addColorStop(1,'#1c2a2e');
  ctx.fillStyle=grad;ctx.fillRect(0,0,2,256);
- const skyTex=new THREE.CanvasTexture(c);skyTex.wrapS=skyTex.wrapT=THREE.ClampToEdgeWrapping;
- const dome=new THREE.Mesh(new THREE.SphereGeometry(260,24,14,0,Math.PI*2,0,Math.PI*.5),new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide,depthWrite:false}));
- dome.position.y=-15;scene.add(dome);
+ const skyTex=new THREE.CanvasTexture(c);skyTex.colorSpace=THREE.SRGBColorSpace;skyTex.wrapS=skyTex.wrapT=THREE.ClampToEdgeWrapping;
+ // A camera-following celestial group (dome/stars/moon): visible now that far=320, and
+ // fog:false so the world haze does not swallow the night sky.
+ const sky=new THREE.Group();
+ const dome=new THREE.Mesh(new THREE.SphereGeometry(260,24,14,0,Math.PI*2,0,Math.PI*.5),new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide,depthWrite:false,fog:false}));
+ dome.position.y=-15;sky.add(dome);
  const starCount=140,starPos=new Float32Array(starCount*3);let s=0;
  for(let i=0;i<starCount;i++){const th=Math.random()*Math.PI*2,phi=Math.random()*.52+.12,r=252;starPos[s++]=r*Math.sin(phi)*Math.cos(th);starPos[s++]=r*Math.cos(phi)-15;starPos[s++]=r*Math.sin(phi)*Math.sin(th);}
  const starGeo=new THREE.BufferGeometry();starGeo.setAttribute('position',new THREE.BufferAttribute(starPos,3));
- scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xdfe8f7,size:1.1,transparent:true,opacity:.65,sizeAttenuation:false})));
+ sky.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xdfe8f7,size:1.1,transparent:true,opacity:.65,sizeAttenuation:false,fog:false})));
  const moonDir=new THREE.Vector3(-40,70,-30).normalize(),moonGroup=new THREE.Group();
  moonGroup.position.copy(moonDir.multiplyScalar(225));moonGroup.lookAt(0,0,0);
- const halo=new THREE.Mesh(new THREE.CircleGeometry(26,32),new THREE.MeshBasicMaterial({color:0x345672,transparent:true,opacity:.35,blending:THREE.AdditiveBlending,depthWrite:false}));
+ const halo=new THREE.Mesh(new THREE.CircleGeometry(26,32),new THREE.MeshBasicMaterial({color:0x345672,transparent:true,opacity:.35,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}));
  moonGroup.add(halo);
- const outerHalo=new THREE.Mesh(new THREE.CircleGeometry(52,32),new THREE.MeshBasicMaterial({color:0x162c3e,transparent:true,opacity:.2,blending:THREE.AdditiveBlending,depthWrite:false}));
+ const outerHalo=new THREE.Mesh(new THREE.CircleGeometry(52,32),new THREE.MeshBasicMaterial({color:0x162c3e,transparent:true,opacity:.2,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}));
  moonGroup.add(outerHalo);
- const disc=new THREE.Mesh(new THREE.CircleGeometry(8.5,32),new THREE.MeshBasicMaterial({color:0xf2f6ff,depthWrite:false}));
- disc.position.z=.08;moonGroup.add(disc);scene.add(moonGroup);
+ const disc=new THREE.Mesh(new THREE.CircleGeometry(8.5,32),new THREE.MeshBasicMaterial({color:0xf2f6ff,depthWrite:false,fog:false}));
+ disc.position.z=.08;moonGroup.add(disc);sky.add(moonGroup);
+ scene.add(sky);
+ return sky;
 }
 /**
  * Night-sky IBL: a dark gradient dome (plus a faint moon glint) baked once with PMREM.
@@ -77,13 +82,13 @@ export class WorldView{
  fpSerial=-1;fpAttack=0;fpDuration=.6;
  customProps=new Map<string,THREE.Group>();
  characterAssets=new CharacterAssets();animated=new Map<string,NonNullable<ReturnType<CharacterAssets['create']>>>();
- renderer:THREE.WebGLRenderer;scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(68,1,.08,80);actors=new Map<string,THREE.Group>();flags=new Map<string,THREE.Mesh>();gates=new Map<string,THREE.Mesh>();barriers=new Map<string,THREE.Group>();keeps=new Map<string,THREE.Group>();campMeshes=new Map<string,THREE.Group>();cacheMeshes=new Map<string,THREE.Group>();nest=new THREE.Group();weapon=new THREE.Group();shield=new THREE.Group();solid:THREE.Object3D[]=[];flames:{group:THREE.Group;seed:number;x:number;z:number}[]=[];flagMeshes:{mesh:THREE.Mesh;seed:number}[]=[];upgrades=new Map<string,THREE.Group[]>();previousHp=new Map<string,number>();effects:{mesh:THREE.Sprite;life:number}[]=[];projectiles=new Map<number,THREE.Mesh>();debris:{mesh:THREE.Mesh;life:number;velocity:THREE.Vector3}[]=[];artillery=new Map<string,THREE.Object3D>();
+ renderer:THREE.WebGLRenderer;scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(68,1,.1,320);actors=new Map<string,THREE.Group>();flags=new Map<string,THREE.Mesh>();gates=new Map<string,THREE.Mesh>();barriers=new Map<string,THREE.Group>();keeps=new Map<string,THREE.Group>();campMeshes=new Map<string,THREE.Group>();cacheMeshes=new Map<string,THREE.Group>();nest=new THREE.Group();weapon=new THREE.Group();shield=new THREE.Group();solid:THREE.Object3D[]=[];flames:{group:THREE.Group;seed:number;x:number;z:number}[]=[];flagMeshes:{mesh:THREE.Mesh;seed:number}[]=[];upgrades=new Map<string,THREE.Group[]>();previousHp=new Map<string,number>();effects:{mesh:THREE.Sprite;life:number}[]=[];projectiles=new Map<number,THREE.Mesh>();debris:{mesh:THREE.Mesh;life:number;velocity:THREE.Vector3}[]=[];artillery=new Map<string,THREE.Object3D>();
  /** New systems (batch 2026-10). */
  fx:CombatEffects;postfx:PostFX|null=null;
  ruinsUpdate:((game:Game|undefined,me:Actor|undefined,time:number)=>void)|null=null;
- fog!:THREE.FogExp2;moon!:THREE.DirectionalLight;hemi!:THREE.HemisphereLight;fill!:THREE.PointLight;
+ fog!:THREE.FogExp2;moon!:THREE.DirectionalLight;hemi!:THREE.HemisphereLight;fill!:THREE.PointLight;sky!:THREE.Group;
  torchSources:TorchSource[]=[];lightPool:THREE.PointLight[]=[];
- towerSlots:TowerSlot[]=[];legacyTowerTops:THREE.Object3D[]=[];modernTowers=false;
+ towerSlots:TowerSlot[]=[];legacyTowerTops:THREE.Object3D[]=[];modernTowers=false;newKeepsApplied=false;
  private nestTorch=-1;
  private readonly fogTarget=new THREE.Color();private readonly fogCurrent=new THREE.Color(0x1c2a2e);
  private readonly tmpV=new THREE.Vector3();private readonly tmpV2=new THREE.Vector3();
@@ -92,10 +97,10 @@ export class WorldView{
  private readonly camTarget=new THREE.Vector3();private readonly camForward=new THREE.Vector3();private readonly camDesired=new THREE.Vector3();private readonly camDelta=new THREE.Vector3();
  private readonly camRay=new THREE.Raycaster();private readonly shieldTarget=new THREE.Vector3();
  constructor(canvas:HTMLCanvasElement){
-  this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.65;this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x1a2629);
+  this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFShadowMap;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.65;this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x1a2629);
   this.fog=new THREE.FogExp2(0x1c2a2e,0.015);this.scene.fog=this.fog;
   this.hemi=new THREE.HemisphereLight(0xd0e0f0,0x2a3820,3.2);this.scene.add(this.hemi);
-  this.moon=new THREE.DirectionalLight(0xcadff5,3.5);this.moon.position.set(-40,74,-30);this.moon.castShadow=true;this.moon.shadow.mapSize.set(2048,2048);this.moon.shadow.camera.left=-46;this.moon.shadow.camera.right=46;this.moon.shadow.camera.top=46;this.moon.shadow.camera.bottom=-46;this.moon.shadow.camera.near=1;this.moon.shadow.camera.far=190;this.moon.shadow.bias=-0.0004;this.moon.shadow.normalBias=0.035;this.moon.shadow.radius=1.5;this.scene.add(this.moon);this.scene.add(this.moon.target);this.moon.name="sun";createSkyAndMoon(this.scene);
+  this.moon=new THREE.DirectionalLight(0xcadff5,2.7);this.moon.position.set(-40,74,-30);this.moon.castShadow=true;this.moon.shadow.mapSize.set(2048,2048);this.moon.shadow.camera.left=-46;this.moon.shadow.camera.right=46;this.moon.shadow.camera.top=46;this.moon.shadow.camera.bottom=-46;this.moon.shadow.camera.near=1;this.moon.shadow.camera.far=190;this.moon.shadow.bias=-0.001;this.moon.shadow.normalBias=0.06;this.moon.shadow.radius=1.5;this.scene.add(this.moon);this.scene.add(this.moon.target);this.moon.name="sun";this.sky=createSkyAndMoon(this.scene);
   // Dark night-sky IBL so the PBR armour/metal has something to reflect (single PMREM bake).
   try{const environment=createNightEnvironment(this.renderer);if(environment){this.scene.environment=environment;this.scene.environmentIntensity=0.75;}}
   catch(error){console.warn('Environment map unavailable',error);}
@@ -124,7 +129,18 @@ export class WorldView{
  /** Scanned road/cobblestone/dirt maps owned by terrain-surfaces.ts; never throws. */
  private async applySurfaces(){
   try{await applySurfaceTextures(this.scene,this.renderer.capabilities.getMaxAnisotropy());}
-  catch(error){console.warn('Surface textures unavailable',error);}
+  catch(error){console.warn('Surface textures unavailable',error);return;}
+  // The scanned country-road/cobble albedo is naturally light; under moon+hemi it reads
+  // near-white. Tint the material colour down (texture detail intact) so streets stay
+  // readable but don't compete with the night mood. Terrain-surfaces owns the textures;
+  // this only touches the material instances it cloned onto our tagged meshes.
+  this.scene.traverse(object=>{
+   if(!(object instanceof THREE.Mesh))return;
+   const surface=object.userData.surface;
+   if(surface!=='road'&&surface!=='cobble')return;
+   const materials=Array.isArray(object.material)?object.material:[object.material];
+   for(const material of materials){const standard=material as THREE.MeshStandardMaterial;if(standard.isMeshStandardMaterial&&standard.color)standard.color.multiplyScalar(surface==='road'?0.5:0.56);}
+  });
  }
  async survivorAssets(){
   await this.characterAssets.customReady;const source=this.characterAssets.custom.get('survivor');if(!source)return;
@@ -134,8 +150,11 @@ export class WorldView{
   }
  }
  private async startEnvironment(){
-  try{await this.customEnvironment();}catch(error){console.warn('Custom environment failed',error);}
-  try{await this.modernFortress();}catch(error){console.warn('Fortress upgrade failed',error);}
+  // Load the modular fortress art in parallel with the legacy prop pass; otherwise the
+  // sequential prop queue delays the keeps/towers until after the first QA screenshots.
+  const legacy=this.customEnvironment().catch(error=>console.warn('Custom environment failed',error));
+  const fortress=this.modernFortress().catch(error=>console.warn('Fortress upgrade failed',error));
+  await Promise.all([legacy,fortress]);
  }
  async customEnvironment(){
   for(const treeName of ['oak','pine'])try{
@@ -166,6 +185,7 @@ export class WorldView{
   }catch(e){console.warn('Custom prop unavailable',name,e);}
    for(const c of CASTLES){
     const group=this.keeps.get(c.id);if(!group)continue;
+    if(this.newKeepsApplied)continue;
     const kName=c.id.includes('citadel')?'high_citadel':c.id.includes('border')?'border_fortress':'fallen_keep';
     const source=this.customProps.get(kName);
     if(source){
@@ -199,6 +219,8 @@ export class WorldView{
     group.clear();group.add(clone);
    }
    keepApplied=true;
+   this.newKeepsApplied=true;
+   console.info('fortress_keep applied to',CASTLES.length,'castles');
   }catch(error){console.warn('fortress_keep unavailable — keeping simplified keeps',error);}
   if(!keepApplied)return;
   try{
@@ -231,6 +253,7 @@ export class WorldView{
     this.scene.add(instanced);
    }
    this.modernTowers=true;
+   console.info('castle_tower instanced at',useSlots.length,'wall corners');
    for(const slot of slots)slot.decor.visible=false;
    for(const top of this.legacyTowerTops)top.visible=false;
   }catch(error){console.warn('castle_tower unavailable — keeping box towers',error);}
@@ -288,8 +311,9 @@ export class WorldView{
    this.fog.density+=(targetDensity-this.fog.density)*(1-Math.exp(-Math.max(0,dt)*1.1));
    this.tmpColor2.setHex(0xcadff5).lerp(this.tmpColor3.setHex(0xd9d2c2),moor).lerp(this.tmpColor3.setHex(0xbcd6ff),crown);
    this.moon.color.lerp(this.tmpColor2,1-Math.exp(-Math.max(0,dt)*1.4));
-   this.moon.intensity=3.4-moor*0.25+crown*0.3;
-   this.hemi.intensity=2.7-moor*0.15+crown*0.15;
+   this.moon.intensity=2.7-moor*0.2+crown*0.25;
+   this.hemi.intensity=4.0-moor*0.2+crown*0.2;
+   this.sky.position.set(this.camera.position.x,0,this.camera.position.z);
    this.fill.position.set(focusX,Math.max(2.2,this.camera.position.y+0.6),focusZ);
    this.fill.intensity=3.4+moor*0.7+crown*1.1;
    this.moon.position.set(focusX-42,74,focusZ-32);this.moon.target.position.set(focusX,0,focusZ);
@@ -382,7 +406,7 @@ export class WorldView{
    const shots=new Set(g.shots.map(s=>s.id));for(const [id,m] of this.projectiles)if(!shots.has(id)){this.scene.remove(m);m.geometry.dispose();this.projectiles.delete(id);}for(const shot of g.shots){let m=this.projectiles.get(shot.id);if(!m){m=new THREE.Mesh(new THREE.SphereGeometry(.23,8,6),mat(0xe6bb79));this.scene.add(m);this.projectiles.set(shot.id,m);}const t=Math.max(0,Math.min(1,1-(shot.lands-g.time)/.7));m.position.set(shot.x+(shot.tx-shot.x)*t,2+Math.sin(t*Math.PI)*6,shot.z+(shot.tz-shot.z)*t);const gun=this.artillery.get(shot.castle);if(gun)gun.rotation.y=Math.atan2(shot.tx-shot.x,shot.tz-shot.z);}
    for(const c of g.castles){this.upgrades.get(c.id)!.forEach((group,i)=>group.visible=c.friendly&&c.level>i);(this.flags.get(c.id)!.material as THREE.MeshStandardMaterial).color.setHex(c.friendly?0x4ea88c:0x9a4d47);const gate=this.gates.get(c.id)!;gate.visible=c.friendly&&c.gate>0;const nearFriendly=g.actors.some(a=>(a.kind==='player'||a.kind==='soldier')&&a.hp>0&&dist(a,{x:c.x,z:c.z+10})<4);gate.scale.y=nearFriendly?.15:1;gate.position.y=nearFriendly?3.9:2;this.barriers.get(c.id)!.visible=c.barrier>0;}
    for(const c of g.camps){const mesh=this.campMeshes.get(c.id)!;mesh.visible=!c.rescued&&(!me||dist(c,me)<45);}
-   for(const drop of g.weaponDrops){let rack=this.weaponRacks.get(drop.id);if(!rack){rack=new THREE.Group();rack.position.set(drop.x,0,drop.z);for(const x of [-.6,.6])box(rack,x,.7,0,.12,1.4,.12,palette.wood);box(rack,0,1,0,1.5,.1,.12,palette.wood);const sign=this.label(WEAPONS[drop.weapon].name.toUpperCase(),'#b8e1f0','#0d1a1e88');sign.position.set(0,2.2,0);sign.name='sign';sign.scale.set(3,.62,1);rack.add(sign);const ring=new THREE.Mesh(new THREE.RingGeometry(.8,.9,24),new THREE.MeshBasicMaterial({color:0x8ed2e5,side:THREE.DoubleSide,transparent:true,opacity:.7}));ring.rotation.x=-Math.PI/2;ring.position.y=.05;rack.add(ring);this.weaponRacks.set(drop.id,rack);this.scene.add(rack);}const source=this.characterAssets.custom.get(drop.weapon);if(source&&!rack.userData.loaded){const item=equipmentModel(source.scene,WEAPONS[drop.weapon].length,false,drop.weapon);item.position.y=.65;rack.add(item);rack.userData.loaded=true;}rack.visible=!drop.taken&&(!me||dist(drop,me)<35);const sign=rack.getObjectByName('sign') as THREE.Sprite|undefined;if(sign){const camDist=this.camera.position.distanceTo(rack.position);sign.visible=camDist>4.5;const signMaterial=sign.material as THREE.SpriteMaterial;signMaterial.opacity=Math.max(0,Math.min(1,(camDist-4.5)/5.5));}}
+   for(const drop of g.weaponDrops){let rack=this.weaponRacks.get(drop.id);if(!rack){rack=new THREE.Group();rack.position.set(drop.x,0,drop.z);for(const x of [-.6,.6])box(rack,x,.7,0,.12,1.4,.12,palette.wood);box(rack,0,1,0,1.5,.1,.12,palette.wood);const sign=this.label(WEAPONS[drop.weapon].name.toUpperCase(),'#b8e1f0','#0d1a1e88');sign.position.set(0,2.2,0);sign.name='sign';sign.scale.set(1.8,.4,1);rack.add(sign);const ring=new THREE.Mesh(new THREE.RingGeometry(.8,.9,24),new THREE.MeshBasicMaterial({color:0x8ed2e5,side:THREE.DoubleSide,transparent:true,opacity:.7}));ring.rotation.x=-Math.PI/2;ring.position.y=.05;rack.add(ring);this.weaponRacks.set(drop.id,rack);this.scene.add(rack);}const source=this.characterAssets.custom.get(drop.weapon);if(source&&!rack.userData.loaded){const item=equipmentModel(source.scene,WEAPONS[drop.weapon].length,false,drop.weapon);item.position.y=.65;rack.add(item);rack.userData.loaded=true;}rack.visible=!drop.taken&&(!me||dist(drop,me)<35);const sign=rack.getObjectByName('sign') as THREE.Sprite|undefined;if(sign){const camDist=this.camera.position.distanceTo(rack.position);sign.visible=camDist>6;const signMaterial=sign.material as THREE.SpriteMaterial;signMaterial.opacity=Math.max(0,Math.min(1,(camDist-6)/4));}}
    for(const c of g.caches){let mesh=this.cacheMeshes.get(c.id);if(!mesh){mesh=new THREE.Group();mesh.position.set(c.x,0,c.z);box(mesh,0,.4,0,.8,.8,.7,0xb59151,true);box(mesh,0,.42,0,.85,.1,.75,0xd7b16e);this.cacheMeshes.set(c.id,mesh);this.scene.add(mesh);}if(this.customProps.has('supplies')&&!mesh.userData.custom){mesh.clear();const source=this.customProps.get('supplies')!;const o=source.clone(true);o.scale.setScalar(1/source.userData.height);mesh.add(o);mesh.userData.custom=true;}for(const [name,x] of [['iron',-.8],['medicine',.8]] as const){const source=this.customProps.get(name);if(source&&!mesh.getObjectByName('resource-'+name)){const o=source.clone(true);const b=new THREE.Box3().setFromObject(o),size=b.getSize(new THREE.Vector3());o.scale.setScalar(.45/Math.max(size.x,size.y,size.z));o.position.x=x;o.name='resource-'+name;mesh.add(o);}}mesh.visible=!c.taken&&(!me||dist(c,me)<46);}
    this.nest.visible=g.nest.hp>0;
    if(this.nest.children[8])this.nest.children[8].rotation.y=time*.5;

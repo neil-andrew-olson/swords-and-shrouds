@@ -47,6 +47,14 @@ for (const [name, cfg] of Object.entries(CONFIG)) {
   const tex = texOverride ?? cfg.tex;
   const size = [tex, tex];
 
+  // Non-alpha assets are opaque solids/ruins: force OPAQUE so colour maps can become JPEG
+  // (a leftover BLEND/MASK flag from an FBX import otherwise blocks conversion).
+  if (!cfg.alpha) {
+    for (const mat of doc.getRoot().listMaterials()) mat.setAlphaMode('OPAQUE').setAlphaCutoff(null);
+  } else {
+    for (const mat of doc.getRoot().listMaterials()) mat.setAlphaMode('MASK').setAlphaCutoff(0.5).setDoubleSided(true);
+  }
+
   // colour: JPEG (or PNG when alpha is needed for alpha-tested foliage)
   await doc.transform(textureCompress({
     encoder: sharp, targetFormat: cfg.alpha ? 'png' : 'jpeg', resize: size,

@@ -149,8 +149,18 @@ function applyToMesh(mesh: THREE.Mesh, surface: SurfaceKind, textures: SurfaceTe
       copy.normalMap = normal;
       copy.normalScale = new THREE.Vector2(spec.normalStrength ?? 0.8, spec.normalStrength ?? 0.8);
     }
-    // The scanned albedo carries the colour for roads/cobbles; keep the region tint for ground detail.
-    if (surface !== 'ground' && copy.color) copy.color.setRGB(1, 1, 1);
+    // The scanned albedo carries the colour for roads/cobbles; keep (desaturated) region tint for ground.
+    if (copy.color) {
+      if (surface !== 'ground') {
+        copy.color.setRGB(1, 1, 1);
+      } else {
+        // Neutralise most of the daylight-green region tint so moonlight reads blue-grey.
+        const tint = copy.color;
+        const luma = tint.r * 0.299 + tint.g * 0.587 + tint.b * 0.114;
+        tint.lerp(new THREE.Color(luma * 1.06, luma * 1.12, luma * 1.24), 0.62);
+        tint.multiplyScalar(1.35);
+      }
+    }
     copy.needsUpdate = true;
     return copy;
   });
@@ -163,6 +173,50 @@ function applyToMesh(mesh: THREE.Mesh, surface: SurfaceKind, textures: SurfaceTe
  * Loads the scanned surface textures and applies them to every `mesh.userData.surface`-tagged
  * mesh currently in the scene. Safe to call once after the world is built.
  */
+const flatGroundCache = new Map<THREE.Texture, THREE.Texture>();
+/**
+ * The scanned mud/grass detail map is high-contrast and strongly green; multiplied by the dark
+ * region tint under moonlight it reads as bright-green polygons against near-black shadow. Re-map
+ * it to a low-contrast, cool blue-grey night albedo: the moss/soil luminance detail stays, but the
+ * daylight-green saturation that fought the night palette goes. The green world colour then comes
+ * from the grass/foliage instances rather than the ground itself.
+ */
+function flattenGroundTexture(source: THREE.Texture): THREE.Texture {
+  const cached = flatGroundCache.get(source);
+  if (cached) return cached;
+  try {
+    if (typeof document === 'undefined' || !source.image) return source;
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const context = canvas.getContext('2d');
+    if (!context) return source;
+    context.filter = 'blur(1.5px)';
+    context.drawImage(source.image as CanvasImageSource, 0, 0, size, size);
+    context.filter = 'none';
+    const image = context.getImageData(0, 0, size, size);
+    const data = image.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      // Compress the luminance swing (0.42x around mid-grey) and cool it toward moonlight.
+      const level = (luma - 128) * 0.42 + 96;
+      data[i] = Math.max(0, Math.min(255, level * 0.82 + 10));
+      data[i + 1] = Math.max(0, Math.min(255, level * 0.92 + 12));
+      data[i + 2] = Math.max(0, Math.min(255, level * 1.02 + 14));
+    }
+    context.putImageData(image, 0, 0);
+    const flattened = new THREE.CanvasTexture(canvas);
+    flattened.colorSpace = THREE.SRGBColorSpace;
+    flattened.wrapS = flattened.wrapT = THREE.RepeatWrapping;
+    flattened.anisotropy = source.anisotropy;
+    flattened.needsUpdate = true;
+    flatGroundCache.set(source, flattened);
+    return flattened;
+  } catch {
+    return source;
+  }
+}
+
 export async function applySurfaceTextures(scene: THREE.Scene, maxAnisotropy: number): Promise<void> {
   try {
     const anisotropy = Math.max(1, Math.min(16, Math.floor(Number.isFinite(maxAnisotropy) ? maxAnisotropy : 1)));
@@ -176,8 +230,9 @@ export async function applySurfaceTextures(scene: THREE.Scene, maxAnisotropy: nu
           loadTexture(loader, assetUrl(spec.map), THREE.SRGBColorSpace, anisotropy),
           spec.normal ? loadTexture(loader, assetUrl(spec.normal), THREE.NoColorSpace, anisotropy) : Promise.resolve(null)
         ]);
+        const flattened = surface === 'ground' && color ? flattenGroundTexture(color) : color;
         loaded.set(surface, {
-          color: color ? new TextureVariants(color) : null,
+          color: flattened ? new TextureVariants(flattened) : null,
           normal: normal ? new TextureVariants(normal) : null
         });
       })

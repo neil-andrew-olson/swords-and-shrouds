@@ -23,9 +23,11 @@ export interface PostFX {
 
 // Matches the renderer's own cap; keeps the composer from ballooning on 4K/retina.
 const MAX_PIXEL_RATIO = 1.75;
-const BLOOM_STRENGTH = 0.32;
-const BLOOM_RADIUS = 0.4;
-const BLOOM_THRESHOLD = 0.8;
+// Only genuinely emissive things (flames, moon, crystals, sparks) should bloom; a lower
+// threshold smears the moonlit grass field into a white shimmer.
+const BLOOM_STRENGTH = 0.22;
+const BLOOM_RADIUS = 0.45;
+const BLOOM_THRESHOLD = 1.05;
 
 export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): PostFX {
   try {

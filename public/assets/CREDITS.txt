@@ -18,4 +18,32 @@ CC0. Original license included beside this file.
 Selected tower roof, ballista, rock formation and stone pillar. Color atlas embedded; compressed with gzip.
 Catapult model added for automatic castle artillery. Ballista asset retained but no longer placed in the world.
 
-All selected downloads were free. No paid generation service, API key or runtime third-party asset server is required.
+=== Batch 2026-10 additions (supplied from the project owner's Sketchlab warehouse) ===
+
+Ground scans (seamless retiled, basecolor re-encoded, normal maps derived/normalised; no scan geometry shipped):
+- "Ground 03 - Country Road" by Andrea Spognetta (Spogna) — CC-BY-NC-4.0
+  Source: sketchlab/ground_03_-_country_road.glb
+  This portfolio/game build is a non-commercial project; the NC term is respected by not selling or monetising the game.
+- "cobblestone ground - highpoly" by SPLEEN VISION — CC-BY-4.0
+  Source: sketchlab/cobblestone_ground_-_highpoly.glb
+  The cobblestone normal map is derived procedurally from the albedo (source has no normal map).
+
+Additional 3D models (decimated/retiled/gzipped; see docs/ASSET-PIPELINE.md for exact changes):
+- "Spanish Rapier" by Lathander — CC-BY-4.0 — sketchlab/spanish_rapier.glb → rapier.glb.gz
+- "Viking Halberd" by beyondmatter — CC-BY-4.0 — sketchlab/viking_halberd.glb → halberd.glb.gz
+- "Great Dane Axe" by Guillaume Bru (EddyTeacher) — CC-BY-4.0 — sketchlab/great_dane_axe.glb → dane_axe.glb.gz
+- "Vashlovani Tower" by Nik — CC-BY-4.0 — sketchlab/vashlovani_tower.glb → castle_tower.glb.gz
+- "Medieval Era Chest" by Geeky_ — CC-BY-4.0 — sketchlab/medieval_era_chest.glb → chest.glb.gz
+- Gothic chapel, aqueduct, broken bridge, overgrown courtyard and stone well: Tripo-converted photogrammetry scans
+  (sketchlab/collapsed-gothic-chapel-ruin.zip, ruined-aqueduct-arches-segment.zip,
+  ruined-stone-bridge-broken-arch.zip, overgrown-courtyard-patio-ruin.zip,
+  medieval-stone-well-game-prop.zip). Licence is recorded with each original Sketchfab download archive.
+- Modular castle keep: sketchlab/modular-castle.zip → source/MOD_castle.fbx. Licence recorded with the source archive.
+- Grass tuft: rebuilt from the alpha grass texture in sketchlab/grass-patches-circle.zip (licence recorded with the source archive).
+- Rock cluster: sketchlab/stones-and-grass.zip → source/stones_and_grass.fbx (licence recorded with the source archive).
+- Stone bench: original work created for this project (procedural stone PBR texture).
+
+Every model in this batch was re-authored for the game: decimated to a 14,000-triangle budget
+(weapons 3,400; props 6,000), textures re-encoded to 512/1024 JPEG/PNG, UVs preserved, glTF 2.0
+with embedded buffers/images, gzip level 9. No paid generation service, API key or runtime
+third-party asset server is required.
