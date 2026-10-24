@@ -1894,3 +1894,42 @@ regions 22.95–25.37 colour distance; `region-crown` AND `landmark-crown` repor
 hero strict-mask 526 headroom, physical controller rumble/real hardware, real-GPU/perceptual/mobile
 passes, surface-audio ear check, content depth, nest ground-decal polish. After deploy: final live
 pass + task-73 complete.
+
+### Final live deployment verification — cycle-7 (game `6f576e82`, hosting `3d81106c`)
+
+Deployed after the Lead accepted the cycle-7 pass. Live verification runs:
+
+```bat
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ `
+    --out qa/live-batch10-deployed --expect-weapons 10 `
+    --expect-assets custom/templar.glb.gz,custom/hero.glb.gz,custom/berserker.glb.gz,custom/ranger.glb.gz,custom/ally.glb.gz,custom/survivor.glb.gz,custom/fallen.glb.gz,custom/stone_well.glb.gz,custom/blacksmith_stall.glb.gz,custom/stone_altar.glb.gz,custom/forge_furnace.glb.gz,custom/zombie-bloated.glb.gz,custom/skeleton-armoured.glb.gz
+& $node scripts/smoke-browser.mjs --url https://neilandrew.dev/games/swords-and-shrouds/ --views --out qa/live-views-c7
+```
+
+- **Results: PASS 37/37 (deployed pass) + PASS 46/46 (live views/content run).** Live serves
+  **`assets/index-sJM8R4Jf.js` (889,971 B)** — hosting/base-path build of authoritative
+  `index-BF93HyxO.js` (889,821 B; +150 B); `/health` OK; **13/13 expected assets HTTP 200**
+  (7 armour GLBs, stone_well, blacksmith_stall, stone_altar, forge_furnace, **zombie-bloated 369,628**,
+  **skeleton-armoured 292,792**; hero 802,229 / ranger 830,666); 10 cards; 0 page/console errors,
+  0 bad/404/failed requests; WS opens=1/closes=0. Only log: external Cloudflare-Insights beacon.
+- **Live payload:** 17,821,149 B = **17.00 MiB** across 88 assets (curl-verified) — +0.71 MB vs
+  cycle-6 live; CREDITS 4,697 B.
+- **Enemy variants live:** `__ssEnemyVariants()` availability true for both; variant actors in the
+  authoritative list (id%4); close-up/10 m captures produced (bloated QA frame partly obstructed by
+  camp props — canonical silhouette evidence in weapons-armory `c7var-base.png`); armoured silhouette
+  clear; animations/grounding verified; 0 errors.
+- **Accessibility/controller live:** captions toggle + `__ssCaptionDemo` cues show/auto-clear/suppress
+  correctly; deadzone presets tight/wide/normal (0.10/0.28/0.18) and sensitivity 1.4 apply + persist
+  (`ss-deadzone`, `ss-pad-sensitivity`); hints/rumble/reduced-motion guards unchanged; 0 errors.
+- **Content views live:** `contentFocus` active; `content-altar` mean 34.4 (vs 31.7 cycle-6 — altar/
+  candles now render), furnaces/wells captured, `content-plague` mean 65.3 with the plague-nest ritual
+  dressing (braziers/candles/graves/stakes/walls/barrels/cart); normal-play 85 m culling unchanged;
+  0 404s.
+- **Night/weather live:** deployed pass TP mean **53.23** and views run **51.35** (≤75); regions/
+  crown unchanged; `landmark-crown` crown on the authoritative artifact; 0 errors.
+- **Live HUD/regression:** join 3.35 s local (≤3.8); live nav→HUD includes QA landing overhead;
+  10 cards; 0 404s; no page/console errors.
+
+**Cycle-7 live deployment is verified end-to-end: green.** task-73 complete; cycle-8 candidates:
+zombie-bloated night tone, enemy QA framing/spawn hook, physical rumble/hardware, real-GPU/perceptual/
+mobile, surface-audio ear check, content depth, nest ground-decal polish.
