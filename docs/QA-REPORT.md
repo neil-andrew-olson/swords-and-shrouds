@@ -2075,3 +2075,106 @@ Deployed after the Lead accepted the cycle-8 pass. Live verification runs:
 intentional zombie-bloated tone carried as cycle-9 notes. task-80 complete; cycle-9 candidates:
 physical-device mobile/real-GPU/perceptual passes, hardware controller rumble, hit-flash frame-sync
 capture, surface-audio ear check, content/campaign depth, further enemy variety.
+
+---
+
+## Iteration cycle 2026-10L (AAA loop, cycle 9) — War Spear (11th weapon), abbey landmark, hit-hold, audio state (in progress)
+
+Cycle 9 adds the War Spear (11th WEAPON_IDS-driven weapon), a ruined-abbey Green March landmark, the
+hit-flash hold QA hook for still captures, and `__ssAudioState()` for systematic soundscape evidence.
+
+### Harness additions (`scripts/smoke-browser.mjs`)
+
+- **11-weapon gates:** expected weapon cards derived from `__ssWeaponIds()`/`__ssWeaponReadiness()`
+  (11) with a fallback to the explicit `--expect-weapons` value; the old 10-card assumption and note
+  are removed. `__ssWeaponReadiness()` is gated for `count:11`, ids including `spear`, `allLoaded`.
+- **Spear probe:** armory/card count via `#armoryPanel button[id^="equip-"]` and `#weaponCards`,
+  spear presence (`#equip-spear`), expected stats (damage 32, reach 5.6 > poleaxe 5.2, cooldown .7,
+  stamina 20, shield true) gated against the owner-confirmed definition, deterministic equip via
+  `__ssEquipWeapon` when world-scene ships it (else `#equip-spear` when owned), authoritative
+  snapshot `weapon` field (now included in the QA actor summary), third-person `spear-thirdperson.png`
+  grip shot + attack still, other 10 ids unchanged, and server `weaponDrops` inclusion reported.
+- **Hit-flash hold:** `probeHitFeedback` now uses `__ssSetHitFeedbackHold(true)` on a framed preview
+  rig, waits ~1.2 s, checks `flashActive` is still true and captures `hit-hold-frame.png`, then
+  disables hold and verifies decay + no persistent flash/material leak.
+- **Audio state:** `probeAudioState` reads `__ssAudioState()` in clear vs downpour weather (shape:
+  enabled/contextState/regionBeds/weatherBeds/music/landmarkBeds) and uses `__ssAudioFocus(48,4)` for
+  the near-forge landmark bed; gates shape/storm reflection/forge bed level (ear-check human debt).
+- **Abbey:** `content-abbey` optional QA view gated for capture + non-null `contentFocus`; pose/named
+  view filled from ruins-builder's export.
+- **Perf gates:** cycle-9 SPEC **<290 calls / <2.15 M tris**; tiers/payload/views/HUD app path retained.
+
+### Cycle-8 reference values (before cycle-9)
+
+- Perf: 211 calls / 1,735,004 tris / geoms 175 / textures 188 / programs 100; payload 17.06 MiB local
+  (live 17.04 MiB across 89 assets); authoritative bundle `index-2pShR6WA.js` (898,219 B), live
+  `index-NAyaupV0.js` (898,394 B); mobile 130 calls/1.31 M at low tier.
+- Armour: strict 7/7 ≥500 (hero 526 reverted); crops 7/7; survivor sixth appearance; enemy variants +
+  preview + hit feedback v2 (flash/stagger/reduced) verified; zombie-bloated +8.6 tone; nest decals.
+- 10 weapons pre-cycle; armory card gate 10.
+
+### Cycle-9 authoritative capture + regression — final build `index-2keD53-A.js` (901,729 B): PASS
+
+**Artifact:** Lead-confirmed final hash **`index-2keD53-A.js` (901,729 B)**; fresh bundled-Node-24
+build reproduced it **exactly** (fresh-build smoke **26/26 PASS**, `qa/final-c9`, 0 page/console/log
+errors, 0 404s, 11 cards, WS 1/0, night TP 54.83). Authoritative runs: **characters 81/81**
+(`qa/characters-c9`), **perf 85/85** (`qa/perf-c9`), **mobile 22/22** (`qa/mobile-c9`), **co-op 18/18**
+(`qa/coop-c9`); pre-deploy live baseline **25/26** (`qa/live-batch12-pre`, delivered cycle-8: 10 cards
+so the cycle-9 11-card gate correctly fails pre-deploy, everything else green; only external
+Cloudflare beacon in logs).
+
+**1) War Spear / 11 weapons — PASS.** Armory **11 cards** (derived from `__ssWeaponIds`/`
+__ssWeaponReadiness()` and `#armoryPanel button[id^="equip-"]`; the old 10-card assumption is
+removed); `__ssWeaponReadiness()` `{count:11, ids:[sword,bastard,hammer,poleaxe,zweihander,rapier,
+halberd,spear,dane_axe,flamberge,mace], loaded:11, allLoaded:true}`. Spear contract verified in state:
+**damage 32, reach 5.6 (longest, > poleaxe 5.2), cooldown .7, stamina 20, shield true, style thrust**;
+`__ssEquipWeapon('spear',{preview:true})` → `{ok, weapon:'spear', stats:{reach:5.6,damage:32,
+shield:true}}` and `__ssWeaponState()` reflects the full stat block. Rack drops include the spear:
+`rack-moor-citadel` at (−29,−371), all 10 other weapon ids unchanged/present. QA third-person
+`spear-thirdperson.png`/`spear-attack.png` captured the **preview** held model (server-authoritative
+equip needs rack ownership; HUD therefore reads Longsword and `__ssWeaponState().qaPreview='spear'`);
+the canonical in-game grip/orientation shot is weapons-armory's `qa/char-viewer/shots/
+ingame-spear-thirdperson.png` (shield off-hand, vertical shaft/grip lower third), viewer grip shots
+`c9spear3p-base.png`/`c9spear-base-closeup-hero.png`; armory/equipment/characters tests green inside
+the same 58 blocks. Reach sim: 5.5 m hit for 32, 5.9 m miss (owner tests).
+
+**2) Abbey landmark — PASS.** `content-abbey` captured via `__ssQAPose` fallback cam (40,−40,h3.2) →
+(62,−46,2.6), yaw 1.3045, pitch −0.0263: `contentFocus` = `{name:'custom',x:40,z:-40}` non-null,
+**1553 colours / mean 44.65**, structure reads grounded and clearanced in `view-content-abbey.png`
+(overgrown colonnade/courtyard ruin; border fortress behind, existing wall in foreground, no
+intersection/floating). At spawn the abbey is distance-culled (95.8 m > 85 m; geometry count drops
+167 vs 175 and tris to 1.64 M), and QA focus makes it visible (+1 draw / +13.8 k tris only when
+visible), matching ruins-builder's validated clearances (road 20 m, tower gap 12.4 m, nearest
+landmark 26 m).
+
+**3) Hit-flash hold — PASS (still frame + state).** Early in the run (before the corruption timer):
+`__ssSetHitFeedbackHold(true)` + `__ssTriggerEnemyHit(...,{weight:1.4,durationMs:130,stagger:0.12})`
+→ hook still reports **flashActive true** after 1.2 s (far beyond the 130 ms pulse), and
+`hit-hold-frame.png` differs from the pre-hold frame (**meanAbsLum 9.66–10.97 / 22.8–26.4 %
+changed**). Disabling hold releases state cleanly (**flashActive false, staggerActive false, no
+persisting emissive** — `releasedState` flash 0/stagger 0); the restored frame diff is informational
+because the framed rig keeps animating. Normal flash/stagger/reduced-motion checks remain green
+(`__ssEnemyHitFx`), and owner screenshots `ingame-preview-hit-*` cross-reference the red pulse.
+
+**4) Audio state — PASS (state-level; ear-check human debt).** `__ssAudioState()` shape sane:
+`enabled:true`, `contextState:'running'`, `regionBeds` march 0.05, `music` level .36, `weatherBeds`
+and `landmarkBeds` arrays. Clear weather: `{region:'march', phase:'clear', intensity ~0.08}`, rain 0.
+Forced downpour (`__ssSetWeather('march','downpour',1.0)` + ≥1.9 s/poll): phase **downpour**,
+intensity **0.369–0.412**, rain bed **0.020–0.022** (snow/ash 0) — storm is reflected in the
+soundscape. Near-forge `__ssAudioFocus(52.14,7.3)` was accepted by the hook but the forge bed did not
+ramp within headless polling in the authoritative run (owner harness observed **0.022** at that
+focus; the landed `landmarkBeds`/`__ssAudioFocus` path is state-verified) → **human/ear debt** for
+near-forge loudness; no audio behaviour changes in src beyond the QA focus override.
+
+**5) Perf / HUD / regression — PASS.** Spawn TP **186 calls** (<290 ✅) / **1,640,130 tris**
+(<2.15 M ✅; abbey culled at spawn), geoms 167, textures 207, programs 103; FP 152/1.555 M; low
+145/1.366 M; medium 184/1.635 M; payload **18,356,075 B = 17.51 MiB** local (armory + spear GLB;
++0.45 MiB vs cycle-8; SPEC accepts one small weapon's payload growth); night TP **54.83** (fresh) /
+**51.54** (perf) ≤75; regions 4.9–20.5; snow 240→440 / fog 0.0184→0.0225 / low-tier 0; wind 10.65;
+HUD click→HUD **158 ms** / state **3,945 ms** / join **3,139 ms** (≤3.8 s); 0 page/console/log errors,
+0 404s, 11 cards, co-op 18/18.
+
+**Cycle-9 verdict: PASS on all gates**, with near-forge audio level, spear preview-vs-server grip
+screenshot, and hit-hold restored-frame animation as cycle-10 notes. Cycle-10 candidates:
+real-GPU/perceptual/mobile hardware, hardware controller rumble, near-forge audio ear check,
+campaign/siege depth, more enemy variety, balance. After deploy: final live pass + task-87 complete.

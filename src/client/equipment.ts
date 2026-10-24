@@ -10,6 +10,7 @@ export const WEAPON_GRIPS:Record<string,{grip:number[];blade:number[]}>= {
  zweihander:{grip:[0,-.65,.70],blade:[0,.682,-.731]},
  rapier:{grip:[0,0,0],blade:[0,1,0]},
  halberd:{grip:[0,0,0],blade:[0,1,0]},
+ spear:{grip:[0,0,0],blade:[0,1,0]},
  dane_axe:{grip:[0,0,0],blade:[0,1,0]},
  flamberge:{grip:[0,0,0],blade:[0,1,0]},
  mace:{grip:[0,0,0],blade:[0,1,0]}
@@ -52,7 +53,7 @@ export function shieldBacking(parent:THREE.Object3D){
  */
 export type CombatSwingStyle='thrust'|'cleave'|'crush'|'sweep';
 export type WeaponCombatProfile={style:CombatSwingStyle;weight:number;trail:[number,number,number];impact:[number,number,number]};
-const SWING_BY_ASSET:Record<string,CombatSwingStyle>={sword:'thrust',rapier:'thrust',flamberge:'cleave',dane_axe:'cleave',zweihander:'cleave',mace:'crush',hammer:'crush',bastard:'crush',poleaxe:'sweep',halberd:'sweep'};
+const SWING_BY_ASSET:Record<string,CombatSwingStyle>={sword:'thrust',rapier:'thrust',spear:'thrust',flamberge:'cleave',dane_axe:'cleave',zweihander:'cleave',mace:'crush',hammer:'crush',bastard:'crush',poleaxe:'sweep',halberd:'sweep'};
 const TRAIL_BASE:Record<CombatSwingStyle,[number,number,number]>={thrust:[1.1,1.5,1.8],cleave:[1.8,1.0,.38],crush:[1.35,1.35,1.55],sweep:[.75,1.55,1.15]};
 const IMPACT_BASE:Record<CombatSwingStyle,[number,number,number]>={thrust:[.9,1.4,1.9],cleave:[1.9,.9,.35],crush:[1.6,1.4,1.1],sweep:[.8,1.6,1.2]};
 /** Deterministic per-weapon combat profile: type from the asset, weight from damage (0.8–1.6). */

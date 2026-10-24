@@ -262,7 +262,7 @@ for(const location of ['landing','armory']){
 }
 
 // ---- Read-only QA hooks: character selector state + controller/pad state (no gameplay effect) ----
-const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown};
+const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown;__ssAudioState?:()=>unknown;__ssAudioFocus?:(x?:number|null,z?:number|null)=>unknown};
 qaHooks.__ssCharacterSelect=()=>({
  appearanceField:'appearance',
  landingSelectId:characterSelectors[0]?.id??null,
@@ -314,6 +314,31 @@ qaHooks.__ssCaptionDemo=(cue?:string)=>{
  const target=cues.includes(cue as CaptionCue)?cue as CaptionCue:'thunder';
  showCaption(target,'Demo Keep',true);
  return qaHooks.__ssCaptions?.();
+};
+/** Read-only audio soundscape diagnostic: current beds/layers + weather/music/duck state, built on
+ * demand from the live Ambience graph (no hot-path work, no logging, no audio behaviour changes). */
+qaHooks.__ssAudioState=()=>{
+ const state=ambience.audioState();
+ return {
+  enabled:soundEnabled(),
+  paused:document.hidden||guide.open||result.open,
+  contextState:state.contextState,
+  weather:state.weather,
+  regionBeds:state.regionBeds,
+  music:state.music,
+  weatherBeds:state.weatherBeds,
+  landmarkBeds:state.landmarkBeds,
+  captionsEnabled,
+  masterMuted:!soundEnabled(),
+  focus:state.focus
+ };
+};
+/** QA-only diagnostic focus for landmark beds: pass furnace/altar x,z to hear the forge/chapel bed
+ * without walking the player; call with null/undefined to restore normal player proximity. */
+qaHooks.__ssAudioFocus=(x?:number|null,z?:number|null)=>{
+ const pos=typeof x==='number'&&typeof z==='number'&&Number.isFinite(x)&&Number.isFinite(z)?{x,z}:null;
+ ambience.setDiagnosticFocus(pos);
+ return qaHooks.__ssAudioState?.();
 };
 
 // ---- Progressive world loading: show real asset counts, gate joining on the core set only ----

@@ -32,11 +32,18 @@ const WEAPONS = [
     name: 'dane_axe', src: 'great_dane_axe.glb', budget: 1200, texSize: 1024,
     tipHints: ['head'], buttHints: ['handle'],
   },
+  {
+    // cycle-9 War Spear: single variant picked from the low-poly-spear-set warehouse pack
+    // (scripts/bake/bake-spear-source.py exports the joined variant as spear_source.glb).
+    // Vertical shaft along +Y after the glTF Y-up conversion; girth heuristic finds the head.
+    name: 'spear', src: 'spear_source.glb', budget: 3400, texSize: 512, nightTone: true, girthMax: true, normalizeHeight: 2.2, dropNormal: true,
+  },
 ];
 
 const args = process.argv.slice(2);
 const inspectOnly = args.includes('--inspect');
 const onlyArg = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',') : null;
+const outArg = args.includes('--outdir') ? args[args.indexOf('--outdir') + 1] : null;
 
 const io = new NodeIO();
 await MeshoptSimplifier.ready;
@@ -118,6 +125,24 @@ async function bake(def) {
       console.log(`   orientation from named parts: tip=${tip.map((v) => v.toFixed(2))} butt=${butt.map((v) => v.toFixed(2))}`);
     }
   }
+  if (def.girthMax) {
+    // spear-style: the head end has the LARGEST cross-section (blade), the butt is a thin cap
+    const prims = vertices(doc);
+    const axis = longAxis;
+    const lo = bounds.min[axis], hi = bounds.max[axis], span = hi - lo || 1;
+    let rLo = 0, rHi = 0;
+    for (const p of prims) {
+      const arr = p.getAttribute('POSITION').getArray();
+      for (let i = 0; i < arr.length; i += 3) {
+        const t = (arr[i + axis] - lo) / span;
+        const others = [0, 1, 2].filter((k) => k !== axis);
+        const r = Math.hypot(arr[i + others[0]], arr[i + others[1]]);
+        if (t < 0.10) rLo = Math.max(rLo, r); else if (t > 0.90) rHi = Math.max(rHi, r);
+      }
+    }
+    dir = [0, 0, 0]; dir[axis] = rHi >= rLo ? 1 : -1;
+    console.log(`   max-radius heuristic: rLo=${rLo.toFixed(3)} rHi=${rHi.toFixed(3)} -> ${dir[axis] > 0 ? '+' : '-'}${'xyz'[axis]}`);
+  }
   if (def.girth || dir.every((v) => Math.abs(v) < 1e-6)) {
     // girth heuristic: the head end has much larger cross-section
     const prims = vertices(doc);
@@ -148,6 +173,15 @@ async function bake(def) {
     const b = sceneBounds(doc);
     console.log(`   after align: min=${b.min.map((v) => v.toFixed(3))} max=${b.max.map((v) => v.toFixed(3))}`);
     return;
+  }
+  // 2b) optional real-world normalisation (spear source is in centimetres)
+  if (def.normalizeHeight) {
+    let bb = sceneBounds(doc);
+    const k = def.normalizeHeight / Math.max(1e-6, bb.size[1]);
+    const S = [k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, 0, 0, 0, 1];
+    transformAll(doc, S);
+    bb = sceneBounds(doc);
+    console.log(`   normalised height ${bb.size[1].toFixed(3)} (scale ${k.toFixed(4)})`);
   }
   // 3) Translate: min.y = -0.20 * height, x/z centred on the handle (bottom quarter centroid)
   let b = sceneBounds(doc);
@@ -189,6 +223,10 @@ async function bake(def) {
   }
   console.log(`   final tris=${triAt()}`);
 
+  // 4b) optional: drop normal maps (thin weapon silhouette, normal detail is not worth the payload)
+  if (def.dropNormal) {
+    for (const mat of doc.getRoot().listMaterials()) mat.setNormalTexture(null);
+  }
   // 5) Textures: one pass for colour, one for normals (JPEG, capped resolution)
   const size = [def.texSize, def.texSize];
   await doc.transform(
@@ -197,6 +235,21 @@ async function bake(def) {
   await doc.transform(
     textureCompress({encoder: sharp, targetFormat: 'jpeg', resize: size, slots: /normalTexture/, quality: 92}),
   );
+  // 5b) night tone: darken + cool-shift the albedo so the weapon sits in the night palette
+  if (def.nightTone) {
+    const seen = new Set();
+    for (const mat of doc.getRoot().listMaterials()) {
+      const tex = mat.getBaseColorTexture();
+      if (!tex || seen.has(tex)) continue;
+      seen.add(tex);
+      const img = tex.getImage();
+      if (!img) continue;
+      const toned = await sharp(Buffer.from(img)).linear(0.84, 0).modulate({brightness: 1.0, saturation: 0.9})
+        .tint({r: 214, g: 226, b: 246}).jpeg({quality: 88, mozjpeg: true}).toBuffer();
+      tex.setImage(new Uint8Array(toned)).setMimeType('image/jpeg');
+    }
+    console.log('   night-toned albedo textures: ' + seen.size);
+  }
   await doc.transform(dedup(), prune());
   // 6) Safety: force indexed + UV presence, drop skins/animations
   for (const a of doc.getRoot().listAnimations()) a.dispose();
@@ -222,7 +275,8 @@ for (const def of WEAPONS) {
   results.push(await bake(def));
 }
 if (!inspectOnly) {
-  ensureDir(OUT_DIR);
-  for (const r of results) fs.writeFileSync(path.join(OUT_DIR, r.def.name + '.glb.gz'), r.gz);
-  console.log('\nwrote: ' + results.map((r) => `${r.def.name}.glb.gz (${(r.gz.length / 1024).toFixed(1)}KB)`).join(', '));
+  const dir = outArg ? path.resolve(outArg) : OUT_DIR;
+  ensureDir(dir);
+  for (const r of results) fs.writeFileSync(path.join(dir, r.def.name + '.glb.gz'), r.gz);
+  console.log('\nwrote: ' + results.map((r) => `${r.def.name}.glb.gz (${(r.gz.length / 1024).toFixed(1)}KB)`).join(', ') + ' -> ' + dir);
 }

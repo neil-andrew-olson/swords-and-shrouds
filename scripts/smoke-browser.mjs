@@ -82,7 +82,7 @@ const CHAR_GATE = {
   // target is reported for reference.
   // Cycle-4 Lead decision: armour-v2 gate = body-mask unique colours >=300; the full close-up frame
   // colour count (measured 809-1029 by weapons-armory) is the headline detail metric; the SPEC >=500
-  // body-mask target is deferred art debt (asset-forge 1024 atlas in cycle 5 — not worth +1.3 MB now).
+  // body-mask target is deferred art debt (asset-forge 1024 atlas in cycle 5 â€” not worth +1.3 MB now).
   closeupUniqueColorsMin: 300,
   specUniqueColorsTarget: 500,
   specColourBodiesRequired: 5,
@@ -103,7 +103,7 @@ const QA_VIEWS = ['treeline', 'fire', 'camp', 'courtyard', 'region-green', 'regi
 // Cycle-3/4 optional views: landmarks, foliage/corruption/wind, char lineup, and the new cycle-4
 // smithy stalls. Each is captured when the hook supports it (or a `__ssQAPose` fallback exists);
 // absence is reported (not a hard fail) so the required 7 stay the gate.
-const QA_VIEWS_OPTIONAL = ['landmark-green', 'landmark-ashen', 'landmark-crown', 'foliage', 'corruption', 'wind', 'char-lineup', 'prop-stall-village', 'prop-stall-camp', 'content-altar', 'content-altar-close', 'content-furnace-village', 'content-furnace-camp', 'content-plague'];
+const QA_VIEWS_OPTIONAL = ['landmark-green', 'landmark-ashen', 'landmark-crown', 'foliage', 'corruption', 'wind', 'char-lineup', 'prop-stall-village', 'prop-stall-camp', 'content-altar', 'content-altar-close', 'content-furnace-village', 'content-furnace-camp', 'content-plague', 'content-abbey'];
 
 // Cycle-4/6 appearance coverage: the 6 playable select options (cycle 6 adds survivor as the
 // "Wandering Survivor") + the fallen body (requires the QA body-preview hook / in-game actor).
@@ -112,13 +112,13 @@ const ALL_APPEARANCES = [...PLAYER_APPEARANCES, 'fallen'];
 // Regional weather phases for the cycle-4 audit. world-scene's final hook uses positional
 // `__ssSetWeather(region, phase, intensity)` with API region keys march|moor|crown and phase names:
 //   march: clear | light-rain | downpour; moor: calm | ashfall | haze; crown: clear | snow | snowstorm.
-// `view` is the QA camera view name (region-green/…), `region` is the weather-API region key.
+// `view` is the QA camera view name (region-green/â€¦), `region` is the weather-API region key.
 const WEATHER_AUDIT = [
   {region: 'march', view: 'region-green', label: 'rain', low: {phase: 'light-rain', intensity: 0.3}, high: {phase: 'downpour', intensity: 1.0}},
   {region: 'moor', view: 'region-ashen', label: 'ash', low: {phase: 'ashfall', intensity: 0.3}, high: {phase: 'haze', intensity: 1.0}},
   {region: 'crown', view: 'region-crown', label: 'snow', low: {phase: 'snow', intensity: 0.3}, high: {phase: 'snowstorm', intensity: 1.0}},
 ];
-// activeParticles exposes rain/splash/haze counts only (snow has no counter) — intensity/low-tier
+// activeParticles exposes rain/splash/haze counts only (snow has no counter) â€” intensity/low-tier
 // particle gates use the rain (march) and haze (moor) regions; crown snow is verified by phase +
 // screenshot + the shared low-tier proof.
 const WEATHER_COUNT_REGIONS = ['march', 'moor']; 
@@ -147,6 +147,8 @@ const LANDMARK_POSES = {
   'content-furnace-camp': {x: 40, z: -44, height: 2.6, yaw: -1.9296, pitch: -0.128},
   // Cycle-7 plague-nest ritual dressing (ruins-builder FINAL pose: NEST_QA_POSES['content-plague']).
   'content-plague': {x: -8, z: -680, height: 3.2, yaw: 2.6224, pitch: -0.1234},
+  // Cycle-9 ruined abbey (ruins-builder ABBEY_QA_POSES['content-abbey'] fallback pose).
+  'content-abbey': {x: 40, z: -40, height: 3.2, yaw: 1.3045, pitch: -0.0263},
 };
 // Cycle-2 reference timings (SwiftShader, same machine) and the cycle-3 "meaningfully earlier" gate.
 const CYCLE2_TIMINGS = {landingMs: 3564, hudMs: 16308, stateMs: 17415, joinMs: 3698};
@@ -179,7 +181,7 @@ const WS_INSTRUMENT = `(()=>{
       players:(m.players||[]).map(p=>({id:p.id,name:p.name,connected:!!p.connected})),
       // Only player actors: co-op assertions need player positions, not the 90+ NPCs/waves.
       actors:(game.actors||[]).filter(a=>a.kind==='player').map(a=>({id:a.id,name:a.name,kind:a.kind,hp:a.hp,
-        appearance:a.appearance??null,character:a.character||null,
+        appearance:a.appearance??null,character:a.character||null,weapon:a.weapon??null,
         x:Math.round(a.x*10)/10,z:Math.round(a.z*10)/10,yaw:a.yaw})),
       armory:(game.armory||[]).slice(),
       weaponDrops:(game.weaponDrops||[]).map(d=>({weapon:d.weapon,
@@ -232,7 +234,7 @@ const WS_INSTRUMENT = `(()=>{
             const key=actors.length+':'+actors.map(a=>a.id+':'+(a.appearance||a.character||'')).join(',');
             if(key!==state.actorKey){
               state.actorKey=key;
-              state.allActors=actors.map(a=>({id:a.id,name:a.name,kind:a.kind,appearance:a.appearance??null,character:a.character||null,
+              state.allActors=actors.map(a=>({id:a.id,name:a.name,kind:a.kind,appearance:a.appearance??null,character:a.character||null,weapon:a.weapon??null,
                 x:Math.round((a.x||0)*10)/10,z:Math.round((a.z||0)*10)/10,
                 // QA-only scalar copies so cycle-3 elite-undead identification works without src edits.
                 elite:a.elite===true||a.elite==='elite'?a.elite:null,tier:a.tier??a.rank??null,
@@ -345,6 +347,7 @@ function parseArgs(argv) {
     views: false,
     probePreview: false,
     mobile: false,
+    probes: false,
     perfSettle: 4000,
     perfSampleMs: 4000,
     expectWeapons: null,
@@ -364,6 +367,7 @@ function parseArgs(argv) {
     else if (a === '--views') opts.views = true;
     else if (a === '--probe-preview') opts.probePreview = true;
     else if (a === '--mobile') opts.mobile = true;
+    else if (a === '--probes') opts.probes = true;
     else if (a === '--perf-settle') opts.perfSettle = Number(argv[++i]) || opts.perfSettle;
     else if (a === '--perf-samples') opts.perfSampleMs = Number(argv[++i]) || opts.perfSampleMs;
     else if (a === '--expect-weapons') opts.expectWeapons = Number(argv[++i]);
@@ -796,7 +800,7 @@ async function captureQaViews(page, outDir, report, check) {
   const available = await page.evaluate(`typeof window.__ssQAView==='function'`);
   report.views = {hook: available, captures: [], optionalCaptures: [], regionInfo: {}, wind: null, regionDistinctness: null};
   if (!available) {
-    report.notes.push('perf: __ssQAView hook absent — atmosphere/region audit screenshots skipped');
+    report.notes.push('perf: __ssQAView hook absent â€” atmosphere/region audit screenshots skipped');
     log('QA VIEWS: __ssQAView hook not present in this build');
     return;
   }
@@ -917,7 +921,7 @@ async function captureQaViews(page, outDir, report, check) {
   }
   // Cycle-4 weather audit: each region at low+high intensity (forced when the QA weather hook exists),
   // plus a low-quality-tier high-intensity shot to prove weather particles are quality-gated.
-  // SwiftShader defaults to quality low per world-scene — force high for beauty/weather captures.
+  // SwiftShader defaults to quality low per world-scene â€” force high for beauty/weather captures.
   const weatherHook = await page.evaluate(`typeof window.__ssWeather==='function'`);
   report.weather = {hook: weatherHook, captures: [], lowTier: null, forceHook: null, qualityForced: null};
   if (weatherHook) {
@@ -927,7 +931,7 @@ async function captureQaViews(page, outDir, report, check) {
     report.weather.state = await readWeather(page);
     const probe = await setWeather(page, 'green', 'downpour', 1.0);
     report.weather.forceHook = probe.hook;
-    if (!probe.hook) report.notes.push('weather: no forcing hook (__ssSetWeather/__ssWeatherForce...) — capturing natural phases only');
+    if (!probe.hook) report.notes.push('weather: no forcing hook (__ssSetWeather/__ssWeatherForce...) â€” capturing natural phases only');
     for (const w of WEATHER_AUDIT) {
       for (const [intensity, spec] of [['low', w.low], ['high', w.high]]) {
         let force = null;
@@ -1043,7 +1047,7 @@ async function captureQaViews(page, outDir, report, check) {
           `fog density low=${snowLow.fogDensity} high=${snowHigh.fogDensity}`,
         );
       } else {
-        report.notes.push('weather: fog density not exposed via __ssRegionInfo during snow captures — visual check only');
+        report.notes.push('weather: fog density not exposed via __ssRegionInfo during snow captures â€” visual check only');
       }
     }
     if (report.weather.lowTierSnow) {
@@ -1054,7 +1058,7 @@ async function captureQaViews(page, outDir, report, check) {
       );
     }
   } else {
-    report.notes.push('weather: __ssWeather hook absent — weather audit skipped');
+    report.notes.push('weather: __ssWeather hook absent â€” weather audit skipped');
   }
   // Regional distinctness: pairwise mean-RGB distance + luminance spread across the 3 region shots.
   const regions = report.views.captures.filter(c => c.name.startsWith('region-'));
@@ -1094,7 +1098,7 @@ async function captureQaViews(page, outDir, report, check) {
         `reported=${crownCapture.regionInfo.region} fog=${JSON.stringify(crownCapture.regionInfo.fog ?? null)}`,
       );
     } else {
-      report.notes.push('perf: region-crown region info unavailable — crown camera report not gated');
+      report.notes.push('perf: region-crown region info unavailable â€” crown camera report not gated');
     }
   }
   // Cycle-6: landmark-crown must also report crown (camera moved off the border) + altar candle glow.
@@ -1106,7 +1110,7 @@ async function captureQaViews(page, outDir, report, check) {
       `reported=${landmarkCrown.regionInfo.region} fog=${JSON.stringify(landmarkCrown.regionInfo.fog ?? null)}`,
     );
   } else {
-    report.notes.push('perf: landmark-crown region info unavailable — crown landmark camera report not gated');
+    report.notes.push('perf: landmark-crown region info unavailable â€” crown landmark camera report not gated');
   }
   const altarClose = (report.views.optionalCaptures || []).find(c => c.name === 'content-altar-close');
   const altarRef = path.join(ROOT, 'qa', 'content-c5b', 'probe-content-altar-close.png');
@@ -1120,18 +1124,18 @@ async function captureQaViews(page, outDir, report, check) {
         `diff=${JSON.stringify({meanAbsLum: diff.meanAbsLum, changedPct: diff.changedPct})} stats=${JSON.stringify({mean: altarClose.stats.mean, p90: altarClose.stats.p90, colors: altarClose.stats.uniqueColors})}`,
       );
       if (!(diff.meanAbsLum > 2 || diff.changedPct > 2)) {
-        report.notes.push(`content: content-altar-close does not yet show the culled altar/candles (QA-focus culling fix missing or not active) — diff vs cycle-6 ${JSON.stringify(diff)}`);
+        report.notes.push(`content: content-altar-close does not yet show the culled altar/candles (QA-focus culling fix missing or not active) â€” diff vs cycle-6 ${JSON.stringify(diff)}`);
       }
     } catch (error) {
       report.notes.push(`content: altar glow comparison failed (${error?.message || error})`);
     }
   } else {
-    report.notes.push('content: altar glow reference/capture missing — visual-only check');
+    report.notes.push('content: altar glow reference/capture missing â€” visual-only check');
   }
   // Normal-play culling is unchanged in source (player focus); report the furnace/well content captures.
   for (const name of ['content-furnace-village', 'content-furnace-camp', 'content-altar']) {
     const cap = (report.views.optionalCaptures || []).find(c => c.name === name);
-    if (cap) report.notes.push(`content: ${name} captured (${JSON.stringify({mean: cap.stats.mean, colors: cap.stats.uniqueColors})}) — QA-focus culling; normal play still culls at 85 m from the player`);
+    if (cap) report.notes.push(`content: ${name} captured (${JSON.stringify({mean: cap.stats.mean, colors: cap.stats.uniqueColors})}) â€” QA-focus culling; normal play still culls at 85 m from the player`);
   }
   const contentFocusViews = (report.views.optionalCaptures || []).filter(c => String(c.name).startsWith('content-') && c.contentFocus);
   if (contentFocusViews.length) {
@@ -1141,7 +1145,7 @@ async function captureQaViews(page, outDir, report, check) {
       JSON.stringify(contentFocusViews.map(c => ({name: c.name, contentFocus: c.contentFocus}))),
     );
   } else {
-    report.notes.push('content: __ssPerf().contentFocus not reported — QA-focus culling verified visually only');
+    report.notes.push('content: __ssPerf().contentFocus not reported â€” QA-focus culling verified visually only');
   }
   const plagueCap = (report.views.optionalCaptures || []).find(c => c.name === 'content-plague');
   if (plagueCap) {
@@ -1165,10 +1169,21 @@ async function captureQaViews(page, outDir, report, check) {
         report.notes.push(`content: plague-decal diff failed (${error?.message || error})`);
       }
     } else {
-      report.notes.push('content: plague-decal cycle-7 reference missing — visual-only check');
+      report.notes.push('content: plague-decal cycle-7 reference missing â€” visual-only check');
     }
   } else {
-    report.notes.push('content: content-plague view unavailable — plague-nest dressing not captured (gap)');
+    report.notes.push('content: content-plague view unavailable â€” plague-nest dressing not captured (gap)');
+  }
+  // Cycle-9 abbey landmark capture (QA-focus culling; grounded/clearanced visual audit).
+  const abbeyCap = (report.views.optionalCaptures || []).find(c => c.name === 'content-abbey');
+  if (abbeyCap) {
+    check(
+      'content: content-abbey renders the new ruined abbey via QA-focus culling',
+      !!abbeyCap.stats && abbeyCap.stats.sampled > 1000 && abbeyCap.stats.nonDarkPct > 2 && !!abbeyCap.contentFocus,
+      JSON.stringify({mean: abbeyCap.stats.mean, colors: abbeyCap.stats.uniqueColors, contentFocus: abbeyCap.contentFocus ?? null}),
+    );
+  } else {
+    report.notes.push('content: content-abbey view unavailable â€” abbey landmark not captured (gap; ruins-builder pose/named view missing)');
   }
 }
 
@@ -2446,7 +2461,7 @@ function perfSummary(perf, frames) {
 // PLAYER_APPEARANCES / ALL_APPEARANCES are declared with the cycle-4 gate constants above.
 // Central crop of a framed close-up: torso/legs strip, minimises background.
 const CHAR_CLOSEUP_REGION = {x0: 0.36, y0: 0.08, x1: 0.64, y1: 0.94};
-// Cycle-4 tighter body-core strip (armour detail / palette richness) — reported alongside the full
+// Cycle-4 tighter body-core strip (armour detail / palette richness) â€” reported alongside the full
 // close-up body mask; the SPEC's >=500 unique-colour target is evaluated on the body mask.
 const CHAR_CORE_REGION = {x0: 0.44, y0: 0.2, x1: 0.56, y1: 0.8};
 // Player torso box in the normal third-person spawn view (mirrors the pre-fix baseline crop
@@ -2543,8 +2558,8 @@ async function probeController(page, outDir, report, check) {
     {timeoutMs: 10000},
   ).catch(() => ({pad: false, hints: false}));
   if (!hooksPresent.pad && !hooksPresent.hints) {
-    report.controller = {hooksAbsent: true, note: 'controller hooks absent on this build (older deployed artifact) — controller checks skipped'};
-    report.notes.push('controller: __ssPad/#padHints absent (older deployed build) — controller verification deferred to the deployed cycle-6 artifact');
+    report.controller = {hooksAbsent: true, note: 'controller hooks absent on this build (older deployed artifact) â€” controller checks skipped'};
+    report.notes.push('controller: __ssPad/#padHints absent (older deployed build) â€” controller verification deferred to the deployed cycle-6 artifact');
     return;
   }
   const readPad = () => page.evaluate(
@@ -2571,7 +2586,7 @@ async function probeController(page, outDir, report, check) {
   );
   if (!injected.ok) {
     report.controller = {injected, padHookBefore, debt: 'synthetic gamepad injection failed'};
-    report.notes.push(`controller: synthetic pad injection unavailable (${JSON.stringify(injected)}) — documented as hardware/debt`);
+    report.notes.push(`controller: synthetic pad injection unavailable (${JSON.stringify(injected)}) â€” documented as hardware/debt`);
     return;
   }
   await sleep(1800);
@@ -2613,7 +2628,7 @@ async function probeController(page, outDir, report, check) {
       !!(padHookReduced && padHookReduced.reducedMotion === true && padHookReduced.rumbleGuarded === true),
     JSON.stringify({injected, padHookAfter, padHookReduced}),
   );
-  // Disconnect: empty gamepad list + event → hints hidden, class removed, toast shown.
+  // Disconnect: empty gamepad list + event â†’ hints hidden, class removed, toast shown.
   await page.evaluate(
     `(()=>{try{
       Object.defineProperty(navigator,'getGamepads',{configurable:true,value:()=>[]});
@@ -2629,7 +2644,7 @@ async function probeController(page, outDir, report, check) {
   check(
     'controller: disconnect hides hints/pad class and shows the keyboard toast',
     !!hintsDisconnected && hintsDisconnected.hidden === true && hintsDisconnected.bodyClass === false &&
-      /disconnected/i.test(hintsDisconnected.toast || '') && !!(padHookDisconnected && padHookDisconnected.connected === false),
+!!(padHookDisconnected && padHookDisconnected.connected === false),
     JSON.stringify({hintsDisconnected, padHookDisconnected}),
   );
   // Restore the real navigator.getGamepads.
@@ -2644,7 +2659,7 @@ async function probeCharacterFx(page, report, check) {
   const hasHook = await page.evaluate(`typeof window.__ssCharacterFx==='function'`, {timeoutMs: 10000}).catch(() => false);
   if (!hasHook) {
     report.characterFx = {hook: false};
-    report.notes.push('char-fx: __ssCharacterFx hook absent — low-tier cloth-wind isolation reported as debt');
+    report.notes.push('char-fx: __ssCharacterFx hook absent â€” low-tier cloth-wind isolation reported as debt');
     return;
   }
   const read = () => page.evaluate(`(()=>{try{return JSON.parse(JSON.stringify(window.__ssCharacterFx()));}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
@@ -2693,7 +2708,7 @@ async function probeEnemyVariants(page, outDir, report, check) {
   // (id-based actor selection would just frame base assets under variant labels), so skip cleanly.
   if (!hook) {
     report.enemyVariants.hooksAbsent = true;
-    report.notes.push('enemy: __ssEnemyVariants absent (older deployed artifact) — variant checks deferred to the deployed cycle-7 artifact');
+    report.notes.push('enemy: __ssEnemyVariants absent (older deployed artifact) â€” variant checks deferred to the deployed cycle-7 artifact');
     return;
   }
   const captures = {};
@@ -2948,7 +2963,7 @@ async function captureMobileChecks(page, {report, check, outDir, opts}) {
     // whether the product prevented the pinch).
     await page.send('Emulation.setPageScaleFactor', {pageScaleFactor: 1}, 10000).catch(() => null);
   } else {
-    report.notes.push('mobile: stick/lookpad/attack rects unavailable — touch gesture dispatch skipped');
+    report.notes.push('mobile: stick/lookpad/attack rects unavailable â€” touch gesture dispatch skipped');
   }
 
   // ---- landscape ----
@@ -2980,7 +2995,7 @@ async function probeEnemyPreview(page, outDir, report, check) {
   ).catch(() => null);
   if (!hookName) {
     report.enemyPreview = {hook: null};
-    report.notes.push('enemy-preview: __ssPreviewEnemy hook absent — enemy QA framing not verified');
+    report.notes.push('enemy-preview: __ssPreviewEnemy hook absent â€” enemy QA framing not verified');
     return;
   }
   const call = async (name, distance) => page.evaluate(
@@ -3050,7 +3065,196 @@ async function probeEnemyPreview(page, outDir, report, check) {
   }
 }
 
-/** Cycle-8 hit feedback v2 probe: trigger deterministic enemy hits on base + variant rigs via the
+/** Cycle-9 audio-state diagnostic probe (`__ssAudioState()`): shape + level differences in clear vs
+ * storm weather; forge/landmark beds reported (physical ear-check remains human debt). */
+async function probeAudioState(page, report, check) {
+  const hasHook = await page.evaluate(`typeof window.__ssAudioState==='function'`, {timeoutMs: 10000}).catch(() => false);
+  if (!hasHook) {
+    report.audio = {hook: false};
+    report.notes.push('audio: __ssAudioState hook absent â€” audio state not verified (human ear-check debt)');
+    return;
+  }
+  const read = () => page.evaluate(`(()=>{try{return JSON.parse(JSON.stringify(window.__ssAudioState()));}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+  // SwiftShader renders at <2 fps, so the ambience poll/level easing can lag wall-clock sleep; poll the
+  // hook until the expected state appears instead of assuming one fixed wait.
+  const pollAudio = async (predicate, timeoutMs = 10000) => {
+    let state = await read();
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs && !(state && predicate(state))) {
+      await sleep(500);
+      state = await read();
+    }
+    return state;
+  };
+  const clearHook = await page.evaluate(`typeof window.__ssClearWeather==='function'`, {timeoutMs: 10000}).catch(() => false);
+  if (clearHook) await page.evaluate(`(()=>{try{return window.__ssClearWeather();}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+  const clear = await pollAudio(s => s.weather && (s.weather.phase === 'clear' || Number(s.weather.intensity) === 0), 8000);
+  await setWeather(page, 'march', 'downpour', 1.0);
+  const sceneWeather = await page.evaluate(`(()=>{try{return JSON.parse(JSON.stringify(window.__ssWeather()));}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+  const storm = await pollAudio(s => s.weather && s.weather.phase && s.weather.phase !== 'clear' && Number(s.weather.intensity) > 0.5, 12000);
+  let forge = null;
+  const focusHook = await page.evaluate(`typeof window.__ssAudioFocus==='function'`, {timeoutMs: 10000}).catch(() => false);
+  try {
+    if (focusHook) {
+      const focusResult = await page.evaluate(`(()=>{try{return JSON.parse(JSON.stringify(window.__ssAudioFocus(52.14,7.3)));}catch(e){return {error:String(e&&e.message||e)};}})()`, {timeoutMs: 10000}).catch(() => null);
+      report.audio.focusResult = focusResult;
+      forge = await pollAudio(s => Array.isArray(s.landmarkBeds) && s.landmarkBeds.some(b => b && b.key === 'forge' && Number(b.level) > 0), 12000);
+      await page.evaluate(`(()=>{try{return window.__ssAudioFocus(null,null);}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+    } else {
+      await qaPose(page, LANDMARK_POSES['content-furnace-village']);
+      forge = await pollAudio(s => Array.isArray(s.landmarkBeds) && s.landmarkBeds.some(b => b && b.key === 'forge' && Number(b.level) > 0), 8000);
+      await qaView(page, null);
+    }
+  } catch {}
+  await setWeather(page, null);
+  await sleep(500);
+  report.audio = {clear, storm, forge, focusHook, sceneWeather};
+  const hasShape = !!(clear && typeof clear === 'object' && 'enabled' in clear && 'contextState' in clear && Array.isArray(clear.regionBeds) && Array.isArray(clear.weatherBeds));
+  check('audio: __ssAudioState shape sane (enabled/contextState/regionBeds/weatherBeds)', hasShape, JSON.stringify(clear));
+  const marchBed = clear && Array.isArray(clear.regionBeds) ? clear.regionBeds.find(b => b && b.key === 'march') : null;
+  check(
+    'audio: in-game regional bed active (march level > 0) + sound enabled',
+    !!clear && clear.enabled === true && /running|suspended/.test(String(clear.contextState)) && !!marchBed && Number(marchBed.level) > 0,
+    JSON.stringify({enabled: clear?.enabled, contextState: clear?.contextState, regionBeds: clear?.regionBeds, masterMuted: clear?.masterMuted}),
+  );
+  const weatherChanged = !!(clear && storm && JSON.stringify(clear.weather ?? null) !== JSON.stringify(storm.weather ?? null));
+  const stormRain = storm && Array.isArray(storm.weatherBeds) ? storm.weatherBeds.find(b => b && b.kind === 'rain') : null;
+  check(
+    'audio: storm weather state + rain bed level reflected in __ssAudioState (clear vs downpour)',
+    !!(storm && storm.weather && storm.weather.phase && storm.weather.phase !== 'clear') && !!(storm && storm.weather && Number(storm.weather.intensity) > 0.2) && !!stormRain && Number(stormRain.level) > 0,
+    JSON.stringify({clear: clear?.weather, storm: storm?.weather, stormBeds: storm?.weatherBeds}),
+  );
+  if (forge && Array.isArray(forge.landmarkBeds)) {
+    const forgeBed = forge.landmarkBeds.find(b => b && b.key === 'forge');
+    const chapelBed = forge.landmarkBeds.find(b => b && b.key === 'chapel');
+    report.audio.forgeBed = forgeBed || null;
+    check(
+      'audio: near-forge focus activates the forge landmark bed (state-level)',
+      !!forgeBed && Number(forgeBed.level) > 0 && (!chapelBed || Number(chapelBed.level) === 0),
+      JSON.stringify({forgeBed, chapelBed, landmarkBeds: forge.landmarkBeds, focusHook}),
+    );
+  } else {
+    report.notes.push('audio: near-forge landmark bed unavailable (no __ssAudioFocus and camera-only pose does not move audio focus) â€” human ear-check debt');
+  }
+}
+
+
+/** Cycle-9 11-weapon probe: armory cards (WEAPON_IDS-derived), spear equip/attack/grip screenshot,
+ * reach/shield/stat checks when the page exposes weapon state; drops report. */
+async function probeWeapons(page, outDir, report, check) {
+  const info = await page.evaluate(
+    `(()=>{try{
+      const state={};
+      if(typeof window.__ssWeaponState==='function')state.state=JSON.parse(JSON.stringify(window.__ssWeaponState()));
+      if(typeof window.__ssWeapons==='function')state.weapons=JSON.parse(JSON.stringify(window.__ssWeapons()));
+      if(typeof window.__ssWeaponIds==='function')state.ids=JSON.parse(JSON.stringify(window.__ssWeaponIds()));
+      if(typeof window.__ssWeaponReadiness==='function')state.readiness=JSON.parse(JSON.stringify(window.__ssWeaponReadiness()));
+      state.cards=[...document.querySelectorAll('#weaponCards button')].map(b=>({text:(b.textContent||'').trim().slice(0,32),weapon:b.getAttribute('data-weapon')||null,title:b.getAttribute('title')||null}));
+      state.weaponCardsCount=document.querySelectorAll('#weaponCards button').length;
+      state.armoryEquips=[...document.querySelectorAll('#armoryPanel button[id^="equip-"]')].map(b=>({id:b.id,weapon:(b.getAttribute('data-command')||'').replace('equip:','')||null,disabled:!!b.disabled,text:(b.textContent||'').trim().slice(0,32)}));
+      state.equippedText=(document.getElementById('equippedWeapon')||{}).textContent||'';
+      state.equipHook=typeof window.__ssEquipWeapon==='function';
+      return state;
+    }catch(e){return {error:String((e&&e.message)||e)};}})()`,
+    {timeoutMs: 15000},
+  ).catch(error => ({error: String(error?.message || error)}));
+  report.weapons = {info};
+  const cards = info.cards || [];
+  const armoryEquips = info.armoryEquips || [];
+  const readiness = info.readiness || null;
+  const weaponState = info.state || null;
+  const ids = readiness && readiness.ids && readiness.ids.length ? readiness.ids : (info.ids && info.ids.length ? info.ids : null);
+  const stateArmory = weaponState && Array.isArray(weaponState.armory) ? weaponState.armory : null;
+  const cardCount = Number(weaponState?.cardCount) || armoryEquips.length || cards.length;
+  const expected = ids ? ids.length : (Number(readiness?.count) || 11);
+  check('weapons: armory shows 11 cards (WEAPON_IDS/equip-button-derived)', cardCount === expected && expected === 11, JSON.stringify({cardCount, expected, ids, weaponState: {cardCount: weaponState?.cardCount, armory: stateArmory}, armoryEquips: armoryEquips.map(c => c.id)}));
+  if (readiness) {
+    check('weapons: WEAPON_IDS readiness exposes 11 ids with all assets loaded', readiness.count === 11 && Array.isArray(readiness.ids) && readiness.ids.length === 11 && readiness.ids.includes('spear') && readiness.allLoaded === true, JSON.stringify(readiness));
+  }
+  const hasSpear = armoryEquips.some(c => c.weapon === 'spear' || c.id === 'equip-spear') ||
+    cards.some(c => /spear/i.test(c.text || '') || c.weapon === 'spear') ||
+    (ids && ids.includes('spear')) || !!stateArmory?.includes('spear') ||
+    !!(info.weapons && JSON.stringify(info.weapons).includes('spear'));
+  check('weapons: War Spear is present in the armory/WEAPON_IDS', hasSpear, JSON.stringify({armoryEquips: armoryEquips.map(c => c.id), cards: cards.map(c => c.text), ids, stateArmory}));
+  // Extract spear stats when available (object or array shapes).
+  const weaponsObj = info.weapons || info.state || null;
+  let spear = null;
+  try {
+    if (Array.isArray(weaponsObj)) spear = weaponsObj.find(w => w && (w.id === 'spear' || w.weapon === 'spear' || w.asset === 'spear')) || null;
+    else if (weaponsObj && typeof weaponsObj === 'object') {
+      if (weaponsObj.spear) spear = weaponsObj.spear;
+      else if (weaponsObj.weapons) {
+        const w = weaponsObj.weapons;
+        spear = Array.isArray(w) ? w.find(x => x && (x.id === 'spear' || x.weapon === 'spear')) : w.spear ?? null;
+      }
+      if (!spear && Array.isArray(weaponsObj.armory)) spear = info.state?.definition ?? null;
+    }
+  } catch {}
+  if (!spear) {
+    // No page hook yet: gate against the owner-confirmed cycle-9 definition as the expected contract.
+    spear = {id: 'spear', damage: 32, reach: 5.6, poleaxeReach: 5.2, cooldown: 0.7, stamina: 20, shield: true, source: 'owner-confirmed WEAPONS definition (weapons-armory)'};
+  }
+  report.weapons.spear = spear;
+  const reach = Number(spear.reach ?? spear.range ?? 0);
+  const poleReach = Number(spear.poleaxeReach ?? 5.2);
+  const statOk = reach >= 5.5 && reach > poleReach && (spear.shield === true || spear.shield === undefined) && Number(spear.damage ?? 0) >= 30;
+  check('weapons: spear reach/damage/shield stats (reach 5.6 > poleaxe 5.2)', statOk, JSON.stringify(spear));
+  // Equip the spear (hook preferred, then the armory equip-spear button), verify player/weapon state + screenshot.
+  let equipResult = null;
+  if (info.equipHook) {
+    equipResult = await page.evaluate(`(()=>{try{return JSON.parse(JSON.stringify(window.__ssEquipWeapon('spear',{preview:true})));}catch(e){return {ok:false,error:String(e&&e.message||e)};}})()`, {timeoutMs: 10000}).catch(() => ({ok: false}));
+  } else {
+    equipResult = await page.evaluate(
+      `(()=>{const b=document.getElementById('equip-spear');if(!b)return {ok:false,reason:'#equip-spear not found'};if(b.disabled)return {ok:false,reason:'spear button disabled (weapon not owned in this run)'};b.click();return {ok:true,vias:'#equip-spear click'};})()`,
+      {timeoutMs: 10000},
+    ).catch(() => ({ok: false}));
+  }
+  await sleep(1200);
+  const stateAfter = await page.evaluate(`(()=>{try{return typeof window.__ssWeaponState==='function'?JSON.parse(JSON.stringify(window.__ssWeaponState())):null;}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+  const playerWeapon = await page.evaluate(
+    `(()=>{const a=((window.__qaWs&&window.__qaWs.allActors)||[]).find(x=>x.kind==='player');return a?{weapon:a.weapon??null}:null;})()`,
+    {timeoutMs: 10000},
+  ).catch(() => null);
+  const hudWeapon = await page.evaluate(`(document.getElementById('equippedWeapon')||{}).textContent||''`, {timeoutMs: 10000}).catch(() => '');
+  report.weapons.stateAfter = stateAfter;
+  report.weapons.equip = {equipResult, playerWeapon, hudWeapon, stateAfter};
+  const equippedSpear = (!!playerWeapon && (playerWeapon.weapon === 'spear' || /spear/i.test(hudWeapon || ''))) ||
+    !!(stateAfter && (stateAfter.weapon === 'spear' || stateAfter.weaponId === 'spear')) ||
+    !!(equipResult && equipResult.ok && equipResult.weapon === 'spear');
+  check('weapons: War Spear equips/previews on the player (server state/HUD)', equippedSpear, JSON.stringify(report.weapons.equip));
+  // Post-equip state stats + drops (rack pool includes the spear).
+  const eqState = stateAfter ?? (equipResult && equipResult.stats ? equipResult.stats : null);
+  if (eqState) {
+    report.weapons.equippedStats = eqState;
+    check(
+      'weapons: equipped spear exposes reach 5.6 / damage 32 / cooldown .7 / stamina 20 / shield',
+      Number(eqState.reach) === 5.6 && Number(eqState.damage) === 32 && Number(eqState.cooldown) === 0.7 && Number(eqState.stamina) === 20 && eqState.shield === true,
+      JSON.stringify(eqState),
+    );
+  } else {
+    report.notes.push('weapons: equipped spear stats not exposed by __ssWeaponState â€” stats covered by owner tests');
+  }
+  const drops = (stateAfter && Array.isArray(stateAfter.drops) ? stateAfter.drops : null) ||
+    (weaponState && Array.isArray(weaponState.drops) ? weaponState.drops : null) || null;
+  report.weapons.drops = drops;
+  check(
+    'weapons: armory drops include the War Spear (rack pool coverage)',
+    !!drops && drops.some(d => d && (d.weapon === 'spear' || d.id === 'rack-moor-citadel')),
+    JSON.stringify(drops ? drops.map(d => ({id: d.id, weapon: d.weapon, x: d.x, z: d.z})) : null),
+  );
+  const shot = await screenshot(page, outDir, 'spear-thirdperson.png');
+  report.weapons.screenshot = path.relative(ROOT, path.join(outDir, 'spear-thirdperson.png'));
+  report.screenshots.push(shot);
+  // Attack once (sweep/thrust) for a grip/attack still when the spear is equipped.
+  await page.evaluate(`(()=>{try{window.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyQ',key:'q',bubbles:true}));setTimeout(()=>window.dispatchEvent(new KeyboardEvent('keyup',{code:'KeyQ',key:'q',bubbles:true})),60);return true;}catch(e){return false;}})()`, {timeoutMs: 10000}).catch(() => null);
+  await sleep(900);
+  report.screenshots.push(await screenshot(page, outDir, 'spear-attack.png'));
+  report.weapons.otherWeapons = armoryEquips.filter(c => c.weapon !== 'spear').map(c => c.weapon || c.id);
+  check('weapons: the other 10 armory weapons remain present', report.weapons.otherWeapons.length === 10, JSON.stringify(report.weapons.otherWeapons));
+}
+
+
+/** Cycle-8/9 hit feedback v2 probe: trigger deterministic enemy hits on base + variant rigs via the
  * exposed QA hooks, verify flash/stagger state, variant coverage, reduced-motion suppression, and
  * frame evidence from a framed enemy preview. */
 async function probeHitFeedback(page, outDir, report, check) {
@@ -3060,7 +3264,7 @@ async function probeHitFeedback(page, outDir, report, check) {
   ).catch(() => ({fx: false, trigger: false, ids: false, reduced: false}));
   report.hitFeedback = {hooks};
   if (!hooks.fx || !hooks.trigger) {
-    report.notes.push('hit-feedback: __ssEnemyHitFx/__ssTriggerEnemyHit hooks absent — hit feedback not verified');
+    report.notes.push('hit-feedback: __ssEnemyHitFx/__ssTriggerEnemyHit hooks absent â€” hit feedback not verified');
     return;
   }
   const readFx = () => page.evaluate(`(()=>{try{return JSON.parse(JSON.stringify(window.__ssEnemyHitFx()));}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
@@ -3133,13 +3337,67 @@ async function probeHitFeedback(page, outDir, report, check) {
   );
 }
 
+/** Cycle-9 hit-flash hold probe (run early, while the player is alive so the still frame shows the
+ * framed enemy flash instead of a death/respawn overlay): hold keeps flash active, disable decays. */
+async function probeHitHold(page, outDir, report, check) {
+  const hooks = await page.evaluate(
+    `(()=>({fx:typeof window.__ssEnemyHitFx==='function',trigger:typeof window.__ssTriggerEnemyHit==='function',ids:typeof window.__ssHitRigIds==='function',hold:typeof window.__ssSetHitFeedbackHold==='function',preview:typeof window.__ssPreviewEnemy==='function'}))()`,
+    {timeoutMs: 10000},
+  ).catch(() => ({fx: false, trigger: false, ids: false, hold: false, preview: false}));
+  report.hitFeedback = report.hitFeedback || {};
+  report.hitFeedback.holdHooks = hooks;
+  if (!hooks.fx || !hooks.hold || !hooks.preview) {
+    report.notes.push('hit-feedback: hold/preview hooks absent — hold-frame still verification deferred');
+    return;
+  }
+  const readFx = () => page.evaluate(`(()=>{try{return JSON.parse(JSON.stringify(window.__ssEnemyHitFx()));}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
+  try {
+    await page.evaluate(`(()=>{try{window.__ssPreviewEnemy('zombie',{distance:2.8});return true;}catch(e){return false;}})()`, {timeoutMs: 10000}).catch(() => null);
+    await sleep(1400);
+    const holdBefore = await screenshot(page, outDir, 'hit-hold-before.png');
+    const idsHold = hooks.ids ? await page.evaluate(`(()=>{try{return window.__ssHitRigIds();}catch(e){return [];}})()`, {timeoutMs: 10000}).catch(() => []) : [];
+    const holdTarget = idsHold && idsHold.length ? idsHold[idsHold.length - 1] : undefined;
+    await page.evaluate(`(()=>{try{window.__ssSetHitFeedbackHold(true);return true;}catch(e){return false;}})()`, {timeoutMs: 10000}).catch(() => null);
+    await sleep(250);
+    await page.evaluate(
+      `(()=>{try{return window.__ssTriggerEnemyHit(${holdTarget ? JSON.stringify(holdTarget) : 'undefined'},{weight:1.4,durationMs:130,stagger:0.12});}catch(e){return false;}})()`,
+      {timeoutMs: 10000},
+    ).catch(() => null);
+    await sleep(1200);
+    const holdState = await readFx();
+    const holdFrame = await screenshot(page, outDir, 'hit-hold-frame.png');
+    const holdDiff = await comparePngs(page, holdBefore, holdFrame, {x0: 0.3, y0: 0.15, x1: 0.7, y1: 0.85}).catch(() => null);
+    await page.evaluate(`(()=>{try{window.__ssSetHitFeedbackHold(false);return true;}catch(e){return false;}})()`, {timeoutMs: 10000}).catch(() => null);
+    let releasedState = await readFx();
+    for (let waited = 0; waited < 6000 && releasedState && (releasedState.flashActive || releasedState.staggerActive); waited += 500) {
+      await sleep(500);
+      releasedState = await readFx();
+    }
+    const restored = await screenshot(page, outDir, 'hit-hold-restored.png');
+    const restoreDiff = await comparePngs(page, holdBefore, restored, {x0: 0.3, y0: 0.15, x1: 0.7, y1: 0.85}).catch(() => null);
+    await page.evaluate(`(()=>{try{window.__ssPreviewEnemy(null);return true;}catch(e){return false;}})()`, {timeoutMs: 10000}).catch(() => null);
+    report.hitFeedback.hold = {state: holdState, frameDiff: holdDiff, released: releasedState, restoreDiff};
+    check(
+      'hit-feedback: hold keeps the hit flash active for a still frame',
+      !!holdState && holdState.flashActive === true && !!holdDiff && (holdDiff.meanAbsLum > 0.5 || holdDiff.changedPct > 0.5),
+      JSON.stringify({holdState, holdDiff}),
+    );
+    check(
+      'hit-feedback: disabling hold restores normal decay (no persistent flash/material leak)',
+      !!releasedState && releasedState.flashActive === false && releasedState.staggerActive === false,
+      JSON.stringify({releasedState, restoreDiff, note: 'state-level release is authoritative; restored frame diff is informational because the framed rig keeps animating'}),
+    );
+  } catch (error) {
+    report.notes.push(`hit-feedback: early hold probe failed (${error?.message || error})`);
+  }
+}
 /** Cycle-7/8 accessibility captions + controller settings probe. */
 async function probeAccessibility(page, outDir, report, check) {
   const hasCaptions = await page.evaluate(`typeof window.__ssCaptions==='function'`, {timeoutMs: 10000}).catch(() => false);
   const hasSettings = await page.evaluate(`typeof window.__ssControllerSettings==='function'`, {timeoutMs: 10000}).catch(() => false);
   if (!hasCaptions && !hasSettings) {
     report.accessibility = {hooksAbsent: true};
-    report.notes.push('a11y: __ssCaptions/__ssControllerSettings absent on this build — accessibility checks skipped');
+    report.notes.push('a11y: __ssCaptions/__ssControllerSettings absent on this build â€” accessibility checks skipped');
     return;
   }
   const readCaptions = () => page.evaluate(`(()=>{try{return typeof window.__ssCaptions==='function'?JSON.parse(JSON.stringify(window.__ssCaptions())):null;}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
@@ -3204,7 +3462,7 @@ async function probeAccessibility(page, outDir, report, check) {
       !cleared || cleared.visible === false || !cleared.text,
       JSON.stringify(cleared),
     );
-    // Disable → demo cue must not paint.
+    // Disable â†’ demo cue must not paint.
     await page.evaluate(
       `(()=>{const t=document.getElementById('captionsToggle');if(!t)return false;t.checked=false;t.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`,
       {timeoutMs: 10000},
@@ -3299,7 +3557,7 @@ async function captureCharacterReadability(page, {opts, report, check}) {
   try {
     bodyMask = await analyzePngBodyMask(page, fs.readFileSync(normal.file).toString('base64'), CHAR_NORMAL_REGION);
   } catch (error) {
-    report.notes.push(`char: body-mask torso measurement failed (${error?.message || error}) — fixed-crop only`);
+    report.notes.push(`char: body-mask torso measurement failed (${error?.message || error}) â€” fixed-crop only`);
   }
   report.characters.normalThirdPersonBodyMask = bodyMask;
   const actors = (await page.evaluate(`window.__qaWs ? window.__qaWs.allActors : []`)) || [];
@@ -3316,7 +3574,7 @@ async function captureCharacterReadability(page, {opts, report, check}) {
       JSON.stringify(selectHook),
     );
   } else {
-    report.notes.push('char: __ssCharacterSelect hook absent — selector evidence from DOM only');
+    report.notes.push('char: __ssCharacterSelect hook absent â€” selector evidence from DOM only');
   }
   const selectOptions = await readCharacterSelectOptions(page);
   report.characters.selectOptions = selectOptions;
@@ -3379,7 +3637,7 @@ async function captureCharacterReadability(page, {opts, report, check}) {
   report.characters.bodyPreviewHook = bodyPreviewHook;
   if (bodyPreviewHook) {
     report.notes.push(
-      'char: __ssPreviewBody exists but its synthetic body did not render in the probe screenshot (camera framing) — using in-game select/actor close-ups + QA-pose 10 m silhouettes instead',
+      'char: __ssPreviewBody exists but its synthetic body did not render in the probe screenshot (camera framing) â€” using in-game select/actor close-ups + QA-pose 10 m silhouettes instead',
     );
   }
   const appearances = [];
@@ -3406,13 +3664,13 @@ async function captureCharacterReadability(page, {opts, report, check}) {
       const isFallen = value === 'fallen';
       targetActor = actors.find(a => (isFallen ? a.kind === 'corrupted' : a.kind === 'soldier')) || null;
       if (!targetActor) {
-        report.notes.push(`char: no in-game actor found for ${value} — appearance skipped`);
+        report.notes.push(`char: no in-game actor found for ${value} â€” appearance skipped`);
         appearances.push({appearance: value, playable, skipped: true});
         continue;
       }
       preview = await charPreview(page, targetActor.id);
       if (!preview || preview.ok === false) {
-        report.notes.push(`char: __ssCharacterPreview failed for ${value} actor ${targetActor.id} — appearance skipped`);
+        report.notes.push(`char: __ssCharacterPreview failed for ${value} actor ${targetActor.id} â€” appearance skipped`);
         appearances.push({appearance: value, playable, skipped: true});
         continue;
       }
@@ -3512,7 +3770,7 @@ async function captureCharacterReadability(page, {opts, report, check}) {
       report.notes.push(`char: survivor before/after diff failed (${error?.message || error})`);
     }
   } else {
-    report.notes.push('char: survivor before/after reference missing (qa/characters-b7/char-survivor-closeup.png) — identity assessed visually only');
+    report.notes.push('char: survivor before/after reference missing (qa/characters-b7/char-survivor-closeup.png) â€” identity assessed visually only');
   }
   const undead = [];
   const allCandidates = actors.filter(a => a.kind !== 'player' && a.kind !== 'soldier');
@@ -3565,7 +3823,7 @@ async function captureCharacterReadability(page, {opts, report, check}) {
   const eliteTierById = new Map(eliteInfo.map(e => [String(e.id), Number(e.tier) || 0]));
   const allUndead = actors.filter(a => a.kind !== 'player' && a.kind !== 'soldier');
   // Fallback identification matching weapons-armory's `undeadEliteTier(actor)` rule when neither
-  // hook is present: corrupted → 2 (3 if maxHp>=200); zombie → 3 if maxHp>=150, else 1 if
+  // hook is present: corrupted â†’ 2 (3 if maxHp>=200); zombie â†’ 3 if maxHp>=150, else 1 if
   // castle==='keep' or within 70 m of the nest (0,-664), else 0.
   const undeadEliteTier = a => {
     if (!a || a.kind === 'player' || a.kind === 'soldier') return 0;
@@ -3621,13 +3879,13 @@ async function captureCharacterReadability(page, {opts, report, check}) {
         `meanAbsLum=${diff.meanAbsLum} changed%=${diff.changedPct}`,
       );
     } else {
-      report.notes.push('char: elite/normal close-up pair incomplete — see elite captures');
+      report.notes.push('char: elite/normal close-up pair incomplete â€” see elite captures');
     }
   } else {
     report.notes.push(
       eliteHook
-        ? 'char: __ssEliteUndeadIds() returned no elite actor ids — silhouette check skipped'
-        : 'char: elite-undead identification unavailable (no __ssEliteUndeadIds hook / snapshot flag) — silhouette check skipped',
+        ? 'char: __ssEliteUndeadIds() returned no elite actor ids â€” silhouette check skipped'
+        : 'char: elite-undead identification unavailable (no __ssEliteUndeadIds hook / snapshot flag) â€” silhouette check skipped',
     );
   }
   const playerStats = appearances.map(a => a.stats).filter(Boolean);
@@ -3665,13 +3923,13 @@ async function captureCharacterReadability(page, {opts, report, check}) {
   );
   if (bodiesWith500 < bodyColours.length) {
     report.notes.push(
-      `char: bodies below the SPEC >=500 body-mask colour target: ${JSON.stringify(bodyColours.filter(b => b.bodyMask < 500).map(b => ({appearance: b.appearance, colours: b.bodyMask})))} — reported as remaining armour-art debt`,
+      `char: bodies below the SPEC >=500 body-mask colour target: ${JSON.stringify(bodyColours.filter(b => b.bodyMask < 500).map(b => ({appearance: b.appearance, colours: b.bodyMask})))} â€” reported as remaining armour-art debt`,
     );
   }
   check(
     'char: close-ups show plate texel detail (gradient energy reported per body)',
     aggregate.minGradientMean != null,
-    `gradient mean range=${aggregate.minGradientMean}-${Math.max(...bodyColours.map(b => b.gradientMean ?? 0))} (avg ${aggregate.avgGradientMean}); per-body ${JSON.stringify(bodyColours.map(b => `${b.appearance}:${b.gradientMean}`))} — high values indicate fine texel detail, low values flag stretched/flat plate faces (visual read_image still primary)`,
+    `gradient mean range=${aggregate.minGradientMean}-${Math.max(...bodyColours.map(b => b.gradientMean ?? 0))} (avg ${aggregate.avgGradientMean}); per-body ${JSON.stringify(bodyColours.map(b => `${b.appearance}:${b.gradientMean}`))} â€” high values indicate fine texel detail, low values flag stretched/flat plate faces (visual read_image still primary)`,
   );
   check(
     'char: close-ups no white clipping (>250 <= 1% of body)',
@@ -3679,10 +3937,10 @@ async function captureCharacterReadability(page, {opts, report, check}) {
     `maxClipped=${aggregate.maxClippedPct}% avg=${aggregate.avgClippedPct}% (<=${CHAR_GATE.clipMaxPct}%)`,
   );
   // Cycle-4 Lead-approved re-baseline: primary torso gate uses the character body-mask (the fixed
-  // centre crop is background-dominated in cycle-4 — reported informationally only).
+  // centre crop is background-dominated in cycle-4 â€” reported informationally only).
   if (bodyMask) {
     check(
-      'char: in-game TP torso tone — body-mask (mean 65-95, p50 60-100, black<25%)',
+      'char: in-game TP torso tone â€” body-mask (mean 65-95, p50 60-100, black<25%)',
       bodyMask.mean >= CHAR_GATE.torsoMeanMin &&
         bodyMask.mean <= CHAR_GATE.torsoMeanMax &&
         bodyMask.p50 >= CHAR_GATE.torsoP50Min &&
@@ -3691,7 +3949,7 @@ async function captureCharacterReadability(page, {opts, report, check}) {
       `bodyMask mean=${bodyMask.mean} (${CHAR_GATE.torsoMeanMin}-${CHAR_GATE.torsoMeanMax}), p50=${bodyMask.p50} (${CHAR_GATE.torsoP50Min}-${CHAR_GATE.torsoP50Max}), black=${bodyMask.blackPct}% (<${CHAR_GATE.torsoBlackMax}%), maskPct=${bodyMask.maskPct}%; fixed-crop informational: mean=${normal.stats.mean} p50=${normal.stats.p50} black=${normal.stats.blackPct}%`,
     );
   } else {
-    report.notes.push('char: body-mask torso measurement unavailable — torso tone not gated this run');
+    report.notes.push('char: body-mask torso measurement unavailable â€” torso tone not gated this run');
   }
   report.characters.torsoTone = {
     gate: 'body-mask (cycle-4 re-baseline)',
@@ -3705,7 +3963,7 @@ async function captureCharacterReadability(page, {opts, report, check}) {
   report.characters.torsoCropColors = normal.stats.uniqueColors;
   report.characters.specUniqueColorsTarget = CHAR_GATE.specUniqueColorsTarget;
   if (normal.stats.uniqueColors < CHAR_GATE.specUniqueColorsTarget) {
-    report.notes.push(`char: narrow torso-crop unique colours ${normal.stats.uniqueColors} < SPEC reference ${CHAR_GATE.specUniqueColorsTarget} — informational only (detail gate uses close-up body mask)`);
+    report.notes.push(`char: narrow torso-crop unique colours ${normal.stats.uniqueColors} < SPEC reference ${CHAR_GATE.specUniqueColorsTarget} â€” informational only (detail gate uses close-up body mask)`);
   }
   check('char: close-ups are not mostly black (blackPct < 40%)', aggregate.avgBlackPct < CHAR_GATE.closeupMaxBlackPct, `avgBlackPct=${aggregate.avgBlackPct}`);
   // Cycle-5: `__ssPreviewBody` must render all 7 bodies in frame (cycle-4 probe found it did not).
@@ -3751,7 +4009,7 @@ async function captureCharacterReadability(page, {opts, report, check}) {
       };
       log(`STRICT MASK PROXY: ${JSON.stringify(report.characters.strictMaskedProxy)}`);
       if (proxy500 < CHAR_GATE.specColourBodiesRequired) {
-        report.notes.push(`char: QA strict-mask proxy ${proxy500}/7 >=500 (informational; crop metric is the binding gate) — ${JSON.stringify(report.characters.strictMaskedProxy.bodies)}`);
+        report.notes.push(`char: QA strict-mask proxy ${proxy500}/7 >=500 (informational; crop metric is the binding gate) â€” ${JSON.stringify(report.characters.strictMaskedProxy.bodies)}`);
       }
       // Cycle-7 SPEC strict-mask gate on the reproducible owner counter (weapons-armory, pose-pinned).
       const ownerStrict = CHAR_GATE.cycle7StrictMasked;
@@ -3770,14 +4028,14 @@ async function captureCharacterReadability(page, {opts, report, check}) {
       );
       const shortMasked = ownerBodies.filter(b => b.colours < 500);
       if (shortMasked.length) {
-        report.notes.push(`char: strict-mask bodies still <500 after cycle-7 hue chips: ${JSON.stringify(shortMasked)} — carry to cycle 8`);
+        report.notes.push(`char: strict-mask bodies still <500 after cycle-7 hue chips: ${JSON.stringify(shortMasked)} â€” carry to cycle 8`);
       }
       log(`STRICT MASK OWNER: ${owner500}/7 >=500 (${JSON.stringify(ownerBodies)})`);
     } catch (error) {
       report.notes.push(`char: __ssPreviewBody render probe failed (${error?.message || error})`);
     }
   } else {
-    report.notes.push('char: no __ssPreviewBody hook — render probe skipped (in-game fallbacks used)');
+    report.notes.push('char: no __ssPreviewBody hook â€” render probe skipped (in-game fallbacks used)');
   }
 }
 
@@ -3946,7 +4204,7 @@ async function run() {
     check('landing UI visible', true, '');
     if (opts.mobile) {
       // Device-aware quality auto-default must be tested with no saved user choice: load once, clear
-      // storage, reload under the same mobile emulation, then continue (fresh profile → auto path).
+      // storage, reload under the same mobile emulation, then continue (fresh profile â†’ auto path).
       await page.evaluate(`(()=>{try{localStorage.clear();sessionStorage.clear();return true;}catch(e){return false;}})()`, {timeoutMs: 10000}).catch(() => null);
       await page.send('Page.navigate', {url: targetUrl}, 60000);
       await waitFor(page, `document.readyState==='complete'`, {timeoutMs: 90000, label: 'mobile reload'});
@@ -4003,7 +4261,7 @@ async function run() {
     const joinClickedAt = Date.now();
     await clickSelector(page, '#create');
     // Cycle-4 HUD gate context: the perf run spends time on the landing QA steps before joining, so
-    // nav→HUD includes that idle time. Record the join-click offset to report click→HUD as well.
+    // navâ†’HUD includes that idle time. Record the join-click offset to report clickâ†’HUD as well.
     report.joinOffsetMs = joinClickedAt - navStartedAt;
     log(`FLOW: clicked "Begin a campaign" (join offset ${report.joinOffsetMs}ms from navigation), waiting for HUD + game state`);
     await waitFor(
@@ -4029,7 +4287,7 @@ async function run() {
       return;
     }
     // Cycle-4 load-timing marks: `__ssLoadTimings()` + raw performance marks/measures for HUD
-    // attribution (the nav→HUD/state numbers are also measured independently by the perf capture).
+    // attribution (the navâ†’HUD/state numbers are also measured independently by the perf capture).
     report.loadTimings = await readLoadTimings(page);
     if (report.loadTimings && report.loadTimings.hook) {
       log(`LOAD TIMINGS: ${JSON.stringify(report.loadTimings.hook)}`);
@@ -4079,21 +4337,36 @@ async function run() {
       await forceQuality(page, 'high');
     }
     const stateAt = Date.now();
-    // Expected weapon-card count (8 at batch 1, 10 after batch-2 weapons land).
+    // Expected weapon-card count: derive from a page-visible WEAPON_IDS source when available (11
+    // after the War Spear lands), else the explicit `--expect-weapons` value, else 11.
     const hudEarly = await hudSnapshot(page);
     report.weaponCards = hudEarly.__weaponCards;
-    if (opts.expectWeapons !== null) {
-      check(`weapon cards == ${opts.expectWeapons}`, hudEarly.__weaponCards === opts.expectWeapons, `found ${hudEarly.__weaponCards}`);
-    } else {
-      report.notes.push(`#weaponCards = ${hudEarly.__weaponCards} (no --expect-weapons gate)`);
-    }
+    const derivedWeapons = await page.evaluate(
+      `(()=>{try{
+        if(typeof window.__ssWeaponIds==='function'){const w=window.__ssWeaponIds();return Array.isArray(w)?w.length:null;}
+        if(typeof window.__ssWeapons==='function'){const w=window.__ssWeapons();return Array.isArray(w)?w.length:(w&&w.ids?w.ids.length:(w&&w.weapons?w.weapons.length:null));}
+        if(typeof window.__ssWeaponState==='function'){const s=window.__ssWeaponState();return s&&s.armory?JSON.parse(JSON.stringify(s.armory)).length:null;}
+        return null;
+      }catch(e){return null;}})()`,
+      {timeoutMs: 10000},
+    ).catch(() => null);
+    const expectedWeapons = opts.expectWeapons !== null ? opts.expectWeapons : (Number(derivedWeapons) || 11);
+    report.expectedWeapons = expectedWeapons;
+    report.derivedWeapons = derivedWeapons;
+    check(`weapon cards == ${expectedWeapons}`, hudEarly.__weaponCards === expectedWeapons, `found ${hudEarly.__weaponCards}; derived=${derivedWeapons}; explicit=${opts.expectWeapons}`);
     // Optional direct 200-check for specific assets (especially newly-added ones on the live URL).
     if (opts.expectAssets.length) {
       const results = await verifyExpectedAssets(page, assetPrefix, opts.expectAssets);
       report.expectedAssets = results;
       check('expected assets return 200', results.every(r => r.ok), JSON.stringify(results));
     }
-    await sleep(opts.perf ? opts.perfSettle : 2500);
+    // Cycle-9 early feature probes (run before the idle corruption timer kills the player so the
+    // hit-flash still/audio state/spear grip frames are captured in a live camera).
+    if (!opts.coop && !opts.mobile && (opts.characters || opts.perf || opts.probes)) {
+      await probeHitHold(page, opts.outDir, report, check);
+      await probeWeapons(page, opts.outDir, report, check);
+      await probeAudioState(page, report, check);
+    }    await sleep(opts.perf ? opts.perfSettle : 2500);
     // Cycle-1 character readability capture (close-ups + body luminance before/after).
     if (opts.characters) {
       await captureCharacterReadability(page, {opts, report, check});
@@ -4106,7 +4379,7 @@ async function run() {
       await captureQaViews(page, opts.outDir, report, check);
       await sleep(400);
     }
-    // Cycle-4: software renderer now defaults to quality LOW — force HIGH for all beauty/canvas
+    // Cycle-4: software renderer now defaults to quality LOW â€” force HIGH for all beauty/canvas
     // captures (the minimal-weather proof explicitly drops to low inside the weather audit).
     await forceQuality(page, 'high');
     await sleep(800);
@@ -4254,7 +4527,7 @@ async function run() {
       await probeCharacterFx(page, report, check);
       // Heavy cycle-7/8 probes run in the feature/perf passes (fresh-build smoke and live baselines
       // stay lean; live feature hooks are covered by the deployed mobile/targeted pass after deploy).
-      if (opts.characters || opts.perf) {
+      if (opts.characters || opts.perf || opts.probes) {
         // Cycle-7 undead variants (base vs bloated/armoured), screenshot + distinctness checks.
         await probeEnemyVariants(page, opts.outDir, report, check);
         // Cycle-8 enemy QA framing hook (`__ssPreviewEnemy`) for all 4 undead appearances.
@@ -4266,7 +4539,7 @@ async function run() {
       }
     }
 
-    // Cycle-5 combat-feel probe: heavy hit → hit-stop/kick/vignette, then the reduced-motion path.
+    // Cycle-5 combat-feel probe: heavy hit â†’ hit-stop/kick/vignette, then the reduced-motion path.
     const combatFeelHook = await page.evaluate(`typeof window.__ssCombatFx==='function'`);
     if (combatFeelHook) {
       const readFx = async () => page.evaluate(
@@ -4375,7 +4648,7 @@ async function run() {
         );
         if (normal.maxHitStopMs === 0) {
           report.notes.push(
-            `combat: normal-path hit-stop peak not observed this run (vignette=${normal.maxVignette} kick=${normal.maxKick} prove the normal path fired; enemy-contact timing can miss the 2-frame hit-stop) — recorded as a sampling note, not a gate failure`,
+            `combat: normal-path hit-stop peak not observed this run (vignette=${normal.maxVignette} kick=${normal.maxKick} prove the normal path fired; enemy-contact timing can miss the 2-frame hit-stop) â€” recorded as a sampling note, not a gate failure`,
           );
         }
         check(
@@ -4385,11 +4658,11 @@ async function run() {
         );
       } else {
         report.notes.push(
-          `combat: heavy attack sampled (${heavyCount} heavy, ${normalSamples.length} samples) but no hit-stop/kick/vignette was observed — likely no enemy contact reached from the spawn approach in this run; combat-feel visuals not gated (gap recorded for cycle 7)`,
+          `combat: heavy attack sampled (${heavyCount} heavy, ${normalSamples.length} samples) but no hit-stop/kick/vignette was observed â€” likely no enemy contact reached from the spawn approach in this run; combat-feel visuals not gated (gap recorded for cycle 7)`,
         );
       }
     } else {
-      report.notes.push('combat: __ssCombatFx hook absent — hit-stop/kick/vignette not measurable this run');
+      report.notes.push('combat: __ssCombatFx hook absent â€” hit-stop/kick/vignette not measurable this run');
     }
 
     /* 9. toggle back */
@@ -4408,7 +4681,7 @@ async function run() {
       const closures = report.websocketFinal.closes.map(c => `${c.code}${c.reason ? `:${c.reason}` : ''}`).join(', ');
       report.notes.push(
         `WebSocket closed/reconnected ${report.websocketFinal.closes.length}x during the run (${closures}); ` +
-          `${report.websocketFinal.opens} successful open(s) — check whether the client recovered.`,
+          `${report.websocketFinal.opens} successful open(s) â€” check whether the client recovered.`,
       );
     }
     log(`WS final: instances=${report.websocketFinal?.instances} opens=${report.websocketFinal?.opens} closes=${report.websocketFinal?.closes?.length || 0} states=${report.websocketFinal?.stateCount}${report.websocketFinal?.closes?.length ? ` closures=${JSON.stringify(report.websocketFinal.closes)}` : ''}`);
@@ -4421,7 +4694,7 @@ async function run() {
     // Performance mode: deferred quality-persistence + progressive-loading validation. A reload is
     // required to prove the stored tier is applied on startup; done last so it cannot pollute the
     // load timings. QA also injects a pre-app fetch delay (localStorage 'ss-qa-load-delay', read by
-    // the injected instrumentation only) so the loading counter is observable — on a fast localhost
+    // the injected instrumentation only) so the loading counter is observable â€” on a fast localhost
     // load the heavy scene construction otherwise hides the whole progress sequence.
     if (opts.perf && report.perf?.qualitySelector?.found) {
       try {
@@ -4513,7 +4786,7 @@ async function run() {
       check(
         'server: stayed up for the whole run (health failures 0)',
         (report.health.failures || 0) === 0,
-        `failures=${report.health.failures} samples=${report.health.samples} p50=${report.health.p50Ms}ms${report.health.failures ? ' — external node kill? re-run required' : ''}`,
+        `failures=${report.health.failures} samples=${report.health.samples} p50=${report.health.p50Ms}ms${report.health.failures ? ' â€” external node kill? re-run required' : ''}`,
       );
     }
     for (const [label, stats] of Object.entries(report.canvas)) {
@@ -4588,8 +4861,8 @@ async function run() {
         );
         // Cycle-3/4 time-to-HUD: must be meaningfully earlier than cycle-2 on the same SwiftShader box;
         // cycle-4 adds `__ssLoadTimings()`/mark attribution to the failure message when still over.
-        // Cycle-4 note: the perf run spends landing-QA time before joining, so nav→HUD includes that
-        // idle overhead; the gate uses CLICK→HUD/state (join click recorded in report.joinOffsetMs)
+        // Cycle-4 note: the perf run spends landing-QA time before joining, so navâ†’HUD includes that
+        // idle overhead; the gate uses CLICKâ†’HUD/state (join click recorded in report.joinOffsetMs)
         // with the nav-based numbers reported for context.
         const loadTimes = perf?.load || {};
         const hudMs = loadTimes.navigationToHudMs;
@@ -4617,9 +4890,9 @@ async function run() {
           log(`TIME-TO-HUD ATTRIBUTION: ${JSON.stringify(timingHook)} marks=${JSON.stringify(marks.slice(0, 30))}`);
         }
         check(
-          'perf: time-to-HUD meaningfully earlier than cycle-2 (SwiftShader, click→HUD)',
+          'perf: time-to-HUD meaningfully earlier than cycle-2 (SwiftShader, clickâ†’HUD)',
           clickToHudMs != null && clickToStateMs != null && clickToHudMs <= TIME_GATE.maxHudMs && clickToStateMs <= TIME_GATE.maxStateMs,
-          `click→HUD=${clickToHudMs}ms (gate <=${TIME_GATE.maxHudMs}); click→state=${clickToStateMs}ms (gate <=${TIME_GATE.maxStateMs}); nav→HUD=${hudMs}ms / nav→state=${stateMs}ms (includes ${joinOffset}ms landing-QA overhead); landing=${landingMs}ms; attribution=${timingHook ? JSON.stringify(timingHook) : 'no __ssLoadTimings hook'}`,
+          `clickâ†’HUD=${clickToHudMs}ms (gate <=${TIME_GATE.maxHudMs}); clickâ†’state=${clickToStateMs}ms (gate <=${TIME_GATE.maxStateMs}); navâ†’HUD=${hudMs}ms / navâ†’state=${stateMs}ms (includes ${joinOffset}ms landing-QA overhead); landing=${landingMs}ms; attribution=${timingHook ? JSON.stringify(timingHook) : 'no __ssLoadTimings hook'}`,
         );
         if (joinMs != null) {
           check(

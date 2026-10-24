@@ -6,6 +6,7 @@ export const WEAPONS = {
  zweihander: {name:'Zweihander', asset:'zweihander', damage:52, reach:4, cooldown:1.2, stamina:32, arc:-.05, length:1.45, shield:false, style:'Wide cleave · weapon parry'},
  rapier: {name:'Rapier', asset:'rapier', damage:26, reach:3.8, cooldown:.42, stamina:12, arc:.12, length:1, shield:true, style:'Swift thrust · shield guard'},
  halberd: {name:'Halberd', asset:'halberd', damage:48, reach:5.2, cooldown:1.05, stamina:28, arc:.55, length:1.85, shield:false, style:'Longest reach · heavy hook · weapon parry'},
+ spear: {name:'War spear', asset:'spear', damage:32, reach:5.6, cooldown:.7, stamina:20, arc:.16, length:2.2, shield:true, style:'Long thrust · shield guard'},
  dane_axe: {name:'Dane axe', asset:'dane_axe', damage:58, reach:3.2, cooldown:1.05, stamina:26, arc:-.1, length:1.5, shield:false, style:'Heavy cleave · weapon parry'},
  flamberge: {name:'Flamberge', asset:'flamberge', damage:60, reach:4.2, cooldown:1.1, stamina:30, arc:-.08, length:1.7, shield:false, style:'Wavy greatsword · wide cleave'},
  mace: {name:'Flanged mace', asset:'mace', damage:44, reach:2.9, cooldown:.95, stamina:22, arc:.35, length:.8, shield:true, style:'Crushing head · shield guard'},

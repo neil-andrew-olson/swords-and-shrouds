@@ -26,7 +26,9 @@ const BUDGETS = {
   chapel_ruin: 14000, aqueduct_ruin: 14000, bridge_ruin: 14000, courtyard_ruin: 14000,
   watchtower_ruin: 10000, village_house_ruin: 8000,
   stone_well: 3000, blacksmith_stall: 5000,
+  spear: 3400,
   stone_altar: 4000, forge_furnace: 8000,
+  abbey_ruin: 14000,
   'zombie-bloated': 11000, 'skeleton-armoured': 8500,
   fortress_keep: 14000, castle_tower: 14000,
   well: 6000, chest: 6000, bench: 6000, rock_cluster: 6000, grass_tuft: 1500,
@@ -115,7 +117,7 @@ function worldBounds(json) {
   return {min: lo, max: hi, size: hi.map((v, i) => v - lo[i])};
 }
 
-const WEAPONS = new Set(['rapier', 'halberd', 'dane_axe']);
+const WEAPONS = new Set(['rapier', 'halberd', 'dane_axe', 'spear']);
 
 function validateGlb(name, file) {
   const issues = [], warnings = [];

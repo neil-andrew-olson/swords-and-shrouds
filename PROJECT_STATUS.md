@@ -23,71 +23,69 @@ workspace-relative paths and/or use the `present` tool.
 broad `taskkill /IM node.exe`. One dist builder at a time; QA owns authoritative captures. If a
 teammate edits after the Lead's gate, the hash changes and QA must be given the definitive artifact.
 
-## Latest completed cycle — 2026-10K cycle 8: mobile/touch, device quality, preview/hit feedback
+## Latest completed cycle — 2026-10L cycle 9: War Spear, ruined abbey, hit-hold, audio diagnostics
 
-Contract: `docs/BATCH-2026-10K-SPEC.md`; results: `docs/BATCH-2026-10K-RESULTS.md`; QA evidence in
-`docs/QA-REPORT.md`. Final bundle `index-2pShR6WA.js` (898,219 B), deterministic across two builds.
+Contract: `docs/BATCH-2026-10L-SPEC.md`; results: `docs/BATCH-2026-10L-RESULTS.md`; QA evidence in
+`docs/QA-REPORT.md`. Final bundle `index-2keD53-A.js` (901,729 B), deterministic across two builds.
 
-### Mobile / touch experience
+### New weapon — War Spear (11th)
 
-- Responsive touch HUD (`body.touch-device`/`small-screen`, safe-area insets): portrait 390×844 +
-  landscape 844×390 layouts, no overlapping panels, thumb-reachable controls, keyboard hints hidden
-  on touch, scrollable finger-sized Settings.
-- Touch input: radial-deadzone analog stick (`touchStickVector()`), shared deadzone preset, persisted
-  touch look sensitivity (0.4–2.0), per-control pointer capture for simultaneous move+look+attack,
-  gesture/scroll/zoom suppression; desktop pointer-lock untouched.
-- **Device-aware quality** `__ssDeviceProfile()`: touch/coarse/small-screen/low-memory detection →
-  auto low/medium/high (SwiftShader low), DPR clamps 1.25/1.5/2; saved `ss-quality` never overridden.
-- QA mobile emulation 22/22: HUD active/no overlaps, pinch scale stays 1, 3-pointer multi-touch
-  (player moved 4.1 m, yaw changed), profile/mobile perf 130 calls / 1.31 M tris, desktop unchanged.
+`spear` asset 504 tris/44.1 KB, canonical polearm orientation (grip origin, +Y shaft, length 2.200);
+`WEAPONS.spear` damage 32, reach 5.6 (longest), cooldown 0.7, stamina 20, arc 0.16, length 2.2,
+shield allowed, thrust style; grip `{grip:[0,0,0],blade:[0,1,0]}`. Drops now use a generic
+`rackPool` in `src/simulation/game.ts` (Lead-approved): 9 castle racks cover all non-starter weapons
+exactly once — keep=bastard, border=poleaxe, citadel=zweihander, moor-keep=rapier, moor-border=halberd,
+**moor-citadel=spear (−29,−371)**, crown-keep=dane axe, crown-border=flamberge, crown-citadel=mace;
+starter hammer unchanged. QA verified 11 armory cards, spear stats/reach, drops mapping and the
+third-person spear+shield grip (server-authoritative equip needs rack ownership — capture debt).
 
-### Enemy preview + hit feedback v2
+### New landmark — ruined abbey
 
-- `__ssPreviewEnemy(appearance, distance?)` frames all four undead appearances (base + variants) in
-  an open spot, returns `{ok,appearance,distance,ready,actorId}`, registers with the rig registry for
-  `__ssTriggerEnemyHit()`, `null` restores. QA captured all four at 2.8 m and 10 m.
-- Every damaging hit: weapon-scaled 80–140 ms emissive material flash (originals stashed/restored,
-  no pooled leaks), pivot-only stagger (grounding safe), weapon-tinted impact spark; works on all
-  variants; reduced motion suppresses. QA verified flash 111–130 ms, stagger 160–183 ms, suppression.
+`abbey_ruin` 13,786 tris/406.8 KB from the warehouse `overgrown-courtyard-patio-ruin` scan
+(1,024² night texture, ground-centred, 7.411 × 5.000 × 7.390 m). Placed as second Green March
+landmark at **(62, −46)** yaw 0.6 h6.5 between the village landmark and border fortress; one
+distance-culled instanced layer (+1 draw/13.8 k tris only when visible), receive-only shadows,
+validated clearances, spawn culled at 95.8 m. QA captured via `__ssQAPose` + QA-focus culling.
 
-### Tone + content polish
+### Verification hooks / audio diagnostics
 
-- Zombie-bloated night tone 131 → 106.9 body mean (base 82.5) via staged albedo/roughness/factor
-  reduction; accepted as intentional plague-pale (+24 vs base). Cycle-9 lever: lighting bias, not
-  albedo. Hero headroom attempt regressed (492 vs 526) → reverted byte-identical; strict-mask gate
-  stays **7/7 ≥500** (561/526/721/651/694/1082/937).
-- Plague-nest ground: 44 feather-mask corruption decals (single instanced draw when visible, pulsed,
-  160 m culling) + 3 enrichment props (29 props + 6 flames total, 0 new layers/draws).
+- `__ssSetHitFeedbackHold(true|false|null)` re-arms per-hit enemy flash/stagger for slow-frame QA
+  stills; disable restores normal decay with no emissive leak (QA: flash held >1.2 s, frame diff
+  9.66–10.97 / 22.8–26.4 %, then all false).
+- `__ssWeaponReadiness()`, `__ssWeaponState()`, `__ssEquipWeapon(id,{preview})` QA hooks.
+- `__ssAudioState()` (beds/levels/weather/captions/master) + `__ssAudioFocus(x,z)` for landmark-bed
+  verification; QA verified march bed/clear→downpour intensity and rain bed; near-forge ramp remains
+  a human ear/debt item.
 
 ### Verification (final artifact)
 
-- `npm test` **58/58**; `tsc` 0; deterministic build reproduced `index-2pShR6WA.js` twice;
-  `validate-assets` **80/80**.
-- Fresh-build smoke **26/26** + hash proof, 0 errors/404s, 10 cards; characters 67/67, perf 70/70,
-  mobile 22/22, co-op **18/18**, live baseline **26/26**.
-- Perf **211 calls / 1,735,004 tris** (gates <290/<2.15 M); FP 165/1.62 M; low 162/1.42 M; payload
-  **17.06 MiB**; HUD click→HUD 3.27 s / state 6.29 s / join 3.61 s; night 51.2.
+- `npm test` **58/58**; `tsc` 0; deterministic build reproduced `index-2keD53-A.js` twice;
+  `validate-assets` **82/82**.
+- Fresh-build smoke **26/26** + hash proof, 0 errors/404s; characters **81/81**, perf **85/85**,
+  mobile **22/22**, co-op **18/18**, 11 cards.
+- Perf spawn TP **186 calls / 1,640,130 tris** (gates <290/<2.15 M; abbey culled), FP 152/1.555 M,
+  low 145/1.366 M; payload **17.51 MiB**; HUD click→HUD 158 ms / state 3.945 s / join 3.139 s.
 
 ### Deployed state
 
-Live bundle is the hosting build of this commit sequence (`feat: AAA cycle 8 …` → hosting pin commit →
+Live bundle is the hosting build of this commit sequence (`feat: AAA cycle 9 …` → hosting pin commit →
 Cloudflare deploy → QA final live pass). Local play: `$env:PORT=3000; node --import tsx
 src/server/index.ts` from the game repo → http://localhost:3000/.
 
-### Cycle-9 (next) — from the audit
+### Cycle-10 (next) — from the audit
 
-1. Physical-device mobile + real-GPU + perceptual playtests (headless emulation is not hardware);
+1. Near-forge audio-level ear check; physical-device mobile / real-GPU / perceptual playtests;
    hardware controller rumble test.
-2. Hit-flash frame-sync capture (dedicated freeze/hook for QA visual proof).
-3. Surface-audio ear check; zombie-bloated lighting-bias tone pass; hero body-atlas headroom.
-4. Content/campaign depth: siege objectives polish, balance, more enemy types/props from warehouse;
-   mobile real-device QA.
+2. Server-authoritative spear equip capture (needs rack ownership) — QA/session task.
+3. Content/campaign depth: siege/campaign objectives polish, balance pass, more enemy types/props.
+4. Optional named `content-abbey` QA view in scene.ts (pose exists in ruins.ts).
 
 ## Previous cycles
 
+- **2026-10K cycle 8** (`docs/BATCH-2026-10K-RESULTS.md`): mobile/touch HUD + analog stick,
+  device-aware quality/DPR, enemy preview hook, per-hit flash/stagger/impact feedback, nest decals.
 - **2026-10J cycle 7** (`docs/BATCH-2026-10J-RESULTS.md`): enemy variants (bloated/armoured),
-  strict-mask palette cleared 7/7, QA content-capture culling, plague dressing, a11y captions,
-  controller deadzone/sensitivity.
+  strict-mask palette cleared 7/7, QA content-capture culling, plague dressing, a11y captions.
 - **2026-10I cycle 6** (`docs/BATCH-2026-10I-RESULTS.md`): Wandering Survivor sixth appearance,
   controller rumble/hints, reduced-motion vignette fix, cloth-wind isolation, altar candle glows.
 - **2026-10H cycle 5** (`docs/BATCH-2026-10H-RESULTS.md`): armour art v3 + survivor identity, cloth

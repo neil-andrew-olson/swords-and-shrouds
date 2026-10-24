@@ -655,6 +655,42 @@ Staged mirrors validated before each install (76/76 armour v3, 78/78 props), ato
 `tests/armory` 5/5 after both phases. `tests/equipment` is 5/5 for the cycle-5 state; the cycle-6
 rebuild below changes the survivor staff weighting, so that assertion needs the cycle-6 update.
 
+## Batch 2026-10L — war spear + ruined abbey (cycle 9)
+
+### Phase A — `spear` (11th weapon, installed)
+
+Baked from the `low-poly-spear-set` warehouse pack: `scripts/bake/bake-spear-source.py` picks one of
+the six spear variants from `Low.fbx`, joins it with the `lambert1` basecolour/normal material and
+exports `spear_source.glb`; `scripts/bake/bake-weapons.mjs` then bakes it through the standard weapon
+pipeline (new `girthMax` head heuristic + `normalizeHeight` + `dropNormal` + night-tone options).
+
+- **Canonical orientation** (same convention as halberd/rapier/dane_axe/flamberge/mace): grip at local
+  origin (0,0,0), point/blade along **+Y**, vertical shaft, x/z centred (x −0.038…+0.037,
+  z ±0.019); blade tip **y=+1.760**, butt **y=−0.440** (handle = 20 % of length below origin);
+  **total length 2.200** = `WEAPONS.spear.length`, so `equipmentModel` scale is exactly 1.0 and
+  `WEAPON_GRIPS.spear = {grip:[0,0,0], blade:[0,1,0]}` needs no re-fit rotation.
+- Contract: **504 tris / 1 prim / 44.1 KB gzip**, one embedded 512² night-toned JPEG albedo
+  (0.84× + cool tint; no normal map to keep the payload in weapon range), indexed + TEXCOORD_0,
+  no skins/animations, no extensions. Validator budget `spear: 3400`; spear added to the weapon class
+  (no-skin/no-animation assertions). Preview: `temp_sketchlab/armour/c9_spear3.png`.
+
+### Phase B — `abbey_ruin` (installed)
+
+Baked from `overgrown-courtyard-patio-ruin.zip` (Tripo courtyard/patio scan, 1.91 M tris) through the
+landmark pipeline: Blender export (`bake-landmark.py`, 1,024 night-toned basecolour) then
+`bake-landmark.mjs` (meshopt simplify + ground-centre + quantize + 1,024 embedded JPEG).
+- **13,786 tris / 1 prim / 406.8 KB gzip** (budget 14,000), `KHR_mesh_quantization`, gzip-9.
+- **bbox 7.411 × 5.000 × 7.390 m** (x × y × z), min y = 0, centred on x/z
+  (±3.71 / ±3.70) — comparable footprint to `chapel_ruin` (6.90 × 7.00 × 6.44),
+  reads as an overgrown cloister/courtyard: colonnade, balustrade, vine-covered posts.
+- Preview: `temp_sketchlab/armour/c9_abbey.png`. Validator budget `abbey_ruin: 14000`.
+
+### Verification
+
+Staged mirror 82/82 before install, atomic install (spear new; abbey_ruin new + 7 unchanged landmark
+files re-written from the same staged bytes), live `validate-assets.mjs` **82/82**,
+`tests/assets` 5/5, `tests/equipment` 5/5, `tests/armory` 5/5; payload 78 files / ~15.2 MB.
+
 ## Batch 2026-10K — zombie-bloated night tone + hero headroom (cycle 8)
 
 Two asset files were touched this cycle; everything else is byte-identical to cycle 7.

@@ -368,6 +368,23 @@ export const NEST_DRESSING = {
 } as const;
 
 // ---------------------------------------------------------------------------------------------
+// Cycle-9 second Green March landmark: the ruined abbey/courtyard sits east of the village ->
+// border-fortress corridor (40 m from the village landmark, 31 m from the border fortress), readable
+// from the keep -> border road and the fortress approach. It is distance-culled like dressing (85 m,
+// player or QA focus) so it costs nothing at spawn; receive-only shadows; existing assets only.
+// ---------------------------------------------------------------------------------------------
+export const ABBEY_PLACEMENTS: readonly PropPlacement[] = [{x: 62, z: -46, yaw: 0.6}];
+
+/** Target world height for the abbey ruin (native bake is 5.0 m tall, 7.4 x 7.4 m footprint). */
+export const ABBEY_HEIGHT = 6.5;
+
+export const CYCLE9_PROPS = {
+  abbeys: ABBEY_PLACEMENTS.length,
+  abbeyTris: 13786,
+  abbeyDraws: 1
+} as const;
+
+// ---------------------------------------------------------------------------------------------
 // Cycle-3 regional identity: one landmark per region plus region-specific prop dressing. All of it
 // goes through the same quantization-safe instanced path; every scatter prop is distance-culled
 // through instance-buffer compaction. Coordinates validated against shared/world, scene.ts's
@@ -610,6 +627,9 @@ export const CONTENT_QA_POSES = [
 
 /** QA framing for the cycle-7 plague-nest ritual precinct: south-west approach, nest core in frame. */
 export const NEST_QA_POSES = [contentPose('content-plague', -8, -680, 3.2, 0, -666, 1.2)] as const;
+
+/** QA framing for the cycle-9 ruined-abbey landmark: from the keep -> border road looking east. */
+export const ABBEY_QA_POSES = [contentPose('content-abbey', 40, -40, 3.2, 62, -46, 2.6)] as const;
 
 const RACK_DX = 5.0;
 const RACK_DZ = 4.2;
@@ -1297,7 +1317,9 @@ export function addRuins(scene: THREE.Scene): {
     placeDressingAsset('chest', SMITHY_CRATES, 0.57, 'dressing:smithy-crates', {scaleVariance: true}),
     // cycle 5: chapel altar + forge furnaces (new warehouse props)
     placeDressingAsset('stone_altar', STONE_ALTARS, 1.4, 'dressing:altar', {emissiveLift: 0.3}),
-    placeDressingAsset('forge_furnace', FORGE_FURNACES, 2.4, 'dressing:furnaces')
+    placeDressingAsset('forge_furnace', FORGE_FURNACES, 2.4, 'dressing:furnaces'),
+    // cycle 9: ruined abbey landmark (distance-culled; receive-only shadows; 1 draw when visible)
+    placeDressingAsset('abbey_ruin', ABBEY_PLACEMENTS, ABBEY_HEIGHT, 'dressing:abbey')
   ]).catch((error) => console.warn('[ruins] asynchronous placement failed', error));
   buildBanners();
   buildFlames();

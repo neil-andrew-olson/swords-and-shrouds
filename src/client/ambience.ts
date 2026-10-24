@@ -113,6 +113,8 @@ export class Ambience{
  private forgeSources:AudioScheduledSourceNode[]=[];
  private forgeNodes:AudioNode[]=[];
  private hammerTimer=1.6;
+ /** QA-only diagnostic focus for landmark beds; null = normal player-proximity behaviour. */
+ private focusOverride:{x:number;z:number}|null=null;
  private quenchTimer=7;
  private heartGain?:GainNode;
  private started=false;
@@ -215,6 +217,25 @@ export class Ambience{
  /** Sidechain-style duck: main.ts calls this from the authoritative combat cue stream so the music
   * bed drops under swings/impacts/hurt and recovers over ~0.6 s. */
  duck(strength=1){this.duckLevel=Math.max(this.duckLevel,clamp01(strength));}
+ /** QA-only diagnostic focus for the landmark beds (chapel/forge). Null restores normal player
+  * proximity behaviour; used by window.__ssAudioFocus() so QA can verify landmark audio without
+  * walking the player. Never affects gameplay. */
+ setDiagnosticFocus(pos:{x:number;z:number}|null){this.focusOverride=pos??null;}
+ /** Read-only diagnostic snapshot for window.__ssAudioState(): current bed levels/weather/music.
+  * Built on demand only (no hot-path work, no logging, never changes audio behaviour). */
+ audioState(){
+  const level=(node:GainNode|undefined)=>node?Math.round(node.gain.value*1000)/1000:0;
+  return {
+   contextState:this.context?.state??'uninitialized',
+   weather:{region:this.weatherRegion||null,phase:this.weatherPhase||null,intensity:Math.round(this.weatherIntensity*1000)/1000},
+   regionBeds:REGIONS.map((region,index)=>({key:region.id,level:level(this.regionGain[index])})),
+   music:{level:Math.round(this.bedLevel*1000)/1000,duck:Math.round(this.duckLevel*1000)/1000},
+   weatherBeds:['rain','snow','ash'].map((kind,index)=>({kind,level:level(this.weatherGains[index])})),
+   landmarkBeds:[{key:'chapel',level:level(this.chapelGain)},{key:'forge',level:level(this.forgeGain)}],
+   masterGain:level(this.master),
+   focus:this.focusOverride?{x:this.focusOverride.x,z:this.focusOverride.z}:null
+  };
+ }
  private noiseBuffer(c:AudioContext,seconds:number,pink:boolean):AudioBuffer{
   const length=Math.ceil(c.sampleRate*seconds),buffer=c.createBuffer(1,length,c.sampleRate),data=buffer.getChannelData(0);
   if(pink){let b0=0,b1=0,b2=0;for(let i=0;i<length;i++){const white=Math.random()*2-1;b0=.99765*b0+white*.099046;b1=.963*b1+white*.296516;b2=.5706*b2+white*.115926;data[i]=(b0+b1+b2)*.6;}}
@@ -884,10 +905,13 @@ export class Ambience{
     if(fireD<28){const near=1-fireD/28;fireLevel=near*near*(.62+Math.random()*.38);}
     this.coverLevel=archD<14?clamp01((14-archD)/8):0;
     this.surface=this.surfaceAt(game,me);
-    const chapelDistance=dist(me,ASHEN_ALTAR);
+   }
+   const landmarkFocus=this.focusOverride??(game&&me?me:undefined);
+   if(landmarkFocus){
+    const chapelDistance=dist(landmarkFocus,ASHEN_ALTAR);
     this.chapelNear=chapelDistance<CHAPEL_RADIUS?1-chapelDistance/CHAPEL_RADIUS:0;
     let forgeDistance=Infinity;
-    for(const site of FORGE_SITES){const d=dist(me,site);if(d<forgeDistance)forgeDistance=d;}
+    for(const site of FORGE_SITES){const d=dist(landmarkFocus,site);if(d<forgeDistance)forgeDistance=d;}
     this.forgeNear=forgeDistance<FORGE_RADIUS?1-forgeDistance/FORGE_RADIUS:0;
    }else{this.chapelNear=0;this.forgeNear=0;}
    this.nearbyUndead=undead;

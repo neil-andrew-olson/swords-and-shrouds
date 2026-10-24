@@ -4,7 +4,7 @@ export type CombatCue={kind:'swing'|'impact'|'hurt'|'equip'|'block'|'siege';heav
 export type SwingProfile='thrust'|'cleave'|'crush'|'sweep';
 export type EventCue='capture'|'rescue'|'siege'|'victory'|'defeat';
 /** Weapon identity → swing synthesis family. Unknown/missing weapons keep the generic whoosh. */
-const SWING_PROFILES:Record<string,SwingProfile>={sword:'thrust',rapier:'thrust',flamberge:'cleave',dane_axe:'cleave',zweihander:'cleave',mace:'crush',hammer:'crush',bastard:'crush',poleaxe:'sweep',halberd:'sweep'};
+const SWING_PROFILES:Record<string,SwingProfile>={sword:'thrust',rapier:'thrust',spear:'thrust',flamberge:'cleave',dane_axe:'cleave',zweihander:'cleave',mace:'crush',hammer:'crush',bastard:'crush',poleaxe:'sweep',halberd:'sweep'};
 export function swingProfile(weapon?:string):SwingProfile|undefined{return weapon?SWING_PROFILES[weapon]:undefined;}
 /** Compare authoritative snapshots. Initial/replayed snapshots must remain silent. */
 export function combatCues(before:Game|undefined,after:Game,id:string):CombatCue[]{

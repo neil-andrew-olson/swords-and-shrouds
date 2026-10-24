@@ -24,7 +24,7 @@ survivorRig.dispose();});
 
 import {WEAPON_IDS,WEAPONS} from '../src/shared/weapons';
 import {characterAsset} from '../src/shared/characters';
-test('every supplied weapon fits the animated hero and two-handed loadouts omit shields',async()=>{const equipment=new Map();for(const id of [...WEAPON_IDS,'shield'])equipment.set(id,await geometryAsset(id));const source=await geometryAsset('hero');for(const weapon of WEAPON_IDS){const a={id:'qa',kind:'player',hp:100,maxHp:100,weapon,attackSerial:0} as Actor;const rig=customCharacter(source,a,equipment);for(let i=0;i<25;i++){if(i===5)a.attackSerial=1;rig.update(a,false,1/30);rig.model.updateMatrixWorld(true);const item=rig.model.getObjectByName('equipment-'+weapon)!;assert.ok(item);const size=new THREE.Box3().setFromObject(item,true).getSize(new THREE.Vector3());assert.ok(size.length()<2.2,weapon+' '+size.toArray());}assert.equal(!!rig.model.getObjectByName('equipment-shield'),WEAPONS[weapon].shield);rig.dispose();}});
+test('every supplied weapon fits the animated hero and two-handed loadouts omit shields',async()=>{const equipment=new Map();for(const id of [...WEAPON_IDS,'shield'])equipment.set(id,await geometryAsset(id));const source=await geometryAsset('hero');for(const weapon of WEAPON_IDS){const a={id:'qa',kind:'player',hp:100,maxHp:100,weapon,attackSerial:0} as Actor;const rig=customCharacter(source,a,equipment);for(let i=0;i<25;i++){if(i===5)a.attackSerial=1;rig.update(a,false,1/30);rig.model.updateMatrixWorld(true);const item=rig.model.getObjectByName('equipment-'+weapon)!;assert.ok(item);const size=new THREE.Box3().setFromObject(item,true).getSize(new THREE.Vector3());assert.ok(size.length()<Math.max(2.2,WEAPONS[weapon].length+.25),weapon+' '+size.toArray());}assert.equal(!!rig.model.getObjectByName('equipment-shield'),WEAPONS[weapon].shield);rig.dispose();}});
 
 import {meshBounds} from '../src/client/grounding';
 test('all nine animated bodies stay grounded through idle, movement, block and attacks',async()=>{
@@ -229,4 +229,10 @@ test('all nine animated bodies stay grounded through idle, movement, block and a
 import {WEAPON_GRIPS,hitFeedbackProfile,hitFlashColor} from '../src/client/equipment';
 test('measured weapon grips place the handle at the socket with the blade above it',async()=>{
  for(const id of WEAPON_IDS){const source=await geometryAsset(id);const fit=equipmentModel(source.scene,WEAPONS[id].length,false,id);fit.updateMatrixWorld(true);const wrapper=fit.children[0];const grip=new THREE.Vector3(...WEAPON_GRIPS[id].grip as [number,number,number]).applyMatrix4(wrapper.matrixWorld);assert.ok(grip.length()<1e-6,id+' grip');const direction=new THREE.Vector3(...WEAPON_GRIPS[id].blade as [number,number,number]).transformDirection(wrapper.matrixWorld);assert.ok(direction.y>.999,id+' blade');const bounds=new THREE.Box3().setFromObject(fit,true);assert.ok(bounds.max.y>Math.abs(bounds.min.y),id+' blade extends beyond grip');if(id==='rapier'||id==='halberd'||id==='dane_axe'||id==='flamberge'||id==='mace'){assert.ok(bounds.getSize(new THREE.Vector3()).length()<2.2,id+' fitted diagonal');source.scene.updateMatrixWorld(true);const raw=new THREE.Box3().setFromObject(source.scene,true),height=raw.getSize(new THREE.Vector3()).y;assert.ok(raw.min.y<-.1*height,id+' handle below grip');assert.ok(raw.max.y>.5*height,id+' blade above grip');}}
+ // Cycle-9 War Spear: canonical polearm fit keeps the point above the grip at full 2.2 m length.
+ const spearFit=equipmentModel((await geometryAsset('spear')).scene,WEAPONS.spear.length,false,'spear');spearFit.updateMatrixWorld(true);
+ const spearBounds=new THREE.Box3().setFromObject(spearFit,true),spearSize=spearBounds.getSize(new THREE.Vector3());
+ assert.ok(spearSize.y>2.1&&spearSize.y<2.35,'spear fitted height '+spearSize.y);
+ assert.ok(spearBounds.max.y>Math.abs(spearBounds.min.y),'spear point above grip');
+ assert.equal(WEAPONS.spear.shield,true,'spear allows a shield');
 });

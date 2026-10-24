@@ -2,8 +2,8 @@ import {characterAsset} from '../shared/characters';
 import * as THREE from 'three';
 import {customCharacter} from './custom-character';
 import {equipmentModel,weaponCombatProfile,blockSparkColor,hitFeedbackProfile,hitFlashColor} from './equipment';
-import {undeadEliteTier,setCharacterWindQuality,setHitFeedbackReducedMotion} from './custom-character';
-import {weaponStats,WEAPONS,type WeaponId} from '../shared/weapons';
+import {undeadEliteTier,setCharacterWindQuality,setHitFeedbackReducedMotion,triggerEnemyHit,enemyHitFxState} from './custom-character';
+import {weaponStats,WEAPONS,WEAPON_IDS,type WeaponId} from '../shared/weapons';
 import {addLandscape} from './landscape';
 import {CharacterAssets,loadAsset} from './assets';
 import {CASTLES,CAMPS,REGIONS,NEST,START,walls,dist} from '../shared/world';
@@ -176,7 +176,7 @@ export class WorldView{
   private groundFrost:{m:THREE.MeshStandardMaterial;base:THREE.Color}[]=[];
   private vignetteEl:HTMLDivElement|null=null;private vignetteLife=0;private vignetteOpacity=0;private vignetteDirX=0;private vignetteDirY=0;
   private reducedMotion=false;private reducedMotionOverride:boolean|null=null;private hitStop=0;private kickPitch=0;private kickRoll=0;private fovPunch=0;private lastHeavyAt=0;private lastHitAt=0;private lastHeavySerial=-1;private visualScale=1;
-  private characterClothWind=true;private lastHitStopMs=0;private lastKickAt=0;private lastKickMag=0;private lastVignetteAt=0;private lastVignetteMag=0;private heavyCount=0;private damageCount=0;
+  private characterClothWind=true;private hitFeedbackHold=false;private lastHitActorId:string|null=null;private qaWeaponPreview:WeaponId|null=null;private lastHitStopMs=0;private lastKickAt=0;private lastKickMag=0;private lastVignetteAt=0;private lastVignetteMag=0;private heavyCount=0;private damageCount=0;
   private lastAmbientTint=new THREE.Color(0xffffff);private lastSaturation=1;
   /** Landmark coordinates per region for the QA landmark views (ruins-builder placements). */
   private landmarkCoords:{green:{x:number;z:number};ashen:{x:number;z:number};crown:{x:number;z:number}}={
@@ -707,7 +707,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    return {calls:info.render.calls,triangles:info.render.triangles,software:this.softwareRenderer,weather:{region:this.weatherRegion,phase:this.weatherStates[this.weatherRegion].name,intensity:+this.weatherStates[this.weatherRegion].intensity.toFixed(3)},contentFocus:this.qaView?{name:this.qaView.name,x:this.qaView.x,z:this.qaView.z}:null,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
    win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
@@ -720,6 +720,10 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    win.__ssLoadTimings=()=>view.loadTimings();
    win.__ssPreviewBody=(name?:string|null,distance?:number|{distance?:number})=>{const d=typeof distance==='number'?distance:(distance?.distance??10);return view.previewBody(name===undefined?null:name,d);};
    win.__ssCombatFx=()=>view.combatFx();
+   win.__ssSetHitFeedbackHold=(value?:boolean|null)=>view.setHitFeedbackHold(value===undefined?null:value);
+   win.__ssWeaponState=()=>view.weaponState();
+   win.__ssEquipWeapon=(id?:string|null,opts?:{preview?:boolean})=>view.equipWeapon(id===undefined?null:id,opts);
+   win.__ssWeaponReadiness=()=>view.weaponReadiness();
    win.__ssCharacterFx=()=>({quality:view.quality,clothWind:view.characterClothWind});
    win.__ssEnemyVariants=()=>view.enemyVariants();
    win.__ssClearWeather=()=>view.clearWeather();
@@ -916,6 +920,41 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.qaBody=group;this.qaBodyRig=rig;this.qaBodyActor=actor;this.qaBodyDistance=Math.max(2,Math.min(30,distance));
    return {ok:true,appearance,distance:this.qaBodyDistance,ready:true,actorId:actor.id};
   }
+  /** window.__ssWeaponState(): read-only current weapon/stats + armory/drop readiness for QA. */
+  weaponState(){
+   const g=this.lastGame;const me=g?.actors.find(a=>a.id===this.lastMeId)??g?.actors.find(a=>a.kind==='player');
+   const weapon=(this.qaWeaponPreview??(me?.weapon??'sword')) as WeaponId;
+   const stats=weaponStats(weapon);const profile=weaponCombatProfile(weapon);
+   const drops=(g?.weaponDrops??[]).map(d=>({id:d.id,weapon:d.weapon,x:d.x,z:d.z,taken:!!d.taken}));
+   return {weapon,weaponId:weapon,weaponName:WEAPONS[weapon]?.name??weapon,reach:stats.reach,damage:stats.damage,cooldown:stats.cooldown,stamina:stats.stamina,shield:!!stats.shield,style:profile.style,armory:[...WEAPON_IDS],cardCount:WEAPON_IDS.length,drops,qaPreview:this.qaWeaponPreview};
+  }
+  /** window.__ssEquipWeapon(id,{preview?}): QA-only deterministic grip preview (server equip still via racks). */
+  equipWeapon(id:string|null,opts?:{preview?:boolean}){
+   if(id===null){this.qaWeaponPreview=null;return {ok:true,weapon:null,preview:false};}
+   if(!WEAPON_IDS.includes(id as WeaponId))return {ok:false,weapon:id,reason:'invalid-weapon',armory:[...WEAPON_IDS]};
+   const wid=id as WeaponId;
+   // Rebuild the held weapon immediately so a dry capture sees the new grip/orientation.
+   this.activeWeapon=undefined as unknown as WeaponId;this.qaWeaponPreview=wid;
+   try{const btn=document.querySelector(`#equip-${wid}`) as HTMLButtonElement|null;if(btn&&!btn.disabled)btn.click();}catch{}
+   return {ok:true,weapon:wid,preview:true,serverAuthoritative:false,stats:{reach:weaponStats(wid).reach,damage:weaponStats(wid).damage,shield:!!weaponStats(wid).shield}};
+  }
+  /** window.__ssSetHitFeedbackHold(bool|null): keep per-hit flash/stagger alive for QA stills. */
+  setHitFeedbackHold(value:boolean|null){
+   const on=value===true;this.hitFeedbackHold=on;
+   // QA stills often use the preview rig registry; ask custom-character to (re)trigger it with a long
+   // duration. Normal hits also use a long duration while hold is on (see damage branch).
+   const forcedId=this.qaBodyActor?.id??this.lastHitActorId??undefined;
+   if(forcedId){
+    try{triggerEnemyHit(forcedId,{weight:1.3,durationMs:on?600000:1,stagger:1});}catch{}
+   }
+   return {hold:on,actorId:forcedId??null};
+  }
+  /** window.__ssWeaponReadiness(): WEAPON_IDS-driven armory readiness (11-weapon cycle). */
+  weaponReadiness(){
+   const ids=[...WEAPON_IDS];
+   const loaded=ids.filter(id=>this.characterAssets.custom.has(id));
+   return {count:ids.length,ids,loaded,allLoaded:loaded.length===ids.length,starter:ids[0]??null};
+  }
   /** window.__ssClearWeather(): deterministic clear-weather state for QA night captures. */
   clearWeather(){
    const region=this.weatherRegion;const list=WEATHER_PHASES[region];const target=list[0];
@@ -1018,7 +1057,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    const hitStopMs=this.hitStop>0?this.hitStop*1000:(recentHeavy||recentHit?this.lastHitStopMs:0);
    const kickMag=this.hitStop>0||recentHeavy||recentHit?this.lastKickMag:0;
    const vig=this.vignetteOpacity>0?this.vignetteOpacity:(recentHeavy||recentHit?this.lastVignetteMag:0);
-   return {reducedMotion:this.reducedMotionOverride??this.reducedMotion,hitStopMs:+hitStopMs.toFixed(1),hitStopActive:this.hitStop>0,kick:{x:+this.kickPitch.toFixed(4),y:+this.kickRoll.toFixed(4),magnitude:+kickMag.toFixed(4)},shake:+this.shake.toFixed(3),fov:+this.camera.fov.toFixed(2),vignette:{opacity:+vig.toFixed(3),direction:{x:+this.vignetteDirX.toFixed(3),y:+this.vignetteDirY.toFixed(3)}},lastHeavyAt:+this.lastHeavyAt.toFixed(0),lastHitAt:+this.lastHitAt.toFixed(0),heavyCount:this.heavyCount,damageCount:this.damageCount,lastHitStopMs:+this.lastHitStopMs.toFixed(1)};
+   return {reducedMotion:this.reducedMotionOverride??this.reducedMotion,hitFeedbackHold:this.hitFeedbackHold,hitStopMs:+hitStopMs.toFixed(1),hitStopActive:this.hitStop>0,kick:{x:+this.kickPitch.toFixed(4),y:+this.kickRoll.toFixed(4),magnitude:+kickMag.toFixed(4)},shake:+this.shake.toFixed(3),fov:+this.camera.fov.toFixed(2),vignette:{opacity:+vig.toFixed(3),direction:{x:+this.vignetteDirX.toFixed(3),y:+this.vignetteDirY.toFixed(3)}},lastHeavyAt:+this.lastHeavyAt.toFixed(0),lastHitAt:+this.lastHitAt.toFixed(0),heavyCount:this.heavyCount,damageCount:this.damageCount,lastHitStopMs:+this.lastHitStopMs.toFixed(1)};
   }
   /** window.__ssSetReducedMotion(bool|null): QA override for the reduced-motion path. */
   setReducedMotion(value:boolean|null){this.reducedMotionOverride=value;const reduced=this.reducedMotionOverride??this.reducedMotion;try{setHitFeedbackReducedMotion(reduced);}catch{}if(reduced){this.hitStop=0;this.visualScale=1;this.kickPitch=0;this.kickRoll=0;this.fovPunch=0;this.vignetteLife=0;this.vignetteOpacity=0;if(this.vignetteEl)this.vignetteEl.style.opacity='0';}return {reducedMotion:reduced};}
@@ -1257,8 +1296,8 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     rig?.update(a,moving,dt*this.visualScale);if(rig)for(const fragment of rig.fragments.splice(0)){this.scene.add(fragment);this.debris.push({mesh:fragment,life:4,velocity:new THREE.Vector3(a.id.length%2?2:-2,3,1.2)});}mesh.position.y=0;const previous=this.previousHp.get(a.id);if(previous!==undefined&&a.hp<previous){this.spawnDamageLabel(String(Math.ceil(previous-a.hp)),a.kind==='player'?'#ff8d78':'#ffe1a0',a.x,2.6,a.z,1.5,.6,.8);
      const evil=a.kind==='zombie'||a.kind==='corrupted';
      this.tmpV.set(a.x,1.35,a.z);
-      const feedback=hitFeedbackProfile(me?.weapon);const hotSpark=a.block?blockSparkColor():feedback.spark;const victimRig=this.animated.get(a.id);const reducedFx=this.reducedMotionOverride??this.reducedMotion;
-      victimRig?.hit?.({weight:feedback.weight,durationMs:feedback.flashMs,stagger:feedback.stagger,flashColor:hitFlashColor(evil),reduced:reducedFx});
+      const feedback=hitFeedbackProfile(me?.weapon);const hotSpark=a.block?blockSparkColor():feedback.spark;const victimRig=this.animated.get(a.id);const reducedFx=this.reducedMotionOverride??this.reducedMotion;this.lastHitActorId=a.id;
+      victimRig?.hit?.({weight:feedback.weight,durationMs:this.hitFeedbackHold?600000:feedback.flashMs,stagger:feedback.stagger,flashColor:hitFlashColor(evil),reduced:reducedFx});
       this.fx.sparks(this.tmpV,evil?'undead':'metal',hotSpark);
      this.fx.blood(this.tmpV,evil,a.maxHp>=200?1.6:1);this.fx.splatter(this.tmpV2.set(a.x,0,a.z),evil,Math.min(2,0.6+(previous-a.hp)/40));
      if(previous>0&&a.hp<=0){
@@ -1298,7 +1337,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    if(me){const model=this.actors.get(me.id);const pos=model?.position??this.tmpV2.set(me.x,0,me.z);const target=this.camTarget.set(pos.x,1.55,pos.z);const forward=this.camForward.set(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch));
     if(first){this.camera.position.copy(target);this.camera.rotation.set(pitch,-yaw,0,'YXZ');}
     else{const desired=this.camDesired.copy(target).addScaledVector(forward,-6);desired.y+=2;const delta=this.camDelta.copy(desired).sub(target);this.camRay.set(target,delta.clone().normalize());this.camRay.far=delta.length();const hits=this.camRay.intersectObjects(this.solid,false);if(hits.length)desired.copy(target).addScaledVector(delta.normalize(),Math.max(.45,hits[0].distance-.3));this.camera.position.copy(desired);this.camera.lookAt(this.tmpV.copy(target).addScaledVector(forward,4));}
-    const selected=me.weapon??'sword',stats=weaponStats(selected),source=this.characterAssets.custom.get(selected);const combatProfile=weaponCombatProfile(selected);if(this.lastHeavySerial!==(me.attackSerial??0)){this.lastHeavySerial=me.attackSerial??0;if(combatProfile.weight>0)this.onHeavyAttack(combatProfile);}if(source&&this.activeWeapon!==selected){this.weapon.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])if(this.activeWeapon)m.dispose();});this.weapon.clear();this.weapon.add(equipmentModel(source.scene,stats.length*.78,false,selected));this.weapon.traverse(o=>{o.castShadow=false;});this.activeWeapon=selected;if(this.trailSerial!==(me.attackSerial??0)){if(this.trailSerial>=0&&!first&&me.hp>0){const trailColor=weaponCombatProfile(selected).trail;this.tmpV2.set(me.x,0,me.z);this.fx.trail(this.tmpV2,me.yaw??yaw,stats.reach,trailColor[0],trailColor[1],trailColor[2]);}this.trailSerial=me.attackSerial??0;}}
+    const selected=this.qaWeaponPreview??(me.weapon??'sword'),stats=weaponStats(selected),source=this.characterAssets.custom.get(selected);const combatProfile=weaponCombatProfile(selected);if(this.lastHeavySerial!==(me.attackSerial??0)){this.lastHeavySerial=me.attackSerial??0;if(combatProfile.weight>0)this.onHeavyAttack(combatProfile);}if(source&&this.activeWeapon!==selected){this.weapon.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material])if(this.activeWeapon)m.dispose();});this.weapon.clear();this.weapon.add(equipmentModel(source.scene,stats.length*.78,false,selected));this.weapon.traverse(o=>{o.castShadow=false;});this.activeWeapon=selected;if(this.trailSerial!==(me.attackSerial??0)){if(this.trailSerial>=0&&!first&&me.hp>0){const trailColor=weaponCombatProfile(selected).trail;this.tmpV2.set(me.x,0,me.z);this.fx.trail(this.tmpV2,me.yaw??yaw,stats.reach,trailColor[0],trailColor[1],trailColor[2]);}this.trailSerial=me.attackSerial??0;}}
     this.weapon.visible=first&&me.hp>0;this.shield.visible=first&&me.hp>0&&stats.shield;this.weapon.position.set(.32,-.4,-.78);this.weapon.rotation.set(me.block&&!stats.shield?-.5:.1,0,me.block&&!stats.shield?-1.1:-.2);if(this.fpSerial!==(me.attackSerial??0)){if(this.fpSerial>=0){this.fpDuration=stats.cooldown*.85;this.fpAttack=this.fpDuration;}this.fpSerial=me.attackSerial??0;}this.fpAttack=Math.max(0,this.fpAttack-dt);if(this.fpAttack>0){const t=1-this.fpAttack/this.fpDuration,arc=Math.sin(Math.PI*t),strike=Math.sin(Math.PI*Math.min(1,t*1.6)),style=swingStyle(selected);if(style==='thrust'){this.weapon.position.z-=strike*.6;this.weapon.position.y+=strike*.05;this.weapon.rotation.x-=strike*.18;this.weapon.rotation.z-=arc*.05;this.weapon.position.x+=arc*.05;}else if(style==='cleave'){this.weapon.rotation.z-=arc*1.9;this.weapon.rotation.x-=strike*.65;this.weapon.rotation.y+=arc*.35;this.weapon.position.x-=arc*.45;this.weapon.position.z-=strike*.18;}else if(style==='crush'){this.weapon.rotation.x-=strike*1.7;this.weapon.rotation.z+=arc*.35;this.weapon.position.y+=arc*.22-strike*.18;this.weapon.position.z-=strike*.24;this.weapon.position.x-=arc*.12;}else{this.weapon.rotation.z-=arc*2;this.weapon.rotation.y-=arc*.5;this.weapon.position.x-=arc*.5;this.weapon.position.z-=arc*.22;this.weapon.position.y+=strike*.08;}}this.shield.position.lerp(this.shieldTarget.set(me.block?-.12:-.38,me.block?-.12:-.38,-.82),1-Math.exp(-dt*16));
    }
    if(this.previewActorId){
@@ -1321,6 +1360,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     this.camera.rotation.set(this.qaView.pitch,-this.qaView.yaw,0,'YXZ');
     this.weapon.visible=false;this.shield.visible=false;
    }
+   if(this.hitFeedbackHold){const ids=new Set<string>();if(this.qaBodyActor)ids.add(this.qaBodyActor.id);if(this.lastHitActorId)ids.add(this.lastHitActorId);try{const cur=enemyHitFxState().actorId;if(cur)ids.add(cur);}catch{}for(const id of ids){try{triggerEnemyHit(id,{weight:1.3,durationMs:600000,stagger:1});}catch{}}}
    this.applyCombatCamera(dt);
    if(this.qaBody&&this.qaBodyActor){this.camera.getWorldQuaternion(this.rainQuat);this.tmpV2.set(0,0,-1).applyQuaternion(this.rainQuat);this.tmpV2.y=0;const flen=Math.hypot(this.tmpV2.x,this.tmpV2.z)||1;this.tmpV2.x/=flen;this.tmpV2.z/=flen;this.qaBody.position.set(this.camera.position.x+this.tmpV2.x*this.qaBodyDistance,0,this.camera.position.z+this.tmpV2.z*this.qaBodyDistance);this.qaBody.visible=true;this.qaBody.rotation.y=Math.atan2(this.camera.position.x-this.qaBody.position.x,this.camera.position.z-this.qaBody.position.z);this.qaBody.updateMatrixWorld(true);this.qaBodyRig?.update(this.qaBodyActor,false,dt*this.visualScale);}
    if(g&&!this.firstGameFrameMarked){this.firstGameFrameMarked=true;try{performance.mark('ss:firstGameFrame');}catch{}}

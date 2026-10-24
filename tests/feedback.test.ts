@@ -9,6 +9,16 @@ assert.equal(swingProfile('sword'),'thrust');assert.equal(swingProfile('rapier')
 assert.equal(swingProfile('flamberge'),'cleave');assert.equal(swingProfile('dane_axe'),'cleave');assert.equal(swingProfile('zweihander'),'cleave');
 assert.equal(swingProfile('mace'),'crush');assert.equal(swingProfile('hammer'),'crush');assert.equal(swingProfile('bastard'),'crush');
 assert.equal(swingProfile('poleaxe'),'sweep');assert.equal(swingProfile('halberd'),'sweep');
+// Cycle-9 War Spear: a long thrust shares the rapier/sword thrust layer, and the generic swing cue
+// path still fires with the spear's weapon id (so it is audible even before/without a profile entry).
+assert.equal(swingProfile('spear'),'thrust');
+const spearGame=structuredClone(armed);spearGame.time=.4;
+const spearActor=spearGame.actors.find(a=>a.id==='p')!;
+spearActor.attackSerial=(spearActor.attackSerial??0)+1;
+(spearActor as unknown as {weapon:string}).weapon='spear';
+const spearCues=combatCues(armed,spearGame,'p');
+assert.equal(spearCues.filter(c=>c.kind==='swing').length,1);
+assert.equal(spearCues.find(c=>c.kind==='swing')!.weapon,'spear');
 assert.equal(swingProfile(undefined),undefined);assert.equal(swingProfile('not-a-weapon'),undefined);
 // Milestone stingers fire once on a transition, never on the initial/replayed/stale snapshots.
 assert.deepEqual(eventCues(undefined,g),[]);assert.deepEqual(eventCues(armed,armed),[]);
