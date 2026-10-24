@@ -115,6 +115,7 @@ class ParticlePool {
 
     const mesh = this.mesh;
     mesh.count = this.alive;
+    mesh.visible = this.alive > 0;
     if (this.alive === 0) return;
     for (let i = 0; i < this.alive; i++) {
       const p3 = i * 3;
@@ -217,6 +218,7 @@ class SwingTrailPool {
       i++;
     }
     this.mesh.count = this.alive;
+    this.mesh.visible = this.alive > 0;
     if (this.alive === 0) return;
     for (let i = 0; i < this.alive; i++) {
       const t = 1 - this.life[i] / this.maxLife[i];
@@ -321,6 +323,9 @@ class GroundDecals {
   }
 
   update(dt: number) {
+    let anyAlive = false;
+    for (let i = 0; i < this.capacity; i++) if (this.life[i] > 0) { anyAlive = true; break; }
+    this.mesh.visible = anyAlive;
     this.mesh.count = this.capacity;
     for (let i = 0; i < this.capacity; i++) {
       if (this.life[i] > 0) this.life[i] -= dt;

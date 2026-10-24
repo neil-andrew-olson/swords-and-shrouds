@@ -27,6 +27,9 @@
  *                      Degrades to fps/load-only when the __ssPerf hook is absent (e.g. live site).
  *   --perf-settle <ms> Settle time after joining before the third-person capture (default 4000)
  *   --perf-samples <ms> Frame-time sampling window per capture point (default 4000)
+ *   --characters       Cycle-1 character readability mode: close-up screenshots of the player in
+ *                      all 5 appearances + zombie/skeleton via window.__ssCharacterPreview, with
+ *                      mean/p50/p90/black% body luminance before/after comparison.
  *   --expect-weapons <n> Gate `#weaponCards` to exactly n (default: report only)
  *   --expect-assets <list> Comma-separated asset paths (relative to assets/) to fetch and require 200
  *   --skip-build       Reuse the existing dist/client instead of running vite build
@@ -56,6 +59,15 @@ const DEFAULT_CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.e
 const BUNDLED_NODE = 'C:\\Users\\neil\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\node\\bin\\node.exe';
 const VIEWPORT = {width: 1600, height: 900};
 const CANVAS_GATE = {minStd: 2, minNonDarkPct: 2, minColors: 32};
+// Character-readability gates (cycle 2026-10D): close-up body luminance must clearly clear the
+// near-black-silhouette baseline measured on the pre-fix batch-3 build.
+const CHAR_GATE = {minMean: 35, minP90: 70, minNormalP50: 35};
+// BEFORE baseline measured from qa/final-batch3 (player body + companion crops, batch-3 pre-fix).
+const CHAR_BEFORE_BASELINE = {
+  normalPlayerTorso: {mean: 54.9, p50: 28.5, p90: 132.0, blackPct: 44.5},
+  normalCompanionBody: {mean: 27.4, p50: 22.8, p90: 30.8, blackPct: 20.4},
+  source: 'qa/final-batch3/01-third-person.png crops (180x400 player region / 230x330 companion region)',
+};
 // Injected before the app boots: records the WebSocket lifecycle AND a summary of the last
 // authoritative snapshot on every page. This is what lets the harness (a) prove a real
 // disconnect/reconnect vs a transient toast, (b) carry out co-op assertions (players, positions,
@@ -64,7 +76,8 @@ const WS_INSTRUMENT = `(()=>{
   if(window.__qaWs)return;
   const O=window.WebSocket;
   const state={instances:0,opens:0,closes:[],errors:[],urls:[],openedAt:[],stateCount:0,
-    welcome:null,firstStateAt:null,lastMessageAt:null,lastState:null,visibility:[],conns:[]};
+    welcome:null,firstStateAt:null,lastMessageAt:null,lastState:null,visibility:[],conns:[],
+    allActors:[],actorKey:null};
   window.__qaWs=state;
   function summarizeState(m){
     const game=m.game||{};
@@ -73,6 +86,7 @@ const WS_INSTRUMENT = `(()=>{
       players:(m.players||[]).map(p=>({id:p.id,name:p.name,connected:!!p.connected})),
       // Only player actors: co-op assertions need player positions, not the 90+ NPCs/waves.
       actors:(game.actors||[]).filter(a=>a.kind==='player').map(a=>({id:a.id,name:a.name,kind:a.kind,hp:a.hp,
+        character:a.character||null,
         x:Math.round(a.x*10)/10,z:Math.round(a.z*10)/10,yaw:a.yaw})),
       armory:(game.armory||[]).slice(),
       weaponDrops:(game.weaponDrops||[]).map(d=>({weapon:d.weapon,
@@ -117,6 +131,15 @@ const WS_INSTRUMENT = `(()=>{
             if(state.conns[idx])state.conns[idx].stateCount++;
             if(!state.firstStateAt)state.firstStateAt=Date.now();
             state.lastState=summarizeState(m);
+            // Full actor id/kind/character index for the character-preview hook (rebuild only when
+            // the actor set changes; ids are stable for the session, so this is cheap).
+            const actors=(m.game&&m.game.actors)||[];
+            const key=actors.length+':'+actors.map(a=>a.id).join(',');
+            if(key!==state.actorKey){
+              state.actorKey=key;
+              state.allActors=actors.map(a=>({id:a.id,name:a.name,kind:a.kind,character:a.character||null,
+                x:Math.round((a.x||0)*10)/10,z:Math.round((a.z||0)*10)/10}));
+            }
           }
         }catch(e){}
       });
@@ -187,7 +210,7 @@ const WS_INSTRUMENT = `(()=>{
         const mode=window.localStorage.getItem('ss-qa-load-delay');
         if(mode&&/\\/assets\\//.test(url)&&/\\.glb\\.gz($|\\?)/.test(url)){
           const wait=Number(mode)||0;
-          const slot=delayed++*250;
+          const slot=delayed++*400;
           return new Promise(resolve=>setTimeout(resolve,wait+slot)).then(()=>origFetch(...args));
         }
       }catch(e){}
@@ -219,6 +242,7 @@ function parseArgs(argv) {
     url: null,
     coop: false,
     perf: false,
+    characters: false,
     perfSettle: 4000,
     perfSampleMs: 4000,
     expectWeapons: null,
@@ -234,6 +258,7 @@ function parseArgs(argv) {
     else if (a === '--url') opts.url = argv[++i];
     else if (a === '--coop') opts.coop = true;
     else if (a === '--perf') opts.perf = true;
+    else if (a === '--characters') opts.characters = true;
     else if (a === '--perf-settle') opts.perfSettle = Number(argv[++i]) || opts.perfSettle;
     else if (a === '--perf-samples') opts.perfSampleMs = Number(argv[++i]) || opts.perfSampleMs;
     else if (a === '--expect-weapons') opts.expectWeapons = Number(argv[++i]);
@@ -249,6 +274,7 @@ function parseArgs(argv) {
   if (!opts.out) throw new Error('--out requires a directory');
   if (opts.coop && opts.url) throw new Error('--coop and --url are mutually exclusive');
   if (opts.coop && opts.perf) throw new Error('--perf captures a single page; do not combine with --coop');
+  if (opts.coop && opts.characters) throw new Error('--characters captures a single page; do not combine with --coop');
   if (opts.expectWeapons !== null && (!Number.isInteger(opts.expectWeapons) || opts.expectWeapons < 1)) {
     throw new Error('--expect-weapons requires a positive integer');
   }
@@ -702,40 +728,63 @@ async function screenshot(page, outDir, name) {
   return file;
 }
 
-/** Decode a PNG screenshot inside the page (2D canvas) and measure what is actually visible. */
-async function analyzePng(page, base64) {
+/**
+ * Decode a PNG screenshot inside the page (2D canvas) and measure what is actually visible.
+ * `region` (optional) is a fractional crop {x0,y0,x1,y1} in 0..1 for character-region luminance.
+ */
+async function analyzePng(page, base64, region = null) {
   return page.evaluate(
     `(()=>new Promise((resolve,reject)=>{
+      const region=${JSON.stringify(region)};
       const img=new Image();
       img.onload=()=>{
         try{
-          const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;
+          const W=img.naturalWidth,H=img.naturalHeight;
+          const c=document.createElement('canvas');c.width=W;c.height=H;
           const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0);
-          const d=ctx.getImageData(0,0,c.width,c.height).data;
-          let count=0,sum=0,sumSq=0,nonDark=0,min=255,max=0;
+          const x0=region?Math.max(0,Math.floor(W*region.x0)):0;
+          const x1=region?Math.min(W,Math.ceil(W*region.x1)):W;
+          const y0=region?Math.max(0,Math.floor(H*region.y0)):0;
+          const y1=region?Math.min(H,Math.ceil(H*region.y1)):H;
+          const d=ctx.getImageData(0,0,W,H).data;
+          const lums=[];let sum=0,sumSq=0,nonDark=0,black=0,min=255,max=0;
           const buckets=new Set();
-          for(let i=0;i<d.length;i+=16){
-            const r=d[i],g=d[i+1],b=d[i+2];
-            const lum=0.2126*r+0.7152*g+0.0722*b;
-            count++;sum+=lum;sumSq+=lum*lum;
-            if(lum>10)nonDark++;
-            if(lum<min)min=lum;
-            if(lum>max)max=lum;
-            buckets.add(((r>>3)<<10)|((g>>3)<<5)|(b>>3));
+          for(let y=y0;y<y1;y+=2){
+            for(let x=x0;x<x1;x+=2){
+              const i=(y*W+x)*4;const r=d[i],g=d[i+1],b=d[i+2];
+              const lum=0.2126*r+0.7152*g+0.0722*b;
+              lums.push(lum);sum+=lum;sumSq+=lum*lum;
+              if(lum>10)nonDark++;
+              if(lum<20)black++;
+              if(lum<min)min=lum;if(lum>max)max=lum;
+              buckets.add(((r>>3)<<10)|((g>>3)<<5)|(b>>3));
+            }
           }
-          const mean=sum/count;
-          resolve({width:c.width,height:c.height,sampled:count,
-            mean:+mean.toFixed(2),
+          const count=lums.length;const mean=sum/count;
+          const sorted=lums.slice().sort((a,b)=>a-b);
+          const pick=p=>sorted[Math.min(sorted.length-1,Math.floor(sorted.length*p))];
+          resolve({width:W,height:H,region:region||null,sampled:count,
+            mean:+mean.toFixed(2),p50:+pick(0.5).toFixed(2),p90:+pick(0.9).toFixed(2),
             std:+Math.sqrt(Math.max(0,sumSq/count-mean*mean)).toFixed(2),
+            blackPct:+(black/count*100).toFixed(2),
             nonDarkPct:+(nonDark/count*100).toFixed(2),
-            uniqueColors:buckets.size,min,max});
+            uniqueColors:buckets.size,min:+min.toFixed(1),max:+max.toFixed(1)});
         }catch(e){reject(new Error('pixels: '+(e&&e.message)));}
       };
       img.onerror=()=>reject(new Error('screenshot decode failed'));
       img.src='data:image/png;base64,${base64.replace(/'/g, "\\'")}';
     }))()`,
-    {awaitPromise: true, timeoutMs: 30000},
+    {awaitPromise: true, timeoutMs: 60000},
   );
+}
+
+/** Screenshot + save + region luminance stats in one call (character readability). */
+async function screenshotWithStats(page, outDir, name, region = null) {
+  const file = await screenshot(page, outDir, name);
+  const base64 = fs.readFileSync(file).toString('base64');
+  const stats = await analyzePng(page, base64, region);
+  log(`REGION[${name}]: mean=${stats.mean} p50=${stats.p50} p90=${stats.p90} black=${stats.blackPct}%`);
+  return {file, stats};
 }
 
 /** Screenshot with HUD/scene overlays hidden so only the WebGL canvas is measured. */
@@ -1016,7 +1065,7 @@ async function readQaState(page) {
     conns:window.__qaWs.conns,
     welcome:window.__qaWs.welcome,stateCount:window.__qaWs.stateCount,
     firstStateAt:window.__qaWs.firstStateAt,lastMessageAt:window.__qaWs.lastMessageAt,
-    lastState:window.__qaWs.lastState,visibility:window.__qaWs.visibility
+    lastState:window.__qaWs.lastState,allActors:window.__qaWs.allActors,visibility:window.__qaWs.visibility
   })) : null`);
 }
 
@@ -1558,6 +1607,133 @@ function perfSummary(perf, frames) {
   };
 }
 
+/* ------------------------------------------------------- character close-ups */
+
+const PLAYER_APPEARANCES = ['templar', 'hero', 'berserker', 'ranger', 'ally'];
+// Central crop of a framed close-up: torso/legs strip, minimises background.
+const CHAR_CLOSEUP_REGION = {x0: 0.36, y0: 0.08, x1: 0.64, y1: 0.94};
+// Player torso box in the normal third-person spawn view (mirrors the pre-fix baseline crop
+// x 752..826 / y 470..640 at 1584x805).
+const CHAR_NORMAL_REGION = {x0: 0.475, y0: 0.584, x1: 0.521, y1: 0.795};
+
+async function charPreview(page, actorId) {
+  // undefined => no-arg call (frames local player); null => restore; string => frame that actor.
+  const arg = actorId === undefined ? '' : actorId === null ? 'null' : JSON.stringify(actorId);
+  return page.evaluate(
+    `(()=>{const f=window.__ssCharacterPreview;if(typeof f!=='function')return {ok:false,reason:'__ssCharacterPreview not available'};try{const r=f(${arg});return r===undefined?{ok:true}:JSON.parse(JSON.stringify(r));}catch(e){return {ok:false,error:String((e&&e.message)||e)};}})()`,
+    {timeoutMs: 15000},
+  );
+}
+
+async function setPlayerAppearance(page, value) {
+  return page.evaluate(
+    `(()=>{
+      const selects=[...document.querySelectorAll('select')];
+      const s=selects.find(x=>[...x.options].some(o=>o.value===${JSON.stringify(PLAYER_APPEARANCES[0])}));
+      if(!s)return {ok:false,reason:'character select not found'};
+      s.value=${JSON.stringify(value)};
+      s.dispatchEvent(new Event('change',{bubbles:true}));
+      return {ok:true,id:s.id,value:s.value};
+    })()`,
+    {timeoutMs: 15000},
+  );
+}
+
+async function waitForPlayerCharacter(page, value, timeoutMs = 30000) {
+  await waitFor(
+    page,
+    `(()=>{const s=window.__qaWs&&window.__qaWs.lastState;if(!s)return false;const p=(s.actors||[]).find(a=>a.kind==='player');return !!p&&p.character===${JSON.stringify(value)};})()`,
+    {timeoutMs, label: `player character ${value}`},
+  );
+}
+
+/** Cycle-1 readability capture: 5 player appearances + undead close-ups with body luminance. */
+async function captureCharacterReadability(page, {opts, report, check}) {
+  const outDir = opts.outDir;
+  const hooks = await page.evaluate(`(()=>({preview:typeof window.__ssCharacterPreview==='function',quality:typeof window.__ssQuality==='function'}))()`);
+  report.characters = {
+    hook: hooks,
+    mode: opts.url ? 'url' : 'local',
+    appearances: [],
+    undead: [],
+    normalThirdPerson: null,
+    baseline: CHAR_BEFORE_BASELINE,
+    closeupRegion: CHAR_CLOSEUP_REGION,
+    normalRegion: CHAR_NORMAL_REGION,
+  };
+  check('char: __ssCharacterPreview hook available', hooks.preview, JSON.stringify(hooks));
+  if (!hooks.preview) return;
+  const normal = await screenshotWithStats(page, outDir, 'char-third-person.png', CHAR_NORMAL_REGION);
+  report.characters.normalThirdPerson = {file: normal.file, stats: normal.stats, before: CHAR_BEFORE_BASELINE.normalPlayerTorso};
+  const appearances = [];
+  for (const value of PLAYER_APPEARANCES) {
+    const sel = await setPlayerAppearance(page, value);
+    let changed = true;
+    try {
+      await waitForPlayerCharacter(page, value, 25000);
+    } catch {
+      changed = false;
+    }
+    await sleep(900);
+    const preview = await charPreview(page);
+    await sleep(900);
+    const shot = await screenshotWithStats(page, outDir, `char-player-${value}-closeup.png`, CHAR_CLOSEUP_REGION);
+    await charPreview(page, null);
+    appearances.push({appearance: value, select: sel, stateChanged: changed, preview, file: shot.file, stats: shot.stats});
+    await sleep(400);
+  }
+  report.characters.appearances = appearances;
+  check(
+    'char: all 5 player appearance close-ups captured',
+    appearances.length === 5 && appearances.every(a => a.stats && a.stats.sampled > 1000),
+    appearances.map(a => a.appearance).join(','),
+  );
+  const undead = [];
+  const actors = (await page.evaluate(`window.__qaWs ? window.__qaWs.allActors : []`)) || [];
+  const allCandidates = actors.filter(a => a.kind !== 'player' && a.kind !== 'soldier');
+  // Prefer actors in open ground (outside castle courtyards) so the 2.8 m preview camera does not
+  // clip through walls/terrain (the first garrison zombie sat inside the keep and framed the ground).
+  const openGround = a => Math.abs(a.x || 0) > 12 || (typeof a.z === 'number' && a.z < -200);
+  const ordered = [...allCandidates].sort((a, b) => (openGround(b) ? 1 : 0) - (openGround(a) ? 1 : 0));
+  let attempts = 0;
+  for (const actor of ordered) {
+    if (undead.length >= 2 || attempts >= 8) break;
+    attempts++;
+    const preview = await charPreview(page, actor.id);
+    if (!preview || preview.ok === false) continue;
+    await sleep(900);
+    const shot = await screenshotWithStats(page, outDir, `char-undead-${undead.length + 1}-${actor.kind}.png`, CHAR_CLOSEUP_REGION);
+    // Reject clipped/framed-inside-terrain attempts (flat, low-detail frames).
+    const good = shot.stats.std >= 18 && shot.stats.uniqueColors >= 60;
+    await charPreview(page, null);
+    if (good) undead.push({actor, preview, file: shot.file, stats: shot.stats});
+    else report.notes.push(`char: discarded clipped undead preview attempt ${attempts} (${actor.kind} id=${actor.id}, std=${shot.stats.std}, colors=${shot.stats.uniqueColors})`);
+    await sleep(300);
+  }
+  report.characters.undead = undead;
+  check(
+    'char: undead close-ups captured',
+    undead.length >= 1 && undead.every(u => u.stats && u.stats.sampled > 1000),
+    `${undead.length} captured (${undead.map(u => `${u.actor.kind}:${u.actor.name}`).join(', ')})`,
+  );
+  const playerStats = appearances.map(a => a.stats).filter(Boolean);
+  const avg = key => +(playerStats.reduce((sum, s) => sum + s[key], 0) / Math.max(1, playerStats.length)).toFixed(2);
+  const aggregate = {avgMean: avg('mean'), avgP50: avg('p50'), avgP90: avg('p90'), avgBlackPct: avg('blackPct')};
+  report.characters.aggregate = aggregate;
+  log(`CHAR CLOSEUPS: ${JSON.stringify(aggregate)} normalTP=${JSON.stringify(normal.stats)} before=${JSON.stringify(CHAR_BEFORE_BASELINE.normalPlayerTorso)}`);
+  check(
+    'char: close-up body luminance above black-silhouette threshold',
+    aggregate.avgMean >= CHAR_GATE.minMean && aggregate.avgP90 >= CHAR_GATE.minP90,
+    `avgMean=${aggregate.avgMean} (>=${CHAR_GATE.minMean}), avgP90=${aggregate.avgP90} (>=${CHAR_GATE.minP90})`,
+  );
+  check(
+    'char: normal third-person body lifted vs pre-fix baseline',
+    normal.stats.p50 >= CHAR_GATE.minNormalP50,
+    `p50=${normal.stats.p50} (>=${CHAR_GATE.minNormalP50}); before p50=${CHAR_BEFORE_BASELINE.normalPlayerTorso.p50}, mean ${normal.stats.mean} vs ${CHAR_BEFORE_BASELINE.normalPlayerTorso.mean}, black% ${normal.stats.blackPct} vs ${CHAR_BEFORE_BASELINE.normalPlayerTorso.blackPct}`,
+  );
+  check('char: close-ups are not mostly black (blackPct < 40%)', aggregate.avgBlackPct < 40, `avgBlackPct=${aggregate.avgBlackPct}`);
+}
+
 /* ---------------------------------------------------------------- update */
 
 async function run() {
@@ -1588,6 +1764,7 @@ async function run() {
     fps: null,
     weaponCards: null,
     perf: null,
+    characters: null,
     loading: null,
     websocket: null,
     websocketFinal: null,
@@ -1791,6 +1968,11 @@ async function run() {
       check('expected assets return 200', results.every(r => r.ok), JSON.stringify(results));
     }
     await sleep(opts.perf ? opts.perfSettle : 2500);
+    // Cycle-1 character readability capture (close-ups + body luminance before/after).
+    if (opts.characters) {
+      await captureCharacterReadability(page, {opts, report, check});
+      await sleep(500);
+    }
     report.fps = await measureFps(page, 1500);
     log(`FPS: ${JSON.stringify(report.fps)}`);
     report.renderer = await rendererInfo(page);
@@ -1940,7 +2122,7 @@ async function run() {
         await setQualityViaSelect(page, 'medium');
         await sleep(400);
         report.perf.qualitySelector.beforeReload = {hook: await readQuality(page), stored: await page.evaluate(`localStorage.getItem('ss-quality')`)};
-        const delayMs = 900;
+        const delayMs = 2500;
         await page.evaluate(`localStorage.setItem('ss-qa-load-delay', ${JSON.stringify(String(delayMs))})`);
         // The app auto-resumes a session from sessionStorage on load; clear it so this reload
         // exercises the fresh landing + loading UI instead of jumping straight into the HUD.
@@ -2170,6 +2352,13 @@ async function run() {
   console.log(`checks:    ${report.checks.filter(c => c.ok).length}/${report.checks.length} passed`);
   for (const c of report.checks) console.log(`  ${c.ok ? '[PASS]' : '[FAIL]'} ${c.name}${c.ok ? '' : ` -> ${c.detail}`}`);
   if (report.weaponCards !== null) console.log(`weapons:   ${report.weaponCards} cards${opts.expectWeapons !== null ? ` (expected ${opts.expectWeapons})` : ''}`);
+  if (report.characters) {
+    const c = report.characters;
+    console.log(`characters: agg=${JSON.stringify(c.aggregate)} normalTP=${JSON.stringify(c.normalThirdPerson?.stats)}`);
+    console.log(`char before: ${JSON.stringify(c.baseline?.normalPlayerTorso)} (${c.baseline?.source})`);
+    for (const a of c.appearances || []) console.log(`  char ${a.appearance}: ${JSON.stringify(a.stats)} -> ${path.relative(ROOT, a.file)}`);
+    for (const u of c.undead || []) console.log(`  undead ${u.actor.kind}:${u.actor.name}: ${JSON.stringify(u.stats)} -> ${path.relative(ROOT, u.file)}`);
+  }
   if (report.perf) {
     const perf = report.perf;
     console.log(`perf:      mode=${perf.mode} third=${JSON.stringify(perfSummary(perf.thirdPerson?.snapshot, perf.thirdPerson?.frames))}`);

@@ -5,6 +5,94 @@ import {equipmentModel} from './equipment';
 import {clone} from 'three/addons/utils/SkeletonUtils.js';
 import type {GLTF} from 'three/addons/loaders/GLTFLoader.js';
 import type {Actor} from '../shared/types';
+/**
+ * Character readability (cycle 2026-10D). All bodies get a sane PBR response plus a cheap
+ * scene-independent Fresnel rim so night silhouettes stay readable. A non-destructive fallback
+ * replaces the base-colour map only when that map samples near-black over the mesh's own UVs
+ * (the batch-3 player/companion atlases are UV-mismatched; once an asset re-bake lands, the
+ * sampled mean is healthy and the map path is kept). Detection is cached per texture/geometry and
+ * never logs in normal operation.
+ */
+type TextureStats={imgMean:number;color:THREE.Color};
+const textureStats=new WeakMap<THREE.Texture,TextureStats>();
+const uvSampleMeans=new WeakMap<THREE.BufferGeometry,WeakMap<THREE.Texture,number>>();
+const RIM_CACHE_KEY='ssNightRim1';
+function analyseTexture(texture:THREE.Texture):TextureStats|undefined{
+ if(textureStats.has(texture))return textureStats.get(texture);
+ const image=texture.image as {width?:number;height?:number;videoWidth?:number;videoHeight?:number}|undefined;
+ const width=image?.width??image?.videoWidth??0,height=image?.height??image?.videoHeight??0;
+ if(typeof document==='undefined'||!width||!height)return undefined;
+ try{
+  const canvas=document.createElement('canvas');canvas.width=32;canvas.height=32;
+  const context=canvas.getContext('2d',{willReadFrequently:true});if(!context)return undefined;
+  context.drawImage(image as CanvasImageSource,0,0,32,32);
+  const pixels=context.getImageData(0,0,32,32).data;
+  let sum=0,count=0,r=0,g=0,b=0,content=0;
+  for(let i=0;i<pixels.length;i+=4){const lum=.2126*pixels[i]+.7152*pixels[i+1]+.0722*pixels[i+2];sum+=lum;count++;if(lum>32){r+=pixels[i];g+=pixels[i+1];b+=pixels[i+2];content++;}}
+  const stats:TextureStats={imgMean:count?sum/count:0,color:new THREE.Color().setRGB(content?r/content/255:.5,content?g/content/255:.5,content?b/content/255:.5,THREE.SRGBColorSpace)};
+  textureStats.set(texture,stats);return stats;
+ }catch{return undefined;}
+}
+/** Mean luminance of the texture sampled at this geometry's own UVs (cached, <=768 samples). */
+function uvSampleMean(geometry:THREE.BufferGeometry,texture:THREE.Texture):number{
+ let perGeometry=uvSampleMeans.get(geometry);if(!perGeometry){perGeometry=new WeakMap();uvSampleMeans.set(geometry,perGeometry);}
+ const cached=perGeometry.get(texture);if(cached!==undefined)return cached;
+ const uv=geometry.attributes.uv as THREE.BufferAttribute|undefined;
+ const image=texture.image as {width?:number;height?:number;videoWidth?:number;videoHeight?:number}|undefined;
+ const width=image?.width??image?.videoWidth??0,height=image?.height??image?.videoHeight??0;
+ if(!uv||typeof document==='undefined'||!width||!height){perGeometry.set(texture,Infinity);return Infinity;}
+ try{
+  // Sample at (near) full resolution: downscaling the atlas would average the black gutters
+  // into the islands and hide the UV/atlas mismatch we need to detect.
+  const sampleWidth=Math.min(512,width),sampleHeight=Math.min(512,height);
+  const canvas=document.createElement('canvas');canvas.width=sampleWidth;canvas.height=sampleHeight;
+  const context=canvas.getContext('2d',{willReadFrequently:true});if(!context)return Infinity;
+  context.drawImage(image as CanvasImageSource,0,0,sampleWidth,sampleHeight);
+  const pixels=context.getImageData(0,0,sampleWidth,sampleHeight).data;
+  let sum=0,count=0;const step=Math.max(1,Math.floor(uv.count/768));
+  for(let i=0;i<uv.count;i+=step){
+   const u=((uv.getX(i)%1)+1)%1,v=((uv.getY(i)%1)+1)%1;
+   const x=Math.min(sampleWidth-1,Math.floor(u*sampleWidth)),y=Math.min(sampleHeight-1,Math.floor(v*sampleHeight)),p=(y*sampleWidth+x)*4;
+   sum+=.2126*pixels[p]+.7152*pixels[p+1]+.0722*pixels[p+2];count++;
+  }
+  const mean=count?sum/count:Infinity;perGeometry.set(texture,mean);return mean;
+ }catch{return Infinity;}
+}
+function repairCharacterMaterials(root:THREE.Object3D){
+ root.traverse(object=>{
+  if(!(object instanceof THREE.SkinnedMesh))return;
+  const list=(Array.isArray(object.material)?object.material:[object.material]) as THREE.MeshStandardMaterial[];
+  for(const material of list){
+   if(!material||!material.isMeshStandardMaterial||material.userData.ssReadable)continue;
+   material.userData.ssReadable=true;
+   // Sane night-PBR response for the character body (authored values were metal 0 / rough .8).
+   material.metalness=Math.min(material.metalness??0,.35);
+   material.roughness=Math.max(material.roughness??1,.5);
+   material.envMapIntensity=Math.max(material.envMapIntensity??1,2);
+   // Non-destructive fallback: only when the map is genuinely black over this mesh's UVs while
+   // the atlas itself has content. Kept reversible (originals stashed in userData).
+   const map=material.map;
+   if(map){
+    const stats=analyseTexture(map),sampled=uvSampleMean(object.geometry,map);
+    // Require a large image-vs-UV gap: a correctly mapped (even intentionally dark/palette) atlas
+    // samples close to its own mean, while the mismatched batch-3 charts sample the black gutters.
+    if(stats&&sampled<34&&sampled<stats.imgMean*.45&&stats.imgMean>24){
+     material.userData.ssOriginalMap=map;material.userData.ssOriginalColor=material.color.clone();
+     material.userData.ssOriginalMetalness=material.metalness;material.userData.ssOriginalRoughness=material.roughness;
+     material.map=null;material.color.copy(stats.color).multiplyScalar(.44);
+     material.metalness=.2;material.roughness=.62;
+     material.emissive.copy(stats.color).multiplyScalar(.075);material.emissiveIntensity=1;
+    }
+   }
+   // Cool dusk Fresnel rim, added to outgoing light in the standard material's fragment stage.
+   material.onBeforeCompile=shader=>{
+    shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>','float ssRim=pow(1.0-clamp(dot(normalize(normal),normalize(vViewPosition)),0.0,1.0),2.5);\noutgoingLight+=vec3(.30,.40,.52)*(ssRim*.5);\n#include <opaque_fragment>');
+   };
+   material.customProgramCacheKey=()=>RIM_CACHE_KEY+(material.map?'m':'n');
+   material.needsUpdate=true;
+  }
+ });
+}
 export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,unarmed=false){
  const model=clone(source.scene);model.updateMatrixWorld(true);
  const bounds=meshBounds(model),scale=1.85/bounds.getSize(new THREE.Vector3()).y;
@@ -61,6 +149,7 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
    head.add(eye);
   }
  }
+ repairCharacterMaterials(model);
  const mixer=new THREE.AnimationMixer(model),actions=new Map<string,THREE.AnimationAction>();
  for(const clip of source.animations){
   const c=clip.clone();

@@ -4,107 +4,111 @@ Updated: 2026-10-24. Read this file first when continuing in a new chat.
 Do not require the previous conversation or import its full transcript.
 Inspect current code and git history before assuming this checkpoint is still current.
 
-## Latest completed batch — 2026-10C: performance & smoothness
+## Standing objective — keep iterating to AAA quality
 
-Implementation on branch `main` (exact SHA in the commit log; hosting pin updated to it).
-Contract: `docs/BATCH-2026-10C-SPEC.md`; results: `docs/BATCH-2026-10C-RESULTS.md`.
+The user asked to keep cycling improvements until the game is AAA level. Every cycle: fix visible
+defects, raise visual fidelity and performance, verify with the headless QA suite, deploy and
+verify live. Never relax these gates:
+`npm test` **58/58** (extend tests in place only), `npx tsc --noEmit` 0 errors, `vite build` green
+with bundled Node 24, `scripts/validate-assets.mjs` all pass, headless smoke 16/16 + perf capture +
+co-op 18/18 + live-URL mode, QA inspects screenshots with read_image, Lead commits/pushes/deploys
+and verifies the live bundle.
 
-The user asked for the game to run smoother. The batch was measured before/after with new
-instrumentation (`window.__ssPerf()`), not vibes:
+**Doc-link note:** the DSH GUI cannot open absolute Windows paths (that is why every md link showed
+"File not found"). `PROJECT_STATUS.md` and `docs/*.md` are mirrored into the session workspace at
+`C:\Users\neil\Documents\deepseek-harness\default-workspace\swords-and-shrouds\`; always link
+workspace-relative paths and/or use the `present` tool.
 
-| Metric (spawn third-person, high tier) | Before | After |
-| --- | --- | --- |
-| Draw calls | 88,544 | **301 (−99.7 %)** |
-| Triangles | 4,041,177 | **1,760,609 (−56.4 %)** |
-| Meshes / scene objects | 96,671 / 175,324 | **852 / 4,728** |
-| Geometries | 2,605 | **148** |
-| Network transfer to playable | 43.19 MB | **12.20 MB (−71.8 %)** |
-| Custom asset payload | 43.51 MB | **9.47 MB (−78.2 %)** |
-| Initial preload set | 12.20 MB | **4.71 MB (−61.4 %)** |
-| Nav → landing (local) | 5.17 s | **3.73 s** |
-| Low vs high tier draw calls | — | 238 vs 301 (−20.7 %) |
+## Latest completed cycle — 2026-10D cycle 1: characters fixed, shadows restored, further perf
 
-SwiftShader rAF fps (relative proxy only) improved 0.58 → 1.35.
+Contract: `docs/BATCH-2026-10D-SPEC.md`; results: `docs/BATCH-2026-10D-RESULTS.md`.
 
-### Behaviour changed
+### Characters no longer blacked out (root cause fixed)
 
-- **Assets**: every embedded texture slimmed (512/256 maps; oak 8.26 MB→184 KB, gatehouse
-  3.44 MB→47 KB, pine 1.35 MB→317 KB, characters/weapons ≤419 KB); all 58 GLBs flattened/joined/
-  quantised — primitives 2,402→78 (pine 2,070→4 with all 12,533 tris kept), skins/animations/
-  canonical grips verified unchanged. Only added extension is `KHR_mesh_quantization` (native
-  GLTFLoader support). Installed atomically.
-- **Rendering**: removed ~95 k duplicate tree-clone meshes; 540 instanced trees now render all
-  primitives; castle static geometry merged per material; courtyards/roads merged; mountains and
-  fires instanced; shadow casters trimmed; damage labels pooled; torch lights 13→10 at high tier;
-  adaptive pixel ratio kept. Quality tiers low/medium/high (DPR, bloom, shadows, lights, particles)
-  selectable in the Guide settings, persisted, with adaptive tier-down.
-- **Loading/UX**: live `Loading world… N/M` progress; join waits only on the new `coreReady` core
-  set and the rest streams in; F3 perf overlay (fps / calls / triangles / quality); audio contexts
-  suspend while hidden or in dialogs.
-- **Co-op smoothing**: non-local actors render interpolated across the last two authoritative
-  snapshots at ~120 ms delay (local actor unchanged, stale fallback).
-- **Landing fix**: legacy blue-cone fallback tower art is hidden from frame 0 and only revealed if
-  modern `castle_tower`/`fortress_keep` genuinely fail, so the first impression shows stone keeps.
+The 7 player/companion bodies had **unusable UV0** (93 % zero-area triangles sampling black atlas
+gutters), so no material tweak could help. asset-forge re-UV'd (Smart UV Project) and baked
+palette-matched procedural armour atlases onto the original rigs in Blender/Cycles without touching
+geometry, bones or animation data (UV-sampled luminance 5–8 → 40–172; rig/clips hash-verified).
+weapons-armory added a runtime safety layer in `custom-character.ts`: PBR clamps, a dormant
+UV-black-map fallback and a cheap Fresnel rim. In-game torso luminance mean 54.9 → 102.8, p50
+28.5 → 114.3, black pixels 44.5 % → 15.4 %; player/companions/undead are clearly readable.
+Cosmetic debt: the new atlases read over-bright/flat white at night (cycle-2 ledger).
+
+### Performance + visuals
+
+- Draw calls 301 → **173** (0.195 % of the original 88,544); triangles 1.76 M → **1.50 M**
+  (37.1 % of original) *with the shadow pass restored*.
+- New LOD assets: `pine_lod` (2,267 tris/88 KB), `oak_lod` (2,474/80 KB), `castle_tower_lod`
+  (3,939/120 KB, transform-identical to the 13.8 k tower) — instanced trees use LODs to 54 m, one
+  LOD tower per castle.
+- Static props instanced per asset; keeps instanced per region; roads merged; grass restored to
+  5,600; survivors 2/camp; carts/graves restored. Quality tiers + adaptive stepper retained.
+- Shadows restored with curated casters (architecture, keeps, gatehouses, towers, actors, large
+  ruins cast; foliage/tents/walls/small props receive only), 2048/1024/off by tier, ±34 m moon
+  frustum following the player.
+- New debug hook `window.__ssCharacterPreview(actorId?)` frames an actor close-up for QA (raycast
+  boom against castle colliders); `window.__ssPerf`/`__ssQuality` unchanged.
+- Payload 12.20 → 12.43 MB (character atlases +0.23 MB); initial preload unchanged ~4.7 MB.
 
 ### Checks actually run (final state)
 
-- `npm test` — **58/58 passing**, exactly 58 `test(...)` blocks (tests extended in place only).
-- `npx tsc --noEmit` — 0 errors. `vite build` with bundled Node 24 — success; final bundle
-  `index-BeMuJwuM.js` (793,960 B). **System Node 22.11 is below Vite 7's floor — always build with
-  the bundled Node v24.21.0** (`C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe`,
-  prepend its dir to PATH for hosting builds).
-- `scripts/validate-assets.mjs` — 62/62.
-- Headless Chrome production suite — fresh-build smoke 16/16, perf capture 23/23, co-op 18/18,
-  live-baseline 17/17; 0 page/console/log errors, 0 asset 404s, 10 weapon cards.
-- Not verified: hardware-GPU frame rate/thermals (SwiftShader only), perceptual smoothness of
-  co-op interpolation under real latency, low/medium/high visual comparison on a real GPU.
+- `npm test` **58/58**; `tsc` 0 errors; `vite build` success; final bundle `index-DtnItod1.js`
+  (801,289 B) reproduced by a fresh build.
+- `validate-assets.mjs` **65/65** (61 custom GLBs incl. 3 LODs + repaired characters).
+- QA `--characters` **22/22**, perf **23/23** (173 calls, 1,500,333 tris — 0.02 % over the 1.5 M
+  target = at-budget), fresh-build smoke **16/16**, co-op **18/18**, live baseline **17/17**;
+  0 page/console/log errors, 0 asset 404s, 10 weapon cards.
+- **Not verified:** hardware-GPU fps/frame pacing/thermals, perceptual audio, controller, mobile.
 
-### Remaining defects / next concrete tasks
+### Next cycle (cycle 2) — concrete backlog
 
-1. **Hardware-GPU verification** is the top item: real fps, frame pacing, thermals, and the
-   low/medium/high tier comparison on actual graphics hardware.
-2. Triangle count at high tier is ~1.76 M; LODs for instanced trees/ruins would reduce further.
-   Trees cull at 64 m (possible pop-in while sprinting); merged castle batches sacrifice per-castle
-   frustum culling (accepted trade).
-3. GLB props still clone individually (~30–40 legacy draws) — a safe merge pass is possible later.
-4. Co-op interpolation needs a live two-player playtest for feel; the state-sync suite is green.
-5. Full campaign balance/controller/mobile-HUD/perceptual-audio playtesting still outstanding from
-   earlier batches; pre-existing `KHR_materials_pbrSpecularGlossiness` loader warning remains on
-   `gatehouse.glb.gz`.
+1. **Character visual quality (top)**: tone down the over-bright flat atlases, add normal/roughness/
+   AO maps and richer armour detail (chainmail, plate segments, surcoat trim, embossing), and
+   evaluate replacing the shared body mesh with distinct higher-fidelity character models from the
+   sketchlab warehouse (plated-knight/medieval-knight-rigged/cursed-knight archives; retarget the
+   authoritative 6 Mixamo clips if models change).
+2. `fortress_keep` 5-trimsheet → 1-atlas merge (45 → ~9 draws across the nine keeps).
+3. Near/far tree band (full-res <20 m, LOD beyond) and restore cast shadows for tents/stone walls
+   once the triangle budget allows.
+4. Richer world: more structures/props/foliage from the warehouse, weather/particles, torch smoke,
+   audio layers (keep verifying perf every step).
+5. Real-GPU playtest pass and low/medium/high visual comparison.
 
-## Previous completed batches
+## Previous cycles
 
-- **2026-10B** readability/combat-feel/arsenal/co-op QA: commit `657cdde` (plus docs); live
-  deployment verified. Results `docs/BATCH-2026-10B-RESULTS.md`.
-- **2026-10** objectives 1–5 battlefield overhaul: commits `c5d3d99`, `6576c37`; results
-  `docs/BATCH-2026-10-RESULTS.md`; asset pipeline `docs/ASSET-PIPELINE.md`.
+- **2026-10C performance & smoothness** (`docs/BATCH-2026-10C-RESULTS.md`): payload 43.5→9.47 MB,
+  initial preload 12.2→4.71 MB, draw calls 88,544→301, triangles 4.04 M→1.76 M, quality tiers,
+  progressive loading, tree/ruin instancing, prop atlas batching.
+- **2026-10B readability/combat feel/arsenal/co-op QA** (`docs/BATCH-2026-10B-RESULTS.md`):
+  night-sky fix, combat FX/trails, two new weapons (flamberge, mace — 10 total), camp tents and
+  ruined walls, audio stingers, co-op test harness.
+- **2026-10 objectives 1–5 battlefield overhaul** (`docs/BATCH-2026-10-RESULTS.md`): scanned
+  road/cobblestone surfaces, ruins/modular keeps, 3 new weapons (rapier/halberd/dane axe), scatter,
+  post-FX/atmosphere/audio. Asset pipeline + attribution in `docs/ASSET-PIPELINE.md`.
 
 ## Hosting / deployment
 
 - Hosting repo: `C:\Users\neil\Desktop\AIprojects\neilandrew.dev` (branch `main`), pin in
-  `game-source.json`; build via `scripts/build-game.mjs` (fetches the pinned commit, `npm ci`,
-  builds the client under `/games/swords-and-shrouds/`). Cloudflare Workers Builds deploys on push;
-  `worker.js` imports the pinned `.game-build` simulation source, so the pin controls both client
-  and authoritative gameplay.
-- Build locally with the bundled Node (see above), then run
-  `& $node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build` in the hosting repo.
-- Batch 2026-10C deployment: game commit `d2b340a` pushed to `swords-and-shrouds` main; hosting
-  commit `47f4782` pins it; Cloudflare Workers Builds deployed successfully (new bundle live ~45 s
-  after push).
-- Live verification (2026-10-24 03:05 America/Chicago): `/games/swords-and-shrouds/` serves
-  `index-BIHlx9in.js` (794,060 B) and `index-CnBWkizl.css`; `/health` OK; the old bundle is gone;
-  assets are the slimmed set — oak 188,639 B (was 8.26 MB), rapier 153,792 B (was 1.36 MB),
-  pine 324,731 B, gatehouse 48,316 B, road normal 247,721 B, fortress_keep 390,396 B. QA's live
-  pass measured **12.18 MB** of asset transfer vs the batch-2 live reference **42.6 MB**
-  (−71.4 %), 0 page/console errors, 0 failed requests, 10 weapon cards, no blue-cone legacy towers
-  in early/mid/settled landing frames.
+  `game-source.json`; `scripts/build-game.mjs` fetches the pinned commit, `npm ci`, builds the
+  client under `/games/swords-and-shrouds/`. Cloudflare Workers Builds deploys on push.
+- Build locally with bundled Node v24.21.0
+  (`C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe`; prepend its
+  dir to PATH), then `& $node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build`
+  in the hosting repo. The system Node 22.11 is below Vite 7's floor.
+- A local play server can be run from the game repo with
+  `$env:PORT=3000; node --import tsx src/server/index.ts` (serves `dist/client` at
+  http://localhost:3000/); because hosting builds may leave `.game-build` in detached HEAD,
+  always `git checkout main` before committing docs.
+- Cycle-1 deployment: game commit pushed to `swords-and-shrouds` main; hosting pin updated and
+  deployed; live verification recorded in the commit messages/session log (new JS bundle, 10 cards,
+  repaired character assets, ~12.4 MB transfer).
 
 ## Continuity procedure
 
-After each completed batch, commit the changes and update this file with:
+After each cycle, commit the changes and update this file with:
 - exact implementation commit, branch, changed behavior;
 - checks actually run and their results;
-- remaining defects and next concrete task;
+- remaining defects and the next concrete task;
 - hosting pin / deployment status, keeping source and live verification separate.
 
-Future prompt: "Continue Swords & Shrouds from PROJECT_STATUS.md in neil-andrew-olson/swords-and-shrouds. Inspect current commits and complete the next unfinished task. Update the checkpoint."
+Future prompt: "Continue Swords & Shrouds from PROJECT_STATUS.md in neil-andrew-olson/swords-and-shrouds. Execute the next cycle in the AAA loop. Update the checkpoint."

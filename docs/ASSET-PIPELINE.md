@@ -266,3 +266,117 @@ installed set.
   the stone look is preserved (verified with a Cycles render).
 * No decoders are required: the only extension added is `KHR_mesh_quantization`, read natively by
   `GLTFLoader`; Draco/KTX2/meshopt remain forbidden/absent.
+
+## Batch 2026-10D cycle 1 — tree LODs (`pine_lod`, `oak_lod`)
+
+Distance LODs for the landscape: near instanced trees keep the full `pine`/`oak`, far instances
+swap to these low-poly variants. They are decimated from the **current shipped** assets (so the
+palette, ground-centre origin and scale convention match exactly and a LOD swap at the same
+instance transform does not move the tree), and they keep only the visible parts of the tree.
+
+| Asset (`.glb.gz`) | Source | Changes | Tris | Prims | gzip |
+| --- | --- | --- | --- | --- | --- |
+| `pine_lod` | `custom/pine.glb.gz` (current, 12,533 rendered tris) | dequantised, dropped the `Groundcover_Wood_Mix` ground disc + `grass` cards (invisible at 60–90 m), meshopt-simplified foliage+bark 12,427 → 2,267, base colours re-encoded to 256 px JPEG (leaf + bark), factor-normalised matte, gzip-9 | **2,267** | 2 (leaf + bark) | **88.3 KB** |
+| `oak_lod` | `custom/oak.glb.gz` (current, 7,112 rendered tris) | dequantised, meshopt-simplified 7,112 → 2,474, leaf atlas 512 → 256 PNG (**alpha kept**, `alphaMode: MASK`, cutoff 0.5, doubleSided), bark 256 JPEG, dropped stale specular/ior extension layers, gzip-9 | **2,474** | 2 (leaf + bark) | **79.7 KB** |
+
+Script: `scripts/bake/bake-tree-lods.mjs` (read current asset → dequantise → drop helper prims →
+meshopt simplify to the 2,500-tri budget → 256 px textures → alpha-tested foliage → stage in
+`temp_sketchlab/optimized_lod` → validate → atomic install via `install-optimized.mjs --stage`).
+
+* Bounds/scale match the full assets (three.js `GLTFLoader` measurement): `pine_lod`
+  `[-120.67,-1.28,-101.38]…[107.79,322.25,115.72]` vs full `[-122.44,-1.28,-126.59]…[120.00,324.14,120.00]`
+  (foliage extents shrink ~5–12 % from card decimation, trunk base y and scale unchanged);
+  `oak_lod` bounds are identical to the full oak. No re-origin, so instances align on swap.
+* Foliage correctness: oak keeps its real alpha atlas as a PNG with `MASK`/0.5/`doubleSided`
+  (converted from the source's expensive `BLEND` — appropriate for foliage LODs and avoids sort
+  artefacts); pine's leaf cards are opaque JPEGs in the source (no alpha channel), so the LOD keeps
+  the same opaque cards as the full asset for an exact colour/silhouette match.
+* Contract: plain glTF 2.0, gzip-9, embedded images with `bufferView`, indexed prims, TEXCOORD_0,
+  no Draco/KTX2/meshopt and no stale extension declarations. `scripts/validate-assets.mjs` budgets
+  now include `pine_lod`/`oak_lod` = 2,500 tris; staged mirror validated 64/64 before install.
+
+### Cycle-1 follow-up — `castle_tower_lod`
+
+| Asset (`.glb.gz`) | Source | Changes | Tris | Prims | gzip |
+| --- | --- | --- | --- | --- | --- |
+| `castle_tower_lod` | `custom/castle_tower.glb.gz` (current, 13,854 tris, 1 prim, 512 px texture) | dequantised, meshopt-simplified 13,854 → 3,939 (ratio 0.286, Permissive), re-quantised (`KHR_mesh_quantization`), base-colour texture and material carried over **byte-identically** (512 px JPEG, 61.6 KB), gzip-9 | **3,939** | 1 | **120.3 KB** |
+
+Script: `scripts/bake/bake-castle-tower-lod.mjs`. For the 18 castle-corner tower instances this cuts
+18 × 13,854 ≈ 249 k tris down to 18 × 3,939 ≈ 71 k tris (−178 k tris rendered) with **no change to
+draw calls** (both 1 prim) and no payload/palette risk: the texture is not re-encoded.
+
+* Bounds are identical to the full tower (three.js `GLTFLoader`): `[-2.74,0.00,-3.00]…[2.74,9.00,3.00]`
+  — ground-centre origin (y = 0) and scale unchanged, so a distance swap at the same instance matrix
+  cannot move it.
+* `scripts/validate-assets.mjs` budget `castle_tower_lod: 4000`; staged mirror 65/65, live
+  65/65 after atomic install; `tests/assets.test.ts` 5/5; preview
+  `temp_sketchlab/lod_previews/castle_tower_lod.png` (rough stone silhouette + crenellations read
+  correctly; the surface is deliberately softer than the 13.8 k-tri scan, which is what the LOD is for).
+
+### `fortress_keep` LOD assessment (not baked)
+
+`fortress_keep` is 10,923 tris / **5 prims** (five distinct 1024² trimsheet materials) / 381 KB and is
+instanced 9× → 98 k tris and 45 draw calls scene-wide. A decimated LOD would save ≈ 75 k tris (about
+6 % of a 1.2 M triangle target) but **zero draw calls** because the five materials would still need
+five primitives, and the keep is the castle hero landmark (seen at shorter range, with fine
+crenellations/windows) so decimation risk is real. Recommendation: **skip a keep LOD** unless draw
+calls remain over target. The high-value version of that job would be merging the five trimsheets
+into one texture atlas (5 prims → 1 ⇒ 45 draws → 9) rather than a tri-reduction LOD; that is a
+separate, larger task (UV re-atlas + bake) and should be scheduled with a QA visual check.
+
+## Batch 2026-10D — character base-colour atlas repair (black characters)
+
+Seven of the nine character bodies (`hero`, `ally`, `fallen`, `templar`, `berserker`, `ranger`,
+`survivor`) shipped with a **broken UV0 layout**: 93 % of their triangles had zero UV area (37
+islands crammed into 7.9 % of the atlas), so sampling the embedded atlas at the mesh's own UVs
+returned the black gutters between charts (UV-sampled mean luminance 5–9 / 255 while the atlas image
+itself averaged 37–102). `zombie` and `skeleton-soldier` map correctly and were left untouched.
+
+Fix (geometry/rig/animations untouched apart from the UV seams it requires):
+
+1. `scripts/bake/bake-character-atlas.py` (Blender headless): imports the shipped GLB, rebuilds UV0
+   with Smart UV Project (1,216 charts, 58 % UV coverage, 0 % degenerate triangles), builds a
+   per-character procedural "dressed armour" material (metal torso/helmet, cloth mid-body, leather
+   boots, thin accent trim bands, broad wear noise — Generated-space so frequency is independent of
+   the mesh's centimetre-like units) and bakes it with a Cycles **EMIT** pass to 1024² (no lighting
+   baked in). The linear bake is converted to sRGB and encoded to a 384²/512² JPEG.
+2. `scripts/bake/bake-character-atlases.mjs` (Node): grafts the new UV chart onto the **original**
+   skinned primitive. Blender's mesh-only re-export bakes the import transform into the vertices, so
+   the script brute-forces the 48 signed axis permutations to recover the similarity transform and
+   matches every exported triangle corner back to an original vertex (8,596/8,596 corners matched).
+   Vertices are split only where the new UV differs (5,534 → ~8,593 verts — the normal glTF
+   representation of UV seams). POSITION and JOINTS_0 are copied verbatim; NORMAL (int8), TEXCOORD_0
+   (uint16) and WEIGHTS_0 (uint8) are normalised-packed and the mesh is marked
+   `KHR_mesh_quantization` (plain attribute packing, no decoder, read natively by `GLTFLoader`) to
+   keep every file inside the 450 KB budget. Animation accessors are untouched and their hashes are
+   verified unchanged after the rewrite.
+3. Stage → validate the whole mirrored set (65/65) → atomic install (copy-to-`.tmp` + single rename)
+   → live validator 65/65; `tests/assets.test.ts` 5/5, `tests/equipment.test.ts` 5/5,
+   `tests/armory.test.ts` 5/5.
+
+| Character | atlas image mean (old → new) | **UV-sampled mean (old → new)** | lit UV samples > 25 | gzip (old → new) | atlas |
+| --- | --- | --- | --- | --- | --- |
+| `hero` | 91.1 → 126.4 | **6.5 → 136.4** | 5.4 % → 99.1 % | 418.7 → 441.3 KB | 384² |
+| `templar` | 87.1 → 160.3 | **6.3 → 171.8** | 5.4 % → 99.2 % | 417.3 → 440.4 KB | 384² |
+| `ally` | 73.0 → 87.1 | **5.4 → 93.2** | 5.2 % → 98.9 % | 414.2 → 438.6 KB | 384² |
+| `survivor` | 71.4 → 97.7 | **5.2 → 105.3** | 5.2 % → 99.3 % | 414.8 → 448.4 KB | 512² |
+| `ranger` | 79.4 → 58.7 | **8.5 → 63.1** | 5.3 % → 98.9 % | 416.0 → 444.7 KB | 512² |
+| `berserker` | 69.9 → 41.0 | **6.1 → 43.9** | 5.2 % → 98.4 % | 418.0 → 446.7 KB | 512² |
+| `fallen` | 36.9 → 36.9 | **5.1 → 39.8** | 3.6 % → 84.2 % | 407.8 → 448.6 KB | 512² |
+
+Rig preservation (checked in the rewrite for every file): triangles 8,449 unchanged, `skins` = 1,
+`animations` = 12, animation-sampler accessors hash-identical, canonical node/socket names unchanged.
+The darker rows (`berserker` crimson/iron, `fallen` corrupted violet/iron) are intentionally dark
+palettes but now read as material with 84–98 % lit samples instead of pure black.
+
+Visual proof (headless-Chrome three.js renders of the shipped GLBs): `temp_sketchlab/atlas/`
+`compare_hero.png`, `compare_templar.png`, `shot_hero_after.png`, `shot_templar_after.png`,
+`shot_fallen_after.png`; the per-character baked atlases are `hero_basecolor_preview.png` etc. in the
+same folder. The hero before/after sheet shows a pure black silhouette vs readable silver armour.
+
+Deviation / cost: each repaired body is 438–449 KB (all still ≤ 450 KB) but ~+6–8 % versus the
+slimmed versions — the cost of the UV-seam vertex splits. 512² would not fit for the 384² rows at the
+default quality ordering, so the atlas dimension is chosen per character by the budget loop. The
+original atlas image is replaced (not kept) and the material stays metallic 0 / roughness 0.85; the
+new colour is a procedural armour palette rather than the original hand-painted skin, because the
+source UVs made the original atlas unusable and no UV-compatible copy of it exists in the repo.

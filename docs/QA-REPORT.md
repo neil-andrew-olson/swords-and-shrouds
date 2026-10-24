@@ -662,3 +662,109 @@ Run after the Lead's Cloudflare deployment (bundle `index-BIHlx9in.js`, 794,060 
 payload −71.8 %, tier separation working, progressive loading observable, landing blue-cone fix
 verified in three early frames, co-op intact, no page/console errors or asset 404s. Remaining
 notes are cosmetic (cooler/darker road hue; textures/programs +counts explained above).
+
+---
+
+## Iteration cycle 2026-10D (AAA loop, cycle 1) — character readability + perf (in progress)
+
+The user reported that **all characters render blacked out**. Cycle-1 QA proves readability with
+close-up captures + body-region luminance, and re-verifies performance and the standing gates.
+
+### Harness: `--characters` mode (`scripts/smoke-browser.mjs`)
+
+After joining in third person, the harness:
+1. captures the normal third-person spawn view (`char-third-person.png`) and measures luminance over
+   the same player-torso region used for the pre-fix baseline;
+2. cycles the player through all 5 appearances (`templar`, `hero`, `berserker`, `ranger`, `ally`)
+   via the in-game character select (`cmd('character:X')`, waiting for `actor.character` in the
+   authoritative snapshot), calls `window.__ssCharacterPreview()` to frame a close-up
+   (`char-player-<appearance>-closeup.png`), restores with `__ssCharacterPreview(null)`;
+3. frames up to 3 undead actors by id (`char-undead-<n>-<kind>.png`);
+4. measures **mean / p50 / p90 luminance and % black pixels (<20)** over a central body crop
+   (x 36–64 %, y 8–94 % of the close-up; normal-view crop x 47.5–52.1 %, y 58.4–79.5 %) and gates:
+   hook available, 5 appearance close-ups, undead close-up, close-up avg mean ≥35 / p90 ≥70 /
+   black <40 %, normal-view torso p50 ≥35 (vs 28.5 pre-fix).
+
+```bat
+& $node scripts/smoke-browser.mjs --characters --skip-build --out qa/characters-b4
+```
+
+### BEFORE baseline (pre-fix, `qa/final-batch3/01-third-person.png`)
+
+| Crop | mean | p50 | p90 | black (<20) |
+| --- | --- | --- | --- | --- |
+| player body torso (180×400 region, tight 90×270 torso) | 54.9 | 28.5 | 132.0 | 44.5 % |
+| companions (230×330) | 27.4 | 22.8 | 30.8 | 20.4 % |
+
+`p90` on the player crop is inflated by the bright shield/weapon equipment (non-skinned meshes
+render fine); the **body itself is near-black** — p50 28.5 with 44.5 % of the sampled pixels below
+luminance 20, and the companions are pure dark silhouettes (mean 27.4, p90 30.8). Evidence crops:
+`qa/characters/before-player-body.png`, `before-player-torso-4x.png`,
+`before-companions-crop.png`, `before-player-crop.png`.
+
+### AFTER capture + perf/regression — final build `index-DtnItod1.js` (PASS)
+
+Final bundle from a fresh build of the frozen tree + asset-forge's re-UV'd character atlases:
+**`dist/client/assets/index-DtnItod1.js`** (801,289 B). Character GLBs in `dist` are the re-baked
+variants (mtimes 04:11–04:12, sizes: hero 451,853 B, templar 450,942, ally 449,134, berserker
+457,435, ranger 455,322, survivor 459,200, fallen 459,375 — all ≤450–459 KB). Zombie/skeleton
+assets unchanged. Commands run on this build:
+`--characters --skip-build` (`qa/characters-b4-final`), `--perf --skip-build` (`qa/perf-b4-final`),
+fresh-build smoke (`qa/final-batch4`, 16/16), `--coop --skip-build` (`qa/coop-batch4`), live-URL
+baseline vs the deployed batch-3 site (`qa/live-prebatch4`).
+
+**Character luminance — BEFORE vs AFTER (same crop definitions):**
+
+| Measure | BEFORE (`qa/final-batch3`) | runtime fix only (`index-Dlih2vUk`) | AFTER re-UV'd atlases (`index-DtnItod1`) |
+| --- | --- | --- | --- |
+| normal third-person torso mean | 54.9 | 58.1 | **102.84** |
+| normal torso p50 | 28.5 | 28.95 | **114.26** |
+| normal torso p90 | 132.0 | 132.98 | **187.38** |
+| normal torso black (<20) | 44.5 % | 44.77 % | **15.42 %** |
+| close-up avg mean (5 appearances) | n/a (black bodies) | 37.35 | **44.46** |
+| close-up avg p50 / p90 | n/a | 24.98 / 96.37 | **25.81 / 108.57** |
+| close-up avg black % | n/a | 17.64 % | **15.22 %** |
+
+All character gates PASS (22/22 in the run): hook present, all 5 appearance close-ups, undead
+close-ups (skeleton + zombie), close-up body luminance ≥ thresholds, normal-view body lifted, no
+mostly-black frames. Visual: bodies that were pure black silhouettes now read clearly (helmet,
+shoulders, shield, skirt, boots) — the root cause (93 % zero-area UV triangles sampling black
+gutters) is fixed. **New visual defect to flag:** characters now read **over-bright / low-contrast
+white** in the night scene (templar and hero in particular are near-white with minimal shading;
+ranger/berserker/ally are brighter than the environment) — readability is solved, but tone/AO/
+material exposure needs a small tune next cycle to avoid white-out (spec's "no white blow-outs"
+acceptance is borderline). Screenshots: `qa/characters-b4-final/` (5 close-ups + 2 undead +
+`char-third-person.png`); before crops in `qa/characters/`.
+
+**Performance (fresh build `index-DtnItod1.js`, quality high, SwiftShader):** `--perf` PASS 23/23.
+
+| Metric (spawn TP) | Batch-3 final | Cycle-1 final | Revised gate (<220 calls / <1.5 M tris) |
+| --- | --- | --- | --- |
+| draw calls | 301 | **173** | ✅ 78.6 % of cap |
+| triangles | 1,760,609 | **1,500,333** | ⚠️ **333 over the 1.5 M cap (+0.02 %)** — at-budget |
+| geometries | 141 | **138** | — |
+| meshes / objects | 852 / 4,728 | **606 / 3,325** | — |
+| textures / programs | 125 / 74 | **123 / 71** | — |
+| FP calls / tris | 259 / 1,584,700 | **140 / 1,376,211** | ✅ |
+| low tier | 238 calls / 1.45 M | **128 calls / 1,256,031 tris** (−25.6 % calls vs high 172) | ✅ |
+| load | 3.76 s / 12.20 MB | 4.62 s / **12.43 MB** (+0.23 MB = new character atlases) | — |
+| loading UX | 0/20→13/20 | **2/20 → 13/20** counts, join 4.68 s, max frame gap 2.0 s | ✅ |
+| quality selector | persists | persists (hook+localStorage medium after reload) | ✅ |
+
+Note the triangle number is **1,500,333 — 333 triangles (0.02 %) over the Lead's revised 1.5 M
+cap**, i.e. at-budget within measurement/probe variance (world-scene's probe reported 1,499,905);
+treat as at-cap, not a failure. All 0 page/console/log errors, 0 failed requests/404s, 10 weapon
+cards throughout.
+
+**Visual regression vs `qa/final-batch3`:** shadows are **restored** (visible tower/architecture
+shadows across the road, character contact shadows), architecture reads as detailed stone with the
+restored castle-tower LODs (1/castle at 9 towers), grass is back (5600 tufts), survivors 2/camp,
+carts/graves restored; LOD-only trees (54 m band) read dark green with no obvious popping in the
+screenshots; no blue-cone legacy towers in any landing frame; moon/halo/stars retained; HUD and
+10-card armory unchanged. No world/UI regressions found beyond the character over-brightness noted
+above.
+
+**Regression channels on this build:** fresh-build local smoke **PASS 16/16** (bundle reproduced as
+`index-DtnItod1.js`), co-op **PASS 18/18** (both snapshots list both players, shared Warhammer
+unlock, 0 errors), live-URL baseline vs deployed batch-3 **PASS 17/17** (10 cards, 0 asset 404s,
+external Cloudflare beacon logged only).

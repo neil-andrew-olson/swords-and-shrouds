@@ -4,17 +4,19 @@
 // Phase 2: one tight rename loop replaces all destinations. If anything fails in phase 1 the
 // live tree is untouched; phase 2 is a few milliseconds of renames so other owners never see a
 // half-installed set.
-//   node scripts/bake/install-optimized.mjs [--dry-run]
+//   node scripts/bake/install-optimized.mjs [--dry-run] [--stage <dir>]
 import fs from 'node:fs';
 import path from 'node:path';
 
 const GAME = path.resolve(path.dirname(new URL(import.meta.url).pathname.slice(1)), '../..');
-const STAGE = 'C:/Users/neil/Desktop/AIprojects/swords/temp_sketchlab/optimized';
+const stageArg = process.argv.includes('--stage') ? process.argv[process.argv.indexOf('--stage') + 1] : null;
+const STAGE = stageArg || 'C:/Users/neil/Desktop/AIprojects/swords/temp_sketchlab/optimized';
 const PUBLIC = path.join(GAME, 'public/assets');
 
 const swaps = [];
 for (const dir of ['custom', 'textures']) {
   const srcDir = path.join(STAGE, dir);
+  if (!fs.existsSync(srcDir)) continue;
   for (const f of fs.readdirSync(srcDir)) {
     if (f.endsWith('.json')) continue;
     swaps.push({from: path.join(srcDir, f), to: path.join(PUBLIC, dir, f)});

@@ -139,50 +139,71 @@ export function addLandscape(scene: THREE.Scene) {
   scene.add(placeholderGroup);
 
   // Some tree assets are flattened into several primitives (pine = 4, oak = 2). Instantiate
-  // EVERY primitive with the same per-instance matrices so the whole tree renders.
+  // EVERY primitive with the same per-instance matrices so the whole tree renders. Trees inside
+  // ~70 m use the full assets; trees out to ~112 m swap to the baked LOD assets (<=2.5 k tris).
   const collectMeshes = (root: THREE.Object3D) => {
     const list: THREE.Mesh[] = [];
     root.traverse((o) => { if (o instanceof THREE.Mesh) list.push(o as THREE.Mesh); });
     return list;
   };
-  const tuneTreeMaterial = (mesh: THREE.Mesh): THREE.Material => {
+  const tuneTreeMaterial = (mesh: THREE.Mesh, isLod: boolean): THREE.Material => {
     const mat = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).clone() as THREE.MeshStandardMaterial;
     const name = (mat.name || '').toLowerCase();
     const foliage = /leaf|grass|groundcover|branch|foliage|needle|frond/.test(name);
     if (foliage) { mat.color.multiplyScalar(0.32); mat.envMapIntensity = 0.22; mat.roughness = 1; mat.metalness = 0; addWind(mat, 0.12, 1.2, 0.8); }
     else { mat.color.multiplyScalar(0.72); mat.envMapIntensity = 0.45; mat.metalness = 0; }
+    if (isLod) mat.envMapIntensity = Math.min(0.4, mat.envMapIntensity + 0.05);
     return mat;
+  };
+  const treeOnly = (parts: THREE.Mesh[]) => {
+    const filtered = parts.filter((part) => {
+      const m = (Array.isArray(part.material) ? part.material[0] : part.material) as THREE.MeshStandardMaterial;
+      return /leaf|needle|branch|bark|trunk|foliage/i.test(m.name || '');
+    });
+    return filtered.length ? filtered : parts;
   };
   let pineInsts: THREE.InstancedMesh[] = [];
   let oakInsts: THREE.InstancedMesh[] = [];
+  let pineLodInsts: THREE.InstancedMesh[] = [];
+  let oakLodInsts: THREE.InstancedMesh[] = [];
   let pineMatrices: Float32Array | null = null;
   let oakMatrices: Float32Array | null = null;
   let pineCount = 0, oakCount = 0;
   const tmpMatrix = new THREE.Matrix4();
 
-  const cullInto = (mesh: THREE.InstancedMesh, matrices: Float32Array, total: number, focusX: number, focusZ: number, radius: number) => {
+  const cullIntoBand = (mesh: THREE.InstancedMesh, matrices: Float32Array, total: number, focusX: number, focusZ: number, minDist: number, maxDist: number) => {
     let n = 0;
-    const r2 = radius * radius;
+    const min2 = minDist * minDist, max2 = maxDist * maxDist;
     for (let i = 0; i < total; i++) {
       const base = i * 16;
       const dx = matrices[base + 12] - focusX;
       const dz = matrices[base + 14] - focusZ;
-      if (dx * dx + dz * dz > r2) continue;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < min2 || d2 > max2) continue;
       mesh.setMatrixAt(n++, tmpMatrix.fromArray(matrices, base));
     }
     mesh.count = n;
     mesh.instanceMatrix.needsUpdate = true;
   };
 
-  Promise.all([loadAsset('custom/pine'), loadAsset('custom/oak')])
-    .then(([pineGltf, oakGltf]) => {
-      const treeOnly = (parts: THREE.Mesh[]) => {
-        const filtered = parts.filter((part) => {
-          const m = (Array.isArray(part.material) ? part.material[0] : part.material) as THREE.MeshStandardMaterial;
-          return /leaf|needle|branch|bark|trunk|foliage/i.test(m.name || '');
-        });
-        return filtered.length ? filtered : parts;
-      };
+  const buildTreeInsts = (parts: THREE.Mesh[], total: number, isLod: boolean) => {
+    const insts: THREE.InstancedMesh[] = [];
+    for (const part of parts) {
+      const inst = new THREE.InstancedMesh(part.geometry, tuneTreeMaterial(part, isLod), total);
+      inst.castShadow = false; // foliage shadows are invisible at night and were a big shadow cost
+      inst.receiveShadow = false;
+      inst.frustumCulled = false;
+      inst.count = 0;
+      inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      scene.add(inst);
+      insts.push(inst);
+    }
+    return insts;
+  };
+
+  const lodLoad = (name: string) => loadAsset('custom/' + name).catch(() => null);
+  Promise.all([loadAsset('custom/pine'), loadAsset('custom/oak'), lodLoad('pine_lod'), lodLoad('oak_lod')])
+    .then(([pineGltf, oakGltf, pineLodGltf, oakLodGltf]) => {
       const pineParts = treeOnly(collectMeshes(pineGltf.scene));
       const oakParts = treeOnly(collectMeshes(oakGltf.scene));
       if (!pineParts.length || !oakParts.length) return;
@@ -199,22 +220,16 @@ export function addLandscape(scene: THREE.Scene) {
         if (t.isPine) dummy.matrix.toArray(pineMatrices!, pi++ * 16);
         else dummy.matrix.toArray(oakMatrices!, oi++ * 16);
       }
-      const buildInsts = (parts: THREE.Mesh[], total: number) => {
-        const insts: THREE.InstancedMesh[] = [];
-        for (const part of parts) {
-          const inst = new THREE.InstancedMesh(part.geometry, tuneTreeMaterial(part), total);
-          inst.castShadow = false; // foliage/prop shadows are invisible at night and were a big shadow cost
-          inst.receiveShadow = false;
-          inst.frustumCulled = false;
-          inst.count = 0;
-          inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-          scene.add(inst);
-          insts.push(inst);
-        }
-        return insts;
-      };
-      pineInsts = buildInsts(pineParts, pineCount);
-      oakInsts = buildInsts(oakParts, oakCount);
+      pineInsts = buildTreeInsts(pineParts, pineCount, false);
+      oakInsts = buildTreeInsts(oakParts, oakCount, false);
+      if (pineLodGltf) {
+        const lodParts = treeOnly(collectMeshes(pineLodGltf.scene));
+        if (lodParts.length) { pineLodInsts = buildTreeInsts(lodParts, pineCount, true); pineInsts = []; }
+      }
+      if (oakLodGltf) {
+        const lodParts = treeOnly(collectMeshes(oakLodGltf.scene));
+        if (lodParts.length) { oakLodInsts = buildTreeInsts(lodParts, oakCount, true); oakInsts = []; }
+      }
       scene.remove(placeholderGroup);
     })
     .catch((err) => console.warn('3D trees load error, keeping placeholders', err));
@@ -312,11 +327,26 @@ export function addLandscape(scene: THREE.Scene) {
   return {
     update: (time: number, focusX = 0, focusZ = 0) => {
       windUniform.value = time;
-      // Draw only trees/rocks near the player: they are fogged out beyond ~70 m and this keeps
-      // the triangle budget bounded even with full multi-primitive tree geometry (pine ~12.5 k tris).
-      if (pineMatrices) for (const inst of pineInsts) cullInto(inst, pineMatrices, pineCount, focusX, focusZ, 64);
-      if (oakMatrices) for (const inst of oakInsts) cullInto(inst, oakMatrices, oakCount, focusX, focusZ, 64);
-      if (rockInst && rockMatrices) cullInto(rockInst, rockMatrices, rockTotal, focusX, focusZ, 80);
+      // Near trees = full assets; ring band 70..112 m = baked LOD assets (no pop-through, both
+      // bands are always drawn together so the swap is invisible behind the night fog).
+      const NEAR = 0, FAR = 54;
+      if (pineMatrices) {
+        if (pineLodInsts.length) {
+          for (const inst of pineInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, 0, NEAR);
+          for (const inst of pineLodInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, NEAR, FAR);
+        } else {
+          for (const inst of pineInsts) cullIntoBand(inst, pineMatrices, pineCount, focusX, focusZ, 0, 48);
+        }
+      }
+      if (oakMatrices) {
+        if (oakLodInsts.length) {
+          for (const inst of oakInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, 0, NEAR);
+          for (const inst of oakLodInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, NEAR, FAR);
+        } else {
+          for (const inst of oakInsts) cullIntoBand(inst, oakMatrices, oakCount, focusX, focusZ, 0, 48);
+        }
+      }
+      if (rockInst && rockMatrices) cullIntoBand(rockInst, rockMatrices, rockTotal, focusX, focusZ, 0, 22);
     }
   };
 }

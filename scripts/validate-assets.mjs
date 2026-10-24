@@ -27,6 +27,7 @@ const BUDGETS = {
   fortress_keep: 14000, castle_tower: 14000,
   well: 6000, chest: 6000, bench: 6000, rock_cluster: 6000, grass_tuft: 1500,
   camp_tent: 6000, stone_wall: 8000,
+  pine_lod: 2500, oak_lod: 2500, castle_tower_lod: 4000,
 };
 const FORBIDDEN_EXT = ['KHR_draco_mesh_compression', 'KHR_texture_basisu', 'EXT_meshopt_compression', 'EXT_meshopt'];
 
