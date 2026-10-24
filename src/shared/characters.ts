@@ -1,10 +1,10 @@
 import type {Actor} from './types';
 export const PLAYER_CHARACTERS = {
-  templar:'Crusader',
-  hero:'Vanguard Knight',
-  berserker:'Mercenary Berserker',
+  templar:'Crusader Knight',
+  hero:'Vanguard Champion',
+  berserker:'Iron Berserker',
   ranger:'Scout Ranger',
-  ally:'Oathsworn'
+  ally:'Oathsworn Defender'
 } as const;
 export type PlayerCharacter = keyof typeof PLAYER_CHARACTERS;
 export function isPlayerCharacter(value:string):value is PlayerCharacter {

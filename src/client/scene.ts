@@ -66,6 +66,13 @@ export class WorldView{
   }
  }
  async customEnvironment(){
+   for(const treeName of ['oak','pine'])try{
+    const treeAsset=await loadAsset('custom/'+treeName);const treeBounds=new THREE.Box3().setFromObject(treeAsset.scene),treeSize=treeBounds.getSize(new THREE.Vector3());
+    const placeTree=(x:number,z:number,sc=1)=>{const o=treeAsset.scene.clone(true);o.scale.setScalar((4.5*sc)/treeSize.y);o.position.set(x,0,z);o.rotation.y=x*0.37+z*0.19;o.traverse((n:THREE.Object3D)=>{if(n instanceof THREE.Mesh){n.castShadow=true;n.receiveShadow=true;}});this.scene.add(o);};
+    let sv=treeName==='oak'?9413:5527;const rv=()=>{sv=(sv*16807)%2147483647;return sv/2147483647;};
+    for(let i=0;i<28;i++){const angle=rv()*Math.PI*2,d2=45+rv()*32;placeTree(Math.cos(angle)*d2,-200+Math.sin(angle)*d2*2.5,0.7+rv()*0.6);}
+    for(let i=0;i<18;i++){placeTree((rv()-0.5)*120,50+rv()*200*(treeName==='oak'?1:-1),0.8+rv()*0.5);}
+   }catch(e){console.warn('Tree asset unavailable',treeName,e);}
   for(const name of ['sword','shield','stakes','supplies','plague','trebuchet','iron','medicine','cauldron','gatehouse','gate','beacon','firepit','mill','fallen_keep','border_fortress','high_citadel','cart','brazier','barrels','grave','house'])try{
    const asset=await loadAsset('custom/'+name);const model=asset.scene.clone(true);model.updateMatrixWorld(true);const bounds=new THREE.Box3().setFromObject(model),size=bounds.getSize(new THREE.Vector3()),center=bounds.getCenter(new THREE.Vector3());
    const normalized=new THREE.Group();model.position.x-=center.x;model.position.z-=center.z;model.position.y-=bounds.min.y;normalized.add(model);normalized.userData.height=size.y;this.customProps.set(name,normalized);
@@ -119,11 +126,11 @@ export class WorldView{
  castle(c:{id:string;x:number;z:number}){
   box(this.scene,c.x,.035,c.z,20,.08,20,0x384145,true);
   for(const w of walls(c)){const wall=box(this.scene,w.x,2,w.z,w.w,4,w.d,palette.dark,true);this.solid.push(wall);const count=Math.floor(Math.max(w.w,w.d)/1.5);for(let n=0;n<count;n++)box(this.scene,w.x+(w.w>w.d?(n-(count-1)/2)*1.5:0),4.5,w.z+(w.d>w.w?(n-(count-1)/2)*1.5:0),w.w>w.d?.7:1.5,1,w.d>w.w?.7:1.5,palette.dark,true);}
-  for(const dx of [-10,10])for(const dz of [-10,10]){this.solid.push(box(this.scene,c.x+dx,3,c.z+dz,3.5,6,3.5,palette.dark,true));for(const sx of [-1,1])for(const sz of [-1,1])box(this.scene,c.x+dx+sx*1.2,6.5,c.z+dz+sz*1.2,.8,1,.8,palette.stone);}
+  for(const dx of [-10,10])for(const dz of [-10,10]){const tColor=c.id.includes('citadel')?0x3a5862:c.id.includes('border')?0x384550:0x2c2235;this.solid.push(box(this.scene,c.x+dx,3,c.z+dz,3.5,6,3.5,tColor,true));const capColor=c.id.includes('citadel')?0x2d7080:c.id.includes('border')?palette.iron:0x3d2a45;for(const sx of [-1,1])for(const sz of [-1,1])box(this.scene,c.x+dx+sx*1.2,6.5,c.z+dz+sz*1.2,.8,1,.8,capColor);}
   const stages:THREE.Group[]=[];for(let tier=0;tier<2;tier++){const detail=new THREE.Group();detail.position.set(c.x,0,c.z);detail.visible=false;this.scene.add(detail);stages.push(detail);for(const side of [-1,1]){box(detail,side*7,1.5,-5+tier*5,2,3,2,tier?0x466e75:palette.wood,true);box(detail,side*7,3.2,-5+tier*5,2.5,.4,2.5,palette.gold);box(detail,side*9,4.1,0, .15,1.8,4,tier?palette.gold:0x468f87);}const crest=this.label(tier?'CITADEL':'BASTION');crest.position.set(0,6+tier*1.4,-1);detail.add(crest);}this.upgrades.set(c.id,stages);
   // Banner is the functional keep/capture point; rear architecture stays behind it.
   box(this.scene,c.x,.2,c.z,3,.4,3,0x858a7b,true);box(this.scene,c.x,2.6,c.z,.16,5.2,.16,palette.wood);const flagGeo=new THREE.PlaneGeometry(1.8,1.4,8,4);flagGeo.translate(.9,0,0);const flag=new THREE.Mesh(flagGeo,new THREE.MeshStandardMaterial({color:0x9a4d47,side:THREE.DoubleSide,roughness:.8}));flag.position.set(c.x,4.3,c.z);flag.castShadow=true;this.scene.add(flag);this.flags.set(c.id,flag);this.flagMeshes.push({mesh:flag,seed:this.flagMeshes.length*1.7});
-  const keep=new THREE.Group();keep.position.set(c.x-5,0,c.z-6);box(keep,0,2.2,0,4,4.4,4,palette.dark,true);box(keep,0,4.7,0,4.6,.6,4.6,palette.stone);this.scene.add(keep);this.keeps.set(c.id,keep);
+  const keep=new THREE.Group();keep.position.set(c.x-5,0,c.z-6);const isCitadel=c.id.includes('citadel'),isBorder=c.id.includes('border');const kWall=isCitadel?0x3d5560:isBorder?0x404d57:0x2d2433;const kAccent=isCitadel?0x2d6e75:isBorder?0x526070:0x3d2d3a;box(keep,0,2.2,0,4,4.4,4,kWall,true);box(keep,0,4.7,0,4.6,.6,4.6,kAccent);if(isCitadel){box(keep,0,5.5,0,2,.5,2,0x4a8a95);box(keep,0,6.2,0,.3,1.2,.3,palette.gold);}if(isBorder){box(keep,2.2,4.3,0,.3,2.5,.3,palette.iron);box(keep,-2.2,4.3,0,.3,2.5,.3,palette.iron);}if(!isCitadel&&!isBorder){box(keep,0,5,0,4.5,.15,4.5,0x2a1f30);box(keep,0,3,1.5,.3,1.5,.3,0x4a3a55);}this.scene.add(keep);this.keeps.set(c.id,keep);
   this.fire(c.x-3.6,c.z+11);this.fire(c.x+3.6,c.z+11);
   const gateParent=new THREE.Group();gateParent.position.set(c.x,2,c.z+10);box(gateParent,0,0,0,5.5,4,.35,palette.wood,true);this.scene.add(gateParent);this.gates.set(c.id,gateParent as unknown as THREE.Mesh);gateParent.visible=false;
   const barrier=new THREE.Group();barrier.position.set(c.x,0,c.z+13);for(let i=-2;i<=2;i++){const b=box(barrier,i,.7,0,.25,1.7,.3,palette.wood);b.rotation.x=-.35;}box(barrier,0,.8,0,5,.2,.2,palette.wood);this.scene.add(barrier);this.barriers.set(c.id,barrier);barrier.visible=false;
