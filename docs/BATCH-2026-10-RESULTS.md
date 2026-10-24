@@ -102,3 +102,20 @@ footer no longer collides with the room-code row.
    warning); `/favicon.ico` is now provided as an inline SVG data URI.
 6. Landing viewport coverage: 700–900 px tall is fixed; heights above 900 px use the desktop design,
    and below 700 px tall the pre-existing overlap remains.
+
+## Commits
+
+- `c5d3d99` — phase 1 (scanned surfaces, post-FX/atmosphere, combat FX, ruins framework, three
+  weapons, ambience).
+- `6576c37` — phase 2 (baked ruins/keeps/props/scatter, modular castles, night sky, ground polish,
+  docs).
+
+## Final Lead re-run after the polish pass
+
+The QA suite was re-run by the Lead on the final tree after the night-sky and ground fixes:
+`node scripts/smoke-browser.mjs --out qa/final-lead2` (bundled Node 24, fresh production build) →
+**16/16 gates pass**, 0 page errors, 0 console errors, 0 bad responses, **0 asset 404s**, 8 armory
+cards, both cameras and live input exercised. Canvas third-person mean luminance 48.4 / std 42.4,
+98.5 % non-dark, 1655 unique colours. The WebSocket instrumentation showed reconnects during the
+software-renderer run at ~0.6 fps (harness/page lifecycle under SwiftShader); the session recovered
+and the HUD stayed live. Real-GPU playtesting remains the open verification item.

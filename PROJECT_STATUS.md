@@ -1,95 +1,92 @@
 # Swords & Shrouds — project checkpoint
 
-Updated: 2026-10-20. Read this file first when continuing in a new chat.
+Updated: 2026-10-23. Read this file first when continuing in a new chat.
 Do not require the previous conversation or import its full transcript.
 Inspect current code and git history before assuming this checkpoint is still current.
 
-## Latest completed batch — visual corrections and asset integration
+## Latest completed batch — Objectives 1–5: battlefield art, ruins, arsenal, atmosphere, audio
 
-- Recovered and integrated seven prepared assets: berserker, ranger, templar, survivor, skeleton-soldier, zombie, cauldron.
-- Ally roles select templar / ranger / berserker appearances. Enemies alternate the supplied skeleton and zombie models; corrupted knights retain fallen.
-- Survivor camps use three animated survivors and a cauldron instead of survivor box placeholders.
-- Five measured weapon grip/orientation profiles now apply to first person, animated hand sockets and weapon racks.
-- Character sizing uses rendered mesh vertices. Grounding follows animated poses, excludes held equipment, and samples body vertices plus soles to control CPU cost.
-- Removed horizontal root motion in character coordinates: the armature rotates local axes, so freezing local X/Z did not stop attack clips from moving models meters away.
-- Terrain surface aligned to Y=0. Removed the mismatched first-person shield backing and disabled viewmodel shadows.
-- Asset loader accepts both compressed bytes and responses already decompressed by the host.
-- Validation: 56 tests pass; TypeScript/Vite production build and git diff --check pass. New regressions cover nine animated bodies, horizontal animation drift, and five weapon grip/blade profiles.
-- Browser validation: local Chromium rendered weapon lineup, hero idle/attack, multiple character variants, survivor camp, and the actual production client in both camera modes. No page errors in the production smoke check.
-- The game is still in polish, not finished. Remaining: broader structure/resource asset integration, model/texture refinement, two-handed support-hand posing, custom-undead visual dismemberment parity, full campaign / controller / performance playtesting.
-- Implementation commit: c008b89c60ed67df87d548ac5f0b6b5a39fd2fe8.
-- With explicit user deployment approval, neilandrew.dev game-source.json was updated in hosting commit fa4fb42838c458a080784c658f5c415151b473a0 to that implementation.
-- Cloudflare Workers Builds reported success. Live HTML serves /games/swords-and-shrouds/assets/index-BNkZFd8Z.js, whose contents include all seven added asset names.
-- Live verification 2026-10-20: /health returned ok:true; Chromium created a new campaign and rendered both camera modes without page errors. Inspected screenshots: first-person sword is upright; scene remains very dark and nearby weapon labels can obstruct third-person views. This is a smoke check, not a full campaign or all-animation visual certification.
+Implementation commits (branch `main`):
+- `c5d3d99` — phase 1: scanned ground materials, terrain-surfaces pass, post-FX composer,
+  PMREM environment + pooled lighting, regional fog/moonlight grading, combat-effects system,
+  ruins/props/courtyard-rack framework, WebAudio ambience, and three new weapons (rapier, halberd,
+  dane axe) with canonical grip profiles and rack distribution.
+- `6576c37` — phase 2: eleven baked scene assets (chapel/aqueduct/bridge/courtyard ruins, modular
+  fortress keep, castle tower, well, chest, bench, grass tuft, rock cluster), modular keeps and
+  instanced towers for all nine castles, courtyard/camp props, visible camera-following night sky
+  (far-plane + sRGB gradient fixes), softened ground lighting, and asset/QA documentation.
 
-## Previous completed batch — companion AI
+Deployed asset work lives in `public/assets/custom/*.glb.gz` (14 new GLBs) and
+`public/assets/textures/` (4 scanned seamless tiles). The bake pipeline is reproducible from
+`scripts/bake/` with Blender 5.2 + glTF-Transform + sharp + Python; sources and attribution are in
+`docs/ASSET-PIPELINE.md` and `public/assets/CREDITS.txt`. Contracts and acceptance criteria:
+`docs/BATCH-2026-10-SPEC.md`; results and remaining defects: `docs/BATCH-2026-10-RESULTS.md`;
+browser evidence: `docs/QA-REPORT.md`.
 
-- Gameplay commit: e1a9345c563bfba0acdeed3e567501b04025d69e on main.
-- Hosting pin updated in neilandrew.dev commit 6169bb3de68618adf49e5bf41aeb53fe2423e9e1 to that gameplay commit.
-- Defender: close protection and frontal blocking between swings.
-- Flanker: wider threat response, less crowded targets and side approaches.
-- Heavy: prioritizes corrupted knights with slower, stronger attacks.
-- Separate follow/hold/guard formation slots; wall-aware soldier separation.
-- Recruitment and travel seek unoccupied positions; travel leaves hold/guard units behind.
-- Explicit Attack orders retain longer pursuit; old saved soldiers receive roles.
-- Validation: 54 tests passed (six new companion regressions), TypeScript and Vite build passed, git diff --check passed.
-- Existing solo rescue and independent WebSocket tests still pass.
-- Visual gameplay and live Cloudflare deployment have NOT been verified. Hosting integration tests were not rerun.
-- worker.js imports .game-build/src/simulation/game.ts, so the hosting source pin controls server simulation as well as client build.
-- Next task: inspect supplied character variants and survivor/cauldron assets, integrate them, then correct per-weapon grips and animated grounding. Visually check formations and combat balance.
+### Behaviour changed
 
-## Recovery baseline (historical)
+- Objective 1: road network, three region slabs and castle courtyards use scanned seamless
+  country-road/cobblestone albedo + normal maps, with per-mesh material cloning, geometry-derived
+  tiling and a night-level tint. The high-contrast grass/soil detail map is remapped to a
+  low-contrast cool night albedo so the ground no longer reads as day-green polygons.
+- Objective 2: all nine castles replace the simplified keep boxes with region-tinted modular
+  `fortress_keep` models and `castle_tower` masonry; gothic chapel, aqueduct and broken-bridge ruins
+  line the Castle 1 → Castle 2 road (plus per-region repeats); wells, chests and stone benches dress
+  every castle courtyard and survivor camp. Every new asset is optional: a missing file leaves the
+  previous art in place.
+- Objective 3: `rapier` (fast 1H thrust, shield), `halberd` (longest reach, two-handed) and
+  `dane_axe` (heavy two-handed cleave) added with measured canonical grips, distinct stats and
+  server-authoritative behaviour. Castle racks cover every `WEAPON_IDS` entry; captured castles
+  display a 3-D rack of every weapon.
+- Objective 4: two extra InstancedMeshes (`grass_tuft` ×440, `rock_cluster` ×96) plus 540 varied
+  trees; the wind shader still drives both procedural and baked foliage.
+- Objective 5: night-sky immersion (visible gradient dome, stars and moon; camera-following),
+  post-processing bloom with correct tone mapping/colour space, regional fog and moonlight grading,
+  constant 14-light torch pool + player fill, pooled combat particles (sparks/blood/corruption/dust/
+  embers), tinted hit flashes, procedural ambience and layered combat audio, plus HUD/landing fixes.
+- New tooling: `scripts/validate-assets.mjs`, the `scripts/bake/` pipeline, and
+  `scripts/smoke-browser.mjs` (headless-Chrome QA harness with WebSocket instrumentation).
 
-- Game repository: https://github.com/neil-andrew-olson/swords-and-shrouds
-- Inspected main gameplay commit: 5f7dfa2baa4c14f2cdb886fabf80c6dc0d0eed50.
-- Hosting repository: https://github.com/neil-andrew-olson/neilandrew.dev
-- Hosting main inspected at 09086cf98c647d8edd8b5087f46cb3b69cda0b5c.
-- Hosting game-source.json pins the game to 5f7dfa2baa4c14f2cdb886fabf80c6dc0d0eed50.
-- Hosting scripts/build-game.mjs fetches that revision and builds the client under /games/swords-and-shrouds/.
-- Hosting wrangler.jsonc configures worker.js, GAME_ROOMS / GameRoom Durable Objects, and game WebSocket/health routes.
-- Live deployment state was NOT verified during this recovery session.
-- There were no AGENTS.md or PROJECT_STATUS.md files in the inspected game tree.
+### Checks actually run (final state)
 
-## Current implementation
+- `npm test` — **58/58 passing**, exactly 58 `test(...)` blocks (no tests added or removed; existing
+  tests extended in place for the new weapons and cue metadata).
+- `npx tsc --noEmit` — 0 errors.
+- `vite build` — success (758.7 kB JS / 202.3 kB gzip; CSS 15.7 kB). **System Node is 22.11.0, which
+  is below Vite 7's engine floor; builds must use the bundled Node v24.21.0** at
+  `C:\Users\neil\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe` (the QA harness
+  auto-selects it).
+- `node scripts/validate-assets.mjs` — 58/58 checks (glTF 2.0, embedded buffers/images, TEXCOORD_0,
+  indexed primitives, triangle budgets, gzip-9, no Draco/KTX2/meshopt extensions).
+- Headless Chrome production smoke — 16/16 gates, 0 page errors, 0 console errors, 0 failed
+  requests, 0 asset 404s, `#weaponCards = 8`, both cameras, live input/combat, WS lifecycle
+  recorded. Screenshots: `qa/final/` (gitignored) and `qa/final-lead2/` (Lead re-run after the final
+  sky/ground polish).
+- Not verified: real-GPU frame rate (SwiftShader software rendering only, sub-1 fps), perceptual
+  audio, physical Xbox controller, and a full campaign playthrough.
 
-TypeScript / Three.js / Vite client, authoritative simulation, Node Express/ws server.
-The current campaign has three regions with nine castles and nine survivor groups (expanded beyond the original three-castle design).
-Solo companions, up to four online players, castle capture/loss/reclamation, sieges, rescue, resources, upgrades, artillery, downed-player revival/corruption, and first/third-person cameras exist.
-Five-weapon shared discovery and individual equipment, weapon stats, Xbox mappings, and combat feedback exist.
-See src/shared/weapons.ts, src/simulation/game.ts, src/client/main.ts and README.md.
+### Remaining defects / next concrete tasks
 
-## Current priorities
+1. Ground/atmosphere is now a readable stylised night, but moonlit ground vs castle shadow still has
+   strong contrast and the road/scanned albedo remains light; further tonal art direction is a call.
+2. NPC/player bodies are readable but still dark in third-person distance; distant enemies rely on
+   markers.
+3. Combat hit reactions/animations, two-handed support-hand posing and custom-undead dismemberment
+   parity remain from earlier batches.
+4. Full campaign balance/formation playtest, controller test, real-GPU performance pass, mobile HUD
+   pass, and live Cloudflare smoke after deployment are outstanding.
+5. Sky/stars/moon are visible when looking up, but the default third-person framing only shows the
+   dark night limb; a star/moon elevation tweak would put them in frame if desired.
 
-1. Improve scene readability and oversized/occluding weapon labels; verify grounding and grips during live combat across weapons.
-2. Integrate more generated structures and environment props; audit source archives against the manifest.
-3. Refine model surfaces, weapon support-hand posing and custom-undead visual dismemberment.
-4. Playtest combat balance, formations, full campaign, physical Xbox controller and low-end performance.
+## Hosting / deployment
 
-The specific upside-down weapon, floating characters and survivor placeholders reported in screenshots were addressed in the latest visual batch. Continue from the current code rather than repeating old recovery claims.
-
-## Asset recovery leads
-
-User supplied these Library archives; these are leads, not inspected contents:
-- characters(1).zip — libfile_0afeb12816648191bf3f6e3f427aad4d
-- characters_static(1).zip — libfile_86850408a59c8191bc10fd97cf3f998b
-- weapons(1).zip — libfile_d4ef8653a25c819184effe72fb8d1372
-- structures(1).zip — libfile_df202a09341c8191bf0131e234e699d2
-- resources(1).zip — libfile_e97b867a9e048191935f1d21ea8a70fe
-- defense(1).zip — libfile_f60c4ed0a0e08191babf7655a9b09dd8
-
-## Verification performed 2026-10-19
-
-At gameplay commit 5f7dfa2:
-- npm ci --include=dev completed.
-- npm test: 48 passed, 0 failed, including local independent WebSocket clients.
-- npm run build: TypeScript check and Vite production build passed.
-- No browser visual validation, physical controller test, full campaign playthrough, or live deployment verification was performed.
-Passing automated tests does not resolve the reported visual/AI polish defects.
-
-## Next work session
-
-Read the latest implementation and hosting commits, then continue broader environment asset integration and the priorities above. Deployment and a live campaign smoke check succeeded for c008b89; do not repeat the old deployment approval request.
-worker.js in neilandrew.dev imports .game-build/src/simulation/game.ts, so game-source.json controls both client and authoritative gameplay builds.
+- Hosting repo: `C:\Users\neil\Desktop\AIprojects\neilandrew.dev` (branch `main`), pin in
+  `game-source.json`; build via `scripts/build-game.mjs` (fetches the pinned commit, `npm ci`,
+  builds the client under `/games/swords-and-shrouds/`).
+- Cloudflare Workers Builds deploys on push; `worker.js` imports the pinned `.game-build` simulation
+  source, so the game-source pin controls both client and authoritative gameplay.
+- This checkpoint will be committed and the hosting pin updated to the resulting game commit; the
+  live URL must be verified separately after Cloudflare finishes building.
 
 ## Continuity procedure
 
