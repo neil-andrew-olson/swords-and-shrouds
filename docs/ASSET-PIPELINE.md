@@ -655,6 +655,26 @@ Staged mirrors validated before each install (76/76 armour v3, 78/78 props), ato
 `tests/armory` 5/5 after both phases. `tests/equipment` is 5/5 for the cycle-5 state; the cycle-6
 rebuild below changes the survivor staff weighting, so that assertion needs the cycle-6 update.
 
+## Batch 2026-10P — camp/village props (cycle 13)
+
+Three roadside/camp dressing props, authored procedurally in the night palette because the warehouse
+candidates for these specific props were not usable as-is (the `top_down_low_poly_medieval_camp` GLB
+separates into 6,577 loose parts, `medieval-castle-modular-kits-interior` is a ruined room, and
+`medieval-props-asset-low-poly` contains only a chest/barrel/box). Builder:
+`scripts/bake/bake-camp-props.mjs` (same approach as the blacksmith_stall precedent). Each prop: one
+primitive, one 512² atlas with shared bands (wood / iron / parchment / stone / ember), roughness 0.86,
+metallic 0.08, no lights, gzip-9, no extensions, ground-centred (min y = 0, centred x/z), front faces
+**+Z**.
+
+| prop | tris | prims | gzip | bbox (x × y × z) | read / use |
+| --- | --- | --- | --- | --- | --- |
+| `notice_board` | 192 | 1 | 34.1 KB | 2.00 × 2.26 × 0.72 | twin posts, board covered in pale notices, lean-to shingle roof, iron brackets, stone feet — village/quest board |
+| `fence_segment` | 252 | 1 | 34.5 KB | 2.57 × 1.35 × 0.24 | two rails in front of seven pickets, four capped posts — camp/road boundary; long axis X, symmetric enough to face either way |
+| `torch_post` | 152 | 1 | 33.7 KB | 0.64 × 2.50 × 0.64 | stone footing, iron-banded pole, iron basket with charcoal bed — road-side milestone/torch stand (no light source) |
+
+Validator budgets added (`notice_board`/`fence_segment`/`torch_post`: 3,000). Previews:
+`temp_sketchlab/armour/c13c_props_sheet.png`. Payload 81 files / 15.29 MB.
+
 ## Batch 2026-10L — war spear + ruined abbey (cycle 9)
 
 ### Phase A — `spear` (11th weapon, installed)

@@ -41,5 +41,20 @@ test('weapon recovery and independent equipment replicate across sockets and sur
  const s=makeServer();await new Promise<void>(r=>s.server.listen(0,'127.0.0.1',r));const url=`ws://127.0.0.1:${(s.server.address() as any).port}/ws`,clients:Awaited<ReturnType<typeof client>>[]=[];
  try{const a=await client(url);clients.push(a);a.send({type:'create',name:'Collector'});const aw=await a.next('welcome');const room=s.rooms.get(aw.code)!,p=room.game.actors.find(a=>a.id===aw.id)!,drop=room.game.weaponDrops[0];p.x=drop.x;p.z=drop.z;a.send({type:'input',input:{...{mx:0,mz:0,yaw:0,attack:false,block:false,interact:true,seq:1}}});await wait(180);assert.ok(room.game.armory.includes('hammer'));
  const b=await client(url);clients.push(b);b.send({type:'join',code:aw.code,name:'Late joiner'});const bw=await b.next('welcome');assert.ok((await b.next('state')).game.armory.includes('hammer'));b.send({type:'command',action:'equip:hammer'});await wait(160);const state=a.messages.filter(m=>m.type==='state').at(-1);assert.equal(state.game.actors.find((p:any)=>p.id===bw.id).weapon,'hammer');assert.equal(state.game.actors.find((p:any)=>p.id===aw.id).weapon,'sword');b.ws.close();await wait(50);const resume=await client(url);clients.push(resume);resume.send({type:'resume',code:aw.code,token:bw.token});await resume.next('welcome');assert.equal((await resume.next('state')).game.actors.find((p:any)=>p.id===bw.id).weapon,'hammer');
+ // Cycle-13 co-op shield bash: the raw {type:'bash'} message is server-authoritative and syncs.
+ const basher=room.game.actors.find((x:any)=>x.id===aw.id)!;
+ const victim=room.game.actors.find((x:any)=>x.kind==='zombie'&&x.hp>0)??room.game.actors.find((x:any)=>x.kind==='corrupted'&&x.hp>0);
+ assert.ok(victim,'co-op bash test has a hostile target');room.game.actors=room.game.actors.filter((x:any)=>x.kind==='player'||x.id===victim.id);
+ basher.weapon='sword';basher.stamina=100;basher.cd=0;basher.bashCd=0;basher.x=0;basher.z=30;basher.yaw=0;
+ victim.x=0;victim.z=28.4;victim.hp=100;victim.maxHp=100;victim.windup=.5;
+ const victimHp=victim.hp;
+ a.send({type:'bash'});await wait(240);
+ const bashA=a.messages.filter((m:any)=>m.type==='state').at(-1).game,bashB=resume.messages.filter((m:any)=>m.type==='state').at(-1).game;
+ assert.equal(bashA.stats.bashes,1,'bash counted once in co-op');assert.equal(bashB.stats.bashes,1,'joiner sees the bash stat');
+ assert.equal(bashA.actors.find((x:any)=>x.id===victim.id).hp,victimHp-6,'bash damage authoritative');assert.equal(bashB.actors.find((x:any)=>x.id===victim.id).hp,victimHp-6);
+ assert.equal(bashA.actors.find((x:any)=>x.id===victim.id).windup,0,'bash interrupts the target windup');
+ const basherA=bashA.actors.find((x:any)=>x.id===aw.id),basherB=bashB.actors.find((x:any)=>x.id===aw.id);
+ assert.ok(basherA.bashCd>0&&basherA.bashCd<=1.1,'bash cooldown exposed');assert.equal(basherA.bashCd,basherB.bashCd);
+ assert.equal(basherA.stamina,basherB.stamina);
  }finally{clients.forEach(c=>c.ws.terminate());await s.close();}
 });

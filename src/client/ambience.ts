@@ -1,6 +1,7 @@
 import type {Actor, Game} from '../shared/types';
 import {REGIONS,START,NEST,dist} from '../shared/world';
 import {FORGE_FURNACES,STONE_ALTARS} from './ruins';
+import {bossSiegeAudioMode} from './controller';
 const clamp01=(v:number)=>(v<0?0:v>1?1:v);
 /** Region audio profiles derived from shared/world. Region centres use the same offset-80 mapping
  * the HUD uses to pick the player's region, so the audio regions match the visible region zones. */
@@ -131,6 +132,18 @@ export class Ambience{
  private musicIdle=0;
  private bedLevel=0;
  private duckLevel=0;
+ // Cycle-13 boss-siege layer + cue diagnostics (lazily built, driven by siege.boss state).
+ private bossGain?:GainNode;
+ private bossSources:AudioScheduledSourceNode[]=[];
+ private bossNodes:AudioNode[]=[];
+ private bossBuilt=false;
+ private bossIdle=0;
+ private bossLevel=0;
+ private bossMode:'idle'|'normal'|'boss'='idle';
+ private lastScreamerAt:number|null=null;
+ private screamerCount=0;
+ private stingMode:'victory'|'defeat'|null=null;
+ private stingAt:number|null=null;
  private captureRelief=0;
  private prevCaptures=0;
  private capturesSeen=false;
@@ -235,8 +248,33 @@ export class Ambience{
    weatherBeds:['rain','snow','ash'].map((kind,index)=>({kind,level:Math.round(this.weatherTargetLevels[index]*1000)/1000})),
    landmarkBeds:[{key:'chapel',level:Math.round((this.enabled()?this.chapelNear*this.chapelNear*.022:0)*1000)/1000},{key:'forge',level:Math.round((this.enabled()?this.forgeNear*this.forgeNear*.024:0)*1000)/1000}],
    masterGain:level(this.master),
-   focus:this.focusOverride?{x:this.focusOverride.x,z:this.focusOverride.z}:null
+   focus:this.focusOverride?{x:this.focusOverride.x,z:this.focusOverride.z}:null,
+   siege:{boss:this.bossMode==='boss',active:this.bossMode!=='idle',mode:this.bossMode,level:Math.round(this.bossLevel*1000)/1000,gain:level(this.bossGain)},
+   cues:{screamerAt:this.lastScreamerAt===null?null:Math.round(this.lastScreamerAt*1000)/1000,screamerCount:this.screamerCount,sting:this.stingMode,stingAt:this.stingAt===null?null:Math.round(this.stingAt*1000)/1000}
   };
+ }
+ private ensureBossSiege(){
+  const c=this.context;if(!c||!this.master||this.bossBuilt)return;
+  try{
+   const gain=c.createGain();gain.gain.value=0;gain.connect(this.master);
+   const drone=c.createOscillator();drone.type='sawtooth';drone.frequency.value=55;
+   const filter=c.createBiquadFilter();filter.type='lowpass';filter.frequency.value=240;filter.Q.value=1.1;
+   const droneGain=c.createGain();droneGain.gain.value=.16;drone.connect(filter);filter.connect(droneGain);droneGain.connect(gain);
+   const noise=c.createBufferSource();noise.buffer=this.noiseBuffer(c,2,true);noise.loop=true;
+   const nf=c.createBiquadFilter();nf.type='bandpass';nf.frequency.value=140;nf.Q.value=.9;
+   const ng=c.createGain();ng.gain.value=.12;noise.connect(nf);nf.connect(ng);ng.connect(gain);
+   drone.start();noise.start();
+   this.bossGain=gain;this.bossSources=[drone,noise];this.bossNodes=[filter,droneGain,nf,ng];this.bossBuilt=true;
+  }catch{}
+ }
+ private stopBossSiege(){if(!this.bossBuilt)return;for(const source of this.bossSources){try{source.stop();}catch{}try{source.disconnect();}catch{}}for(const node of this.bossNodes){try{node.disconnect();}catch{}}this.bossSources=[];this.bossNodes=[];this.bossGain=undefined;this.bossBuilt=false;this.bossIdle=0;}
+ /** Distinct Screamer shriek cue (diagnostics recorded even when muted; rate-limited). */
+ screamerShriek(){const now=this.context?.currentTime??0;if(this.lastScreamerAt!==null&&now-this.lastScreamerAt<.8)return;this.lastScreamerAt=now;this.screamerCount++;const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const t=c.currentTime,osc=c.createOscillator(),gain=c.createGain(),filter=c.createBiquadFilter();osc.type='sawtooth';osc.frequency.setValueAtTime(1500,t);osc.frequency.exponentialRampToValueAtTime(380,t+.5);filter.type='bandpass';filter.frequency.value=1900;filter.Q.value=2.4;gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.055*(1-.6*this.duckLevel),t+.03);gain.gain.exponentialRampToValueAtTime(.0001,t+.58);osc.connect(filter);filter.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+.62);osc.onended=()=>{try{osc.disconnect();filter.disconnect();gain.disconnect();}catch{}};}catch{}
+ }
+ /** Short victory/defeat sting on the recap moment (respects Sound/duck; diagnostics recorded). */
+ endingSting(mode:'victory'|'defeat'){this.stingMode=mode;this.stingAt=this.context?.currentTime??0;const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const notes=mode==='victory'?[392,523.25,659.25,783.99]:[220,196,164.81,110];const t=c.currentTime;notes.forEach((freq,index)=>{const osc=c.createOscillator(),gain=c.createGain();osc.type=mode==='victory'?'triangle':'sine';osc.frequency.value=freq;const at=t+index*.17;gain.gain.setValueAtTime(.0001,at);gain.gain.exponentialRampToValueAtTime(.05*(1-.55*this.duckLevel),at+.03);gain.gain.exponentialRampToValueAtTime(.0001,at+.5);osc.connect(gain);gain.connect(master);osc.start(at);osc.stop(at+.55);osc.onended=()=>{try{osc.disconnect();gain.disconnect();}catch{}};});}catch{}
  }
  private noiseBuffer(c:AudioContext,seconds:number,pink:boolean):AudioBuffer{
   const length=Math.ceil(c.sampleRate*seconds),buffer=c.createBuffer(1,length,c.sampleRate),data=buffer.getChannelData(0);
@@ -1046,6 +1084,17 @@ export class Ambience{
      for(const osc of this.musicDetune)osc.detune.setTargetAtTime(musicDetuneCents,now,.8);
     }
     const tension=this.tensionGain;if(tension)tension.gain.setTargetAtTime(enabled?nestSwell*.06*(1-.85*this.duckLevel):0,now,.4);
+   }
+   // ---- boss-siege layer: intensifies while siege.boss is active, releases afterwards ----
+   this.bossMode=bossSiegeAudioMode(game?.siege).mode;
+   const bossTarget=this.bossMode==='boss'?1:0;
+   this.bossLevel+=(bossTarget-this.bossLevel)*.09;
+   if(enabled&&this.bossMode==='boss'&&this.bossLevel>.01){
+    this.ensureBossSiege();this.bossIdle=0;
+    const boss=this.bossGain;if(boss)boss.gain.setTargetAtTime(this.bossLevel*.085*(1-.5*this.duckLevel),now,.35);
+   }else if(this.bossBuilt){
+    const boss=this.bossGain;if(boss)boss.gain.setTargetAtTime(0,now,.45);
+    this.bossIdle+=.08;if(this.bossIdle>2.5)this.stopBossSiege();
    }
   }
   const hpRatio=me?clamp01(me.hp/me.maxHp):1;

@@ -255,3 +255,23 @@ export function deriveRunRecap(input:{
   ]
  };
 }
+/* ---------------------------------------------------------------------------------------------
+ * Cycle-13: boss-siege audio mode + shield-bash input gating (pure, used by ambience/main/tests).
+ * ------------------------------------------------------------------------------------------- */
+export type AudioSiegeMode='idle'|'normal'|'boss';
+export type AudioSiegeState={boss:boolean;active:boolean;mode:AudioSiegeMode};
+export function bossSiegeAudioMode(siege:{boss?:boolean;active?:boolean}|null|undefined):AudioSiegeState{
+ const active=!!siege?.active,boss=active&&!!siege?.boss;
+ return {boss,active,mode:boss?'boss':active?'normal':'idle'};
+}
+/** True when the held-block + freshly-pressed-attack chord should fire a bash this frame. */
+export type BashInputGate={block:boolean;attack:boolean;previousAttack:boolean;shieldCapable:boolean;alive:boolean;stamina:number;cooldownRemaining:number;minStamina?:number};
+export function bashChordReady(input:BashInputGate):boolean{
+ return !!input.alive&&!!input.shieldCapable&&!!input.block&&!!input.attack&&!input.previousAttack&&input.stamina>=(input.minStamina??14)&&input.cooldownRemaining<=0;
+}
+export function formatBashHint(input:{shieldCapable:boolean;cooldownRemaining:number;stamina:number;minStamina?:number}):string|null{
+ if(!input.shieldCapable)return null;
+ if(input.cooldownRemaining>0)return `Shield bash · recovering ${(input.cooldownRemaining/1000).toFixed(1)}s`;
+ if(input.stamina<(input.minStamina??14))return `Shield bash · low stamina (${Math.max(0,Math.round(input.stamina))})`;
+ return 'Shield bash · hold Block + Attack';
+}

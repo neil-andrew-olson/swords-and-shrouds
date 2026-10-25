@@ -293,3 +293,11 @@ body.touch-device #perf{display:none}
 #result{max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);overflow-y:auto;-webkit-overflow-scrolling:touch}
 @media(max-width:700px){#runRecap{max-height:38vh}.run-recap-rows{grid-template-columns:1fr}}
 @media(pointer:coarse) and (max-height:520px){#result{max-height:calc(100dvh - 10px)}#runRecap{max-height:30vh}}
+/* =============================================================================================
+   Cycle 13 — shield bash HUD hint + touch button.
+   ============================================================================================= */
+#bashHint{margin:4px 0 0;font-size:9px;letter-spacing:.4px;color:#d9c07a;line-height:1.35}
+#bashHint[hidden]{display:none!important}
+#bashBtn{background:#2a2416cc!important;border-color:#cba56866!important;color:#f0e7d0!important}
+#bashBtn:disabled{opacity:.6}
+.guide-bash{margin:10px 0 0;font-size:11px;line-height:1.5;color:#cfc6ab;border-left:2px solid var(--gold);padding-left:8px}

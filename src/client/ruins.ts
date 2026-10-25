@@ -385,6 +385,33 @@ export const CYCLE9_PROPS = {
 } as const;
 
 // ---------------------------------------------------------------------------------------------
+// Cycle-13 village/camp props (notice board + fence segments; torch_post deferred to cycle 14 to
+// respect the <=+2 draw budget). Both are distance-culled dressing (85 m), receive-only shadows,
+// no new lights, defensive missing-asset skip; +2 instanced draws total.
+// ---------------------------------------------------------------------------------------------
+export const NOTICE_BOARD_HEIGHT = 2.26;
+export const FENCE_SEGMENT_HEIGHT = 1.35;
+
+/** Quest/notice board on the village approach; front (+Z) faces the keep -> village walkway. */
+export const NOTICE_BOARDS: readonly PropPlacement[] = [{x: 44, z: -14, yaw: -2.356}];
+
+/** Short fence run along the crossing camp's southern edge (long axis X). */
+export const FENCE_SEGMENTS: readonly PropPlacement[] = [
+  {x: 27.5, z: -44.1, yaw: 0},
+  {x: 25, z: -44.2, yaw: 0},
+  {x: 22.5, z: -44.3, yaw: 0}
+];
+
+export const CYCLE13_PROPS = {
+  noticeBoards: NOTICE_BOARDS.length,
+  fenceSegments: FENCE_SEGMENTS.length,
+  newInstancedLayers: 2,
+  noticeBoardTris: 192,
+  fenceSegmentTris: 252,
+  deferred: 'torch_post (installed by asset-forge; deferred to cycle 14 for the <=+2 draw budget)'
+} as const;
+
+// ---------------------------------------------------------------------------------------------
 // Cycle-3 regional identity: one landmark per region plus region-specific prop dressing. All of it
 // goes through the same quantization-safe instanced path; every scatter prop is distance-culled
 // through instance-buffer compaction. Coordinates validated against shared/world, scene.ts's
@@ -630,6 +657,12 @@ export const NEST_QA_POSES = [contentPose('content-plague', -8, -680, 3.2, 0, -6
 
 /** QA framing for the cycle-9 ruined-abbey landmark: from the keep -> border road looking east. */
 export const ABBEY_QA_POSES = [contentPose('content-abbey', 40, -40, 3.2, 62, -46, 2.6)] as const;
+
+/** QA framing for the cycle-13 village notice board + camp fence run. */
+export const CYCLE13_QA_POSES = [
+  contentPose('content-notice-board', 36.9, -21.1, 2.6, 44, -14, 1.4),
+  contentPose('content-fence', 24, -52, 2.6, 25, -44, 1.2)
+] as const;
 
 const RACK_DX = 5.0;
 const RACK_DZ = 4.2;
@@ -1319,7 +1352,10 @@ export function addRuins(scene: THREE.Scene): {
     placeDressingAsset('stone_altar', STONE_ALTARS, 1.4, 'dressing:altar', {emissiveLift: 0.3}),
     placeDressingAsset('forge_furnace', FORGE_FURNACES, 2.4, 'dressing:furnaces'),
     // cycle 9: ruined abbey landmark (distance-culled; receive-only shadows; 1 draw when visible)
-    placeDressingAsset('abbey_ruin', ABBEY_PLACEMENTS, ABBEY_HEIGHT, 'dressing:abbey')
+    placeDressingAsset('abbey_ruin', ABBEY_PLACEMENTS, ABBEY_HEIGHT, 'dressing:abbey'),
+    // cycle 13: village notice board + camp fence run (2 new instanced layers/draws; torch_post deferred)
+    placeDressingAsset('notice_board', NOTICE_BOARDS, NOTICE_BOARD_HEIGHT, 'dressing:notice-boards'),
+    placeDressingAsset('fence_segment', FENCE_SEGMENTS, FENCE_SEGMENT_HEIGHT, 'dressing:fences')
   ]).catch((error) => console.warn('[ruins] asynchronous placement failed', error));
   buildBanners();
   buildFlames();

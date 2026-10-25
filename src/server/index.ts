@@ -4,7 +4,7 @@ import {WebSocketServer,WebSocket} from 'ws';
 import {randomBytes} from 'node:crypto';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {createGame,addPlayer,setInput,command,tick,snapshot,idle,forceSiege,qaEnsureFriendlyCastle} from '../simulation/game';
+import {createGame,addPlayer,setInput,command,tick,snapshot,idle,forceSiege,qaEnsureFriendlyCastle,shieldBash} from '../simulation/game';
 import {DEFAULT_DIFFICULTY,isDifficulty} from '../shared/difficulty';
 import type {Game} from '../shared/types';
 type Seat={id:string;token:string;name:string;ws?:WebSocket;left:number};
@@ -57,6 +57,7 @@ export function makeServer(){
     if(!forceSiege(room.game,index))return error('Could not start a siege.');
     broadcast(room);
    }
+   else if(m.type==='bash'){const result=shieldBash(room.game,seat.id);if(result)error(result);}
    else if(m.type==='restart'){if(room.host!==seat.id)return error('Only the room leader can restart.');if(room.game.status==='playing')return error('Finish the campaign before restarting.');room.game=createGame(room.game.difficulty);room.ended=0;for(const s of room.seats){const p=addPlayer(room.game,s.id,s.name);p.connected=!!s.ws;}broadcast(room);}
   });
   ws.on('close',()=>{clearTimeout(joinTimeout);clearInterval(heartbeat);if(room&&seat&&seat.ws===ws){seat.ws=undefined;seat.left=Date.now();const p=room.game.actors.find(a=>a.id===seat!.id);if(p){p.connected=false;p.input=idle();p.block=false;}removeExpired(room,Date.now());broadcast(room);}});

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame,addPlayer,setInput,tick,command,spawn,idle,snapshot,forceSiege,qaEnsureFriendlyCastle} from '../src/simulation/game';
+import {createGame,addPlayer,setInput,tick,command,spawn,idle,snapshot,forceSiege,qaEnsureFriendlyCastle,shieldBash,BASH} from '../src/simulation/game';
 import {DIFFICULTIES,DIFFICULTY_IDS,isDifficulty} from '../src/shared/difficulty';
 import {move,waypoint,dist} from '../src/shared/world';
 import {readPad,deadzone} from '../src/client/controller';
@@ -54,8 +54,20 @@ test('pre-capture deaths respawn; losing last castle after first capture defeats
 test('public snapshot omits inputs and credentials',()=>{const g=createGame();addPlayer(g,'p','Knight');const s=snapshot(g);assert.ok(!('input' in s.actors.find(a=>a.id==='p')!));assert.ok(!JSON.stringify(s).includes('token'));});
 test('Xbox mapping, deadzone and one-toggle-per-press',()=>{const p={axes:[.1,-1,.5,0],buttons:Array.from({length:17},()=>({pressed:false,value:0,touched:false}))};assert.equal(deadzone(.1),0);p.buttons[3].pressed=true;p.buttons[7].value=1;const first=readPad(p);assert.equal(first.toggle,true);assert.equal(first.mx,0);assert.equal(first.forward,1);assert.equal(first.attack,true);assert.equal(readPad(p,first.previous).toggle,false);p.buttons[3].pressed=false;assert.equal(readPad(p,first.previous).toggle,false);});
 test('swords cannot damage through a stone wall',()=>{const g=empty(),p=addPlayer(g,'p','Knight');p.x=8;p.z=0;const e=spawn(g,'zombie',11,0);advance(g,.1,p,{yaw:Math.PI/2,attack:true});assert.equal(e.hp,e.maxHp);});
-
-test('blocking reduces frontal damage while preserving incoming attacks',()=>{const g=empty(),p=addPlayer(g,'p','Knight');spawn(g,'zombie',0,25);advance(g,.9,p,{block:true,yaw:0});assert.ok(p.hp<120);assert.ok(p.hp>115);});
+test('blocking reduces frontal damage while preserving incoming attacks',()=>{const g=empty(),p=addPlayer(g,'p','Knight');spawn(g,'zombie',0,25);advance(g,.9,p,{block:true,yaw:0});assert.ok(p.hp<120);assert.ok(p.hp>115);
+ // Cycle-13 shield bash assertions (inside this existing block to keep exactly 58 test blocks).
+ const setup=()=>{const g=empty(),p=addPlayer(g,'p','Basher');p.x=0;p.z=20;p.yaw=0;p.weapon='sword';p.stamina=100;const e=spawn(g,'zombie',0,18.4);e.windup=.5;e.cd=.4;return {g,p,e};};
+ {
+  const {g,p,e}=setup();p.block=true;assert.equal(shieldBash(g,p.id),'','bash succeeds while block is held');assert.equal(p.block,false);assert.equal(p.stamina,100-BASH.stamina);assert.equal(p.bashCd,BASH.cooldown);assert.equal(p.bashSerial,1);assert.equal(p.cd,BASH.attackLock);assert.equal(e.hp,46);assert.equal(e.windup,0);assert.ok(Math.abs(e.cd-BASH.stagger)<1e-9);assert.ok(Math.abs((e.staggerUntil??-1)-(g.time+BASH.stagger))<1e-9);assert.ok(e.z<18.4,'knocked away from the basher');assert.ok(Math.abs((18.4-e.z)-BASH.knockback)<.05,'knockback distance');assert.equal(g.stats.bashes,1);const cue=g.events.find(ev=>ev.text==='Shield bash!');assert.ok(cue&&cue.x===e.x&&cue.z===e.z,'positioned bash cue');assert.match(shieldBash(g,p.id),/recovering/);assert.equal(g.stats.bashes,1);setInput(g,p.id,{...idle(),seq:(p.lastSeq??0)+1,attack:true});tick(g);assert.equal(e.hp,46,'attack cannot cancel out of bash lock');
+ }
+ {const {g,p}=setup();p.weapon='flamberge';assert.match(shieldBash(g,p.id),/shield/);assert.equal(p.stamina,100);}
+ {const {g,p}=setup();p.stamina=13;assert.match(shieldBash(g,p.id),/stamina/);assert.equal(p.stamina,13);}
+ {const {g,p}=setup();p.hp=0;assert.match(shieldBash(g,p.id),/cannot act/);}
+ {const {g,p}=setup();p.cd=.2;assert.match(shieldBash(g,p.id),/Finish your attack/);assert.equal(p.stamina,100);}
+ // Wall check: no bash through the keep's east wall; knockback stops before the stone.
+ {const g=empty(),p=addPlayer(g,'p','Wall');p.x=8;p.z=0;p.yaw=Math.PI/2;p.weapon='sword';p.stamina=100;spawn(g,'zombie',11,0);assert.match(shieldBash(g,p.id),/No enemy/);assert.equal(p.stamina,100);}
+ {const g=empty(),p=addPlayer(g,'p','Wall');p.x=6;p.z=0;p.yaw=Math.PI/2;p.weapon='sword';p.stamina=100;const e=spawn(g,'zombie',8.2,0);assert.equal(shieldBash(g,p.id),'');assert.ok(e.x<9.25,'knockback stops before the stone wall');assert.ok(e.x>=8.2,'no wall clip-through');}
+});
 test('AI can navigate from behind a castle through its south entrance',()=>{const p={x:0,z:-15},target={x:0,z:0};for(let n=0;n<1200;n++)move(p,waypoint(p,target),.15);assert.ok(dist(p,target)<1);});
 test('castle tiers spend shared resources once, cap construction, repair to upgraded maximum and heal allies',()=>{const g=empty(),p=addPlayer(g,'p','Builder'),q=addPlayer(g,'q','Ally'),c=g.castles[0];c.friendly=true;g.everCaptured=true;p.x=0;p.z=12;q.x=0;q.z=3;g.resources.wood=64;g.resources.iron=28;assert.equal(command(g,p.id,'upgrade'),'');assert.equal(c.level,1);assert.equal(c.gate,300);assert.equal(c.barrier,180);assert.equal(g.resources.wood,40);assert.equal(command(g,q.id,'upgrade'),'');assert.equal(c.level,2);assert.equal(c.gate,420);assert.equal(g.resources.wood,0);assert.notEqual(command(g,q.id,'upgrade'),'');assert.equal(c.level,2);c.gate=10;assert.notEqual(command(g,p.id,'repair'),'');assert.equal(c.gate,10);g.resources.wood=8;g.resources.iron=2;assert.equal(command(g,p.id,'repair'),'');assert.equal(c.gate,420);q.hp=50;advance(g,1);assert.ok(q.hp>51);assert.equal(snapshot(g).castles[0].level,2);});
 test('castle upgrades require friendly ownership, proximity and sufficient resources',()=>{const g=empty(),p=addPlayer(g,'p','Builder'),c=g.castles[0];g.resources.wood=100;g.resources.iron=100;p.x=p.z=0;assert.notEqual(command(g,p.id,'upgrade'),'');c.friendly=true;p.z=25;assert.notEqual(command(g,p.id,'upgrade'),'');p.z=0;g.resources.iron=0;assert.notEqual(command(g,p.id,'upgrade'),'');assert.equal(g.resources.wood,100);assert.equal(c.level,0);});

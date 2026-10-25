@@ -5,11 +5,11 @@ import type {Actor,Game,Input} from '../shared/types';
 import {WEAPON_IDS,WEAPONS,isWeapon,weaponStats,type WeaponId} from '../shared/weapons';
 import {DEFAULT_DIFFICULTY,difficultyPreset,type Difficulty} from '../shared/difficulty';
 export const idle=():Input=>({mx:0,mz:0,yaw:0,attack:false,block:false,interact:false,seq:0});
-export function event(g:Game,text:string){g.events.push({id:++g.nextId,text,time:g.time});g.events=g.events.slice(-8);}
+export function event(g:Game,text:string,at?:{x:number;z:number}){g.events.push(at?{id:++g.nextId,text,time:g.time,x:at.x,z:at.z}:{id:++g.nextId,text,time:g.time});g.events=g.events.slice(-8);}
 export function spawn(g:Game,kind:Actor['kind'],x:number,z:number,extra:Partial<Actor>={}):Actor{
  if(kind==='soldier'&&!extra.role)extra={...extra,role:ROLES[g.actors.filter(a=>a.kind==='soldier').length%ROLES.length]};
  const hp=kind==='player'?120:kind==='soldier'?90:kind==='corrupted'?125:52;
- const a:Actor={id:`a${++g.nextId}`,kind,name:kind==='corrupted'?'Corrupted knight':kind==='soldier'?'Oathsworn':kind==='zombie'?'Shrouded':'Knight',x,z,hp,maxHp:hp,yaw:0,cd:0,windup:0,swing:0,block:false,deadUntil:0,stamina:100,armor:'light',abilityCd:0,...extra};
+ const a:Actor={id:`a${++g.nextId}`,kind,name:kind==='corrupted'?'Corrupted knight':kind==='soldier'?'Oathsworn':kind==='zombie'?'Shrouded':'Knight',x,z,hp,maxHp:hp,yaw:0,cd:0,windup:0,swing:0,block:false,deadUntil:0,stamina:100,armor:'light',abilityCd:0,bashCd:0,...extra};
  if(kind==='zombie'||kind==='corrupted'){const hpScale=difficultyPreset(g.difficulty).enemyHp;if(hpScale!==1){a.maxHp=Math.max(1,Math.round(a.maxHp*hpScale));a.hp=Math.min(a.maxHp,Math.round(a.hp*hpScale));}}
  g.actors.push(a);return a;
 }
@@ -17,7 +17,7 @@ export function createGame(difficulty:Difficulty=DEFAULT_DIFFICULTY):Game{
  // Weapon-rack drops are WEAPON_IDS-driven: the starter hammer plus one rack per castle. Filtering
  // out the two starter weapons keeps every rackable weapon covered exactly once as WEAPON_IDS grows.
  const rackPool:WeaponId[]=WEAPON_IDS.filter(id=>id!=='sword'&&id!=='hammer');
- const g:Game={time:0,difficulty,armory:['sword'],weaponDrops:[{id:'starter-hammer',weapon:'hammer',x:-3,z:30,taken:false},...CASTLES.map((c,i)=>({id:'rack-'+c.id,weapon:rackPool[i%rackPool.length],x:c.x-5,z:c.z+4,taken:false}))],regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0,bossesSeen:0,bossesFelled:0,screamers:0,screams:0},events:[],nextId:0};
+ const g:Game={time:0,difficulty,armory:['sword'],weaponDrops:[{id:'starter-hammer',weapon:'hammer',x:-3,z:30,taken:false},...CASTLES.map((c,i)=>({id:'rack-'+c.id,weapon:rackPool[i%rackPool.length],x:c.x-5,z:c.z+4,taken:false}))],regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0,bossesSeen:0,bossesFelled:0,screamers:0,screams:0,bashes:0},events:[],nextId:0};
  g.castles.forEach((c,i)=>{for(let n=0;n<4+(i%3)*2+Math.floor(i/3);n++)spawn(g,n===5?'corrupted':'zombie',c.x-5+(n%3)*4,c.z-5+Math.floor(n/3)*4,{castle:c.id});});
  g.camps.forEach(c=>{for(let n=0;n<3;n++)spawn(g,'zombie',c.x+n*2-2,c.z-4);});
  for(let n=0;n<5;n++)spawn(g,n===4?'corrupted':'zombie',NEST.x-6+n*3,NEST.z+5,n===4?{name:'Plague Champion',hp:200,maxHp:200,weapon:'zweihander'}:{});
@@ -47,6 +47,35 @@ function hurt(g:Game,a:Actor,amount:number,attacker?:Actor){
 }
 function swing(g:Game,a:Actor){const w=weaponStats(a.weapon);a.stamina=Math.max(0,(a.stamina??100)-w.stamina);noise(g,a,22);a.cd=w.cooldown;a.swing=.25;a.attackSerial=(a.attackSerial??0)+1;for(const e of g.actors){if(!hostile(e)||e.hp<=0||dist(a,e)>w.reach||!lineClear(a,e))continue;const angle=Math.atan2(e.x-a.x,-(e.z-a.z));if(Math.cos(angle-a.yaw)>w.arc)hurt(g,e,w.damage,a);}
  if(dist(a,g.nest)<4&&g.castles.every(c=>c.friendly)&&g.camps.every(c=>c.rescued)){g.nest.hp=Math.max(0,g.nest.hp-w.damage);if(g.nest.hp===0){g.status='victory';event(g,'The shroud is broken. The kingdom lives.');}}
+}
+/** Cycle-13 shield bash constants: defensive tool, deliberately not a DPS replacement. */
+export const BASH={stamina:14,cooldown:1.1,damage:6,stagger:.9,range:2.2,knockback:1.2,arcCos:.35,attackLock:.3};
+/** Server-authoritative shield bash. Returns '' on success or a player-facing error string. */
+export function shieldBash(g:Game,id:string):string{
+ const p=g.actors.find(a=>a.id===id&&a.hp>0);
+ if(!p||g.status!=='playing')return 'You cannot act right now.';
+ if(p.kind!=='player'||!p.connected)return 'You cannot act right now.';
+ if(p.downed)return 'You are down.';
+ if((p.bashCd??0)>0)return 'Shield bash is recovering.';
+ if(p.cd>0||p.swing>0)return 'Finish your attack first.';
+ if(!weaponStats(p.weapon).shield)return 'You need a shield to bash.';
+ if((p.stamina??100)<BASH.stamina)return 'Shield bash needs 14 stamina.';
+ const candidates=g.actors.filter(e=>e.hp>0&&hostile(e)!==hostile(p)&&dist(p,e)<=BASH.range&&lineClear(p,e));
+ const target=candidates.find(e=>Math.cos(Math.atan2(e.x-p.x,-(e.z-p.z))-p.yaw)>BASH.arcCos);
+ if(!target)return 'No enemy in front to bash.';
+ p.stamina=Math.max(0,(p.stamina??100)-BASH.stamina);
+ p.bashCd=BASH.cooldown;
+ p.cd=Math.max(p.cd,BASH.attackLock);
+ p.block=false;
+ p.bashSerial=(p.bashSerial??0)+1;
+ p.attackSerial=(p.attackSerial??0)+1;
+ hurt(g,target,BASH.damage,p);
+ target.windup=0;target.cd=Math.max(target.cd,BASH.stagger);target.staggerUntil=g.time+BASH.stagger;target.attackSerial=(target.attackSerial??0)+1;
+ const dx=target.x-p.x,dz=target.z-p.z,len=Math.hypot(dx,dz)||1;
+ move(target,{x:target.x+(dx/len)*BASH.knockback,z:target.z+(dz/len)*BASH.knockback},BASH.knockback);
+ event(g,'Shield bash!',{x:target.x,z:target.z});
+ g.stats.bashes++;
+ return '';
 }
 export function command(g:Game,id:string,action:string){
  const p=g.actors.find(a=>a.id===id&&a.hp>0);if(!p||g.status!=='playing')return 'You cannot act right now.';
@@ -118,7 +147,7 @@ export function tick(g:Game,dt=.05){
   if(a.hp>0&&!hostile(a)&&g.castles.some(c=>c.friendly&&c.level>0&&dist(a,c)<9))a.hp=Math.min(a.maxHp,a.hp+dt*2);
   a.abilityCd=Math.max(0,(a.abilityCd??0)-dt);
   if(a.hp>0&&a.kind==='player')a.stamina=Math.max(0,Math.min(100,(a.stamina??100)+dt*(a.block?-22:a.cd>0?0:a.armor==='heavy'?10:18)));
-  a.cd=Math.max(0,a.cd-dt);a.swing=Math.max(0,a.swing-dt);
+  a.cd=Math.max(0,a.cd-dt);a.swing=Math.max(0,a.swing-dt);a.bashCd=Math.max(0,(a.bashCd??0)-dt);
   if(a.hp<=0){if(a.deadUntil>g.time)continue;
    if(a.kind==='player'){if(a.downed){a.downed=false;const boss=spawn(g,'corrupted',a.x,a.z,{name:`${a.name}, the Fallen`,hp:220,maxHp:220});noise(g,boss,35);a.deadUntil=g.time+8;event(g,`${a.name} has risen as a corrupted knight. Their spirit returns in 8 seconds.`);continue;}const c=g.castles.find(c=>c.friendly);if(!c&&g.everCaptured)continue;a.hp=a.maxHp;a.stamina=100;a.x=c?.x??START.x;a.z=c?c.z+3:START.z;a.input=idle();a.block=false;}
    else{g.actors=g.actors.filter(x=>x!==a);if(a.kind==='soldier')spawn(g,'corrupted',a.x,a.z);continue;}}

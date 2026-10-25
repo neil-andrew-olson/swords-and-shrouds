@@ -5,7 +5,7 @@ import {Ambience} from './ambience';
 import {WEAPON_IDS,WEAPONS,weaponStats} from '../shared/weapons';
 import {WorldView} from './scene';
 import {weaponCombatProfile} from './equipment';
-import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue,touchStickVector,touchSensitivityValue,deriveObjectiveLine,deriveJournalSummary,type JournalInput,type JournalSummary,type ObjectiveLine,type ObjectivePoint,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,type DifficultyId,isDifficultyId,difficultyId,difficultyChoice,bossBarState,type BossBarModel,deriveRunRecap,type RunRecap} from './controller';
+import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue,touchStickVector,touchSensitivityValue,deriveObjectiveLine,deriveJournalSummary,type JournalInput,type JournalSummary,type ObjectiveLine,type ObjectivePoint,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,type DifficultyId,isDifficultyId,difficultyId,difficultyChoice,bossBarState,type BossBarModel,deriveRunRecap,type RunRecap,bashChordReady,formatBashHint} from './controller';
 import {LORE_ENTRIES,LORE_STORAGE_KEY,loreEntryViews,unlockedLoreIds,newlyUnlockedLore,formatLoreToast,type LoreEntry,type LoreState} from '../shared/lore';
 import {dist,clamp,BOUNDS,REGIONS,CASTLES,CAMPS,NEST} from '../shared/world';
 import type {Game,Actor} from '../shared/types';
@@ -73,6 +73,10 @@ if(hudTop){const guideButton=document.getElementById('guideBtn');if(guideButton)
 const journalGuideButton=document.createElement('button');
 journalGuideButton.type='button';journalGuideButton.id='openJournalFromGuide';journalGuideButton.textContent='Open campaign journal · J';
 $('closeGuide').after(journalGuideButton);
+const bashGuideHint=document.createElement('p');
+bashGuideHint.id='bashGuideHint';bashGuideHint.className='guide-bash';
+bashGuideHint.textContent='Shield bash: with a shield-capable weapon, hold Block + Attack (right click + left click / LT + RT / Bash button). Costs 14 stamina, 1.1 s cooldown.';
+document.querySelector('#guide .settings')?.after(bashGuideHint);
 
 // ---- Difficulty picker (landing: solo/host choice; joiners inherit the host's mode) ----
 let selectedDifficulty:DifficultyId=difficultyId(localStorage.getItem('ss-difficulty'));
@@ -104,6 +108,38 @@ bossSiegeBar.setAttribute('aria-live','polite');
 bossSiegeBar.innerHTML='<div id="bossSiegeBanner">BOSS SIEGE · <span id="bossSiegeCastle"></span></div><div id="bossSiegeName">SHROUD WARDEN</div><div id="bossSiegeTrack"><div id="bossSiegeFill"></div></div><div id="bossSiegeMeta"><span id="bossSiegeHp"></span><span id="bossSiegePhase">STEADY</span></div>';
 $('hud').append(bossSiegeBar);
 const bossSiegeElements={bar:bossSiegeBar,castle:$('bossSiegeCastle'),name:$('bossSiegeName'),fill:$('bossSiegeFill'),hp:$('bossSiegeHp'),phase:$('bossSiegePhase')};
+// ---- Shield bash client: block+attack chord sends {type:'bash'} (server-authoritative). ----
+let lastBashAt=0,lastBashSentAt=0,lastBashEventAt=0,bashSentCount=0,attackWasDown=false,stungFor:'victory'|'defeat'|null=null;
+const bashHint=document.createElement('p');
+bashHint.id='bashHint';bashHint.hidden=true;$('vitals')?.append(bashHint);
+const bashButton=document.createElement('button');
+bashButton.type='button';bashButton.id='bashBtn';bashButton.textContent='Bash';bashButton.hidden=true;
+document.querySelector('.touch-actions')?.append(bashButton);
+bashButton.addEventListener('pointerdown',event=>{event.preventDefault();event.stopPropagation();sendBash();});
+function bashCooldownRemaining(now=performance.now()){return Math.max(0,1100-(now-lastBashAt));}
+function bashShieldCapable(){const player=me();return !!game&&!!player&&weaponStats(player.weapon).shield;}
+function sendBash(){
+ const player=me();
+ if(!game||!player||player.hp<=0||bashCooldownRemaining()>0||!bashShieldCapable())return false;
+ lastBashAt=performance.now();lastBashSentAt=lastBashAt;bashSentCount++;
+ send({type:'bash'});
+ updateBashHint();
+ return true;
+}
+function updateBashHint(){
+ const player=me();
+ const capable=!!game&&!!player&&player.hp>0&&weaponStats(player.weapon).shield;
+ if(!capable){if(!bashHint.hidden)bashHint.hidden=true;if(!bashButton.hidden)bashButton.hidden=true;return;}
+ const serverCd=(player as {bashCd?:number}).bashCd??0;
+ const remaining=Math.max(bashCooldownRemaining(),serverCd*1000);
+ const text=formatBashHint({shieldCapable:true,cooldownRemaining:remaining,stamina:player.stamina??100});
+ if(bashHint.hidden)bashHint.hidden=false;
+ if(bashHint.textContent!==text)bashHint.textContent=text??'';
+ const label=remaining>0?`Bash · ${(remaining/1000).toFixed(1)}s`:'Bash';
+ if(bashButton.hidden)bashButton.hidden=false;
+ if(bashButton.textContent!==label)bashButton.textContent=label;
+ bashButton.disabled=remaining>0;
+}
 
 // ---- Chronicle/lore persistence + end-of-run recap DOM ----
 function loadLoreIds():Set<string>{
@@ -433,7 +469,7 @@ function updateBossSiegeBar(model:BossBarModel){
 }
 function journalControlsLegend(){
  if(padWasConnected)return ['Move — Left stick','Look — Right stick','Attack — RT','Block — LT','Sweep — B','Heal — X','Interact — A','Journal — Start / Menu','Guide — View'];
- if(touchDevice)return ['Move — Left stick','Look — Drag the right side','Attack / Block / Interact — Touch buttons','Sweep / Heal — Bottom buttons','Journal — Journal button'];
+ if(touchDevice)return ['Move — Left stick','Look — Drag the right side','Attack / Block / Interact — Touch buttons','Shield bash — Bash button','Sweep / Heal — Bottom buttons','Journal — Journal button'];
  return ['Move — WASD','Look — Mouse','Attack — Left click','Block — Right click','Sweep — Q or B','Heal — H','Interact — E','Camera — V','Journal — J','Guide — G'];
 }
 function previewSummary(summary:JournalSummary):JournalSummary{
@@ -506,7 +542,7 @@ for(const location of ['landing','armory']){
 }
 
 // ---- Read-only QA hooks: character selector state + controller/pad state (no gameplay effect) ----
-const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown;__ssAudioState?:()=>unknown;__ssAudioFocus?:(x?:number|null,z?:number|null)=>unknown;__ssObjectives?:()=>unknown;__ssJournal?:()=>unknown;__ssJournalPreview?:(stage?:string|null)=>unknown;__ssObjectivePreview?:(text?:string|null)=>unknown;__ssForceSiege?:(index?:number|null)=>unknown;__ssDifficulty?:()=>unknown;__ssBossBar?:()=>unknown;__ssLore?:()=>unknown;__ssLorePreview?:(stage?:string|null)=>unknown;__ssRecap?:()=>unknown;__ssRecapPreview?:(outcome?:string|null)=>unknown};
+const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown;__ssAudioState?:()=>unknown;__ssAudioFocus?:(x?:number|null,z?:number|null)=>unknown;__ssObjectives?:()=>unknown;__ssJournal?:()=>unknown;__ssJournalPreview?:(stage?:string|null)=>unknown;__ssObjectivePreview?:(text?:string|null)=>unknown;__ssForceSiege?:(index?:number|null)=>unknown;__ssDifficulty?:()=>unknown;__ssBossBar?:()=>unknown;__ssBash?:()=>unknown;__ssBashSend?:()=>unknown;__ssAudioSting?:(mode?:string|null)=>unknown;__ssAudioScreamer?:()=>unknown;__ssLore?:()=>unknown;__ssLorePreview?:(stage?:string|null)=>unknown;__ssRecap?:()=>unknown;__ssRecapPreview?:(outcome?:string|null)=>unknown};
 qaHooks.__ssCharacterSelect=()=>({
  appearanceField:'appearance',
  landingSelectId:characterSelectors[0]?.id??null,
@@ -572,6 +608,8 @@ qaHooks.__ssAudioState=()=>{
   music:state.music,
   weatherBeds:state.weatherBeds,
   landmarkBeds:state.landmarkBeds,
+  siege:state.siege,
+  cues:state.cues,
   captionsEnabled,
   masterMuted:!soundEnabled(),
   focus:state.focus
@@ -665,6 +703,19 @@ qaHooks.__ssRecapPreview=(outcome?:string|null)=>{
  previewRunRecap(previewRecapOutcome);
  return qaHooks.__ssRecap?.();
 };
+/** Read-only shield-bash client state for QA (server-confirmed bashes, cooldown, HUD handles). */
+qaHooks.__ssBash=()=>{
+ const player=me();const capable=!!player&&!!game&&weaponStats(player.weapon).shield;
+ const serverCd=player?(player as {bashCd?:number}).bashCd??0:0;
+ const remaining=Math.max(bashCooldownRemaining(),serverCd*1000);
+ return {shieldCapable:capable,cooldownRemaining:Math.round(remaining),playerBashCd:player?(player as {bashCd?:number}).bashCd??null:null,lastBashAt:lastBashAt||null,lastBashEventAt:lastBashEventAt||null,sentCount:bashSentCount,lastSentAt:lastBashSentAt||null,serverBashes:game?(game.stats as {bashes?:number}).bashes??null:null,hintId:'bashHint',hintText:bashHint.hidden?null:bashHint.textContent,buttonId:'bashBtn',buttonText:bashButton.hidden?null:bashButton.textContent,buttonHidden:bashButton.hidden,eventName:'ss-bash'};
+};
+/** QA-only bash trigger (same path as the chord; used for deterministic HUD/rejection tests). */
+qaHooks.__ssBashSend=()=>sendBash();
+/** QA-only sting trigger (records the same cue fields as the recap moment; no gameplay effect). */
+qaHooks.__ssAudioSting=(mode?:string|null)=>{ambience.endingSting(mode==='defeat'?'defeat':'victory');return qaHooks.__ssAudioState?.();};
+/** QA-only screamer cue trigger (same synth/state as the server event; no gameplay effect). */
+qaHooks.__ssAudioScreamer=()=>{ambience.screamerShriek();return qaHooks.__ssAudioState?.();};
 
 // ---- Progressive world loading: show real asset counts, gate joining on the core set only ----
 const defaultConnectionText=$('connection').textContent;
@@ -712,7 +763,7 @@ async function connect(mode:'create'|'join'|'resume'){
   if(m.type==='welcome'){cmd('character:'+selectedCharacter);id=m.id;code=m.code;token=m.token;everJoined=true;attempts=0;seq=0;sessionStorage.setItem('ss-session',JSON.stringify({code,token}));$('landing').hidden=true;$('hud').hidden=false;$('roomCode').textContent=code;toast('Campaign started. Clear the Fallen Keep, then hold E / A at its banner.');}
   else if(m.type==='state'){if(!document.hidden){for(const cue of combatCues(game,m.game,id)){combatAudio.play(cue);if(cue.kind==='impact'||cue.kind==='hurt')ambience.duck(1);else if(cue.kind==='swing'||cue.kind==='block')ambience.duck(.55);if(cue.kind==='hurt'){const hudActor=m.game.actors.find((a:Actor)=>a.id===id);const weight=weaponCombatProfile(hudActor?.weapon).weight;rumble(clamp(.16+.24*weight,.2,.55),150);$('hud').classList.remove('hurt-flash');void $('hud').offsetWidth;$('hud').classList.add('hurt-flash');view.shake=Math.max(view.shake,.24);}else if(cue.kind==='block')rumble(.3,90);}for(const event of eventCues(game,m.game)){combatAudio.playEvent(event);if(event==='capture'){rumble(.22,170);const captured=m.game.castles.find((c:{id:string;name:string;friendly:boolean})=>c.friendly&&!game?.castles.find(o=>o.id===c.id)?.friendly);if(captured)showCaption('castle-captured',captured.name);}}
    if(game?.status==='playing'){const wasSiege=!!game.siege?.active,nowSiege=!!m.game.siege?.active;if(nowSiege&&!wasSiege){const target=m.game.castles.find((c:{id:string;name:string})=>c.id===m.game.siege?.castle);const bossName=(m.game.siege as {bossName?:string}|null)?.bossName;showCaption('siege-start',target?.name?`${target.name}${bossName?` · ${bossName} leads the wave`:''}`:bossName??undefined);}else if(!nowSiege&&wasSiege)showCaption('siege-end');}
-  }game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();stopRumble();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;$('restart').hidden=host!==id;updateRunRecap(m.game);result.showModal();}else if(game!.status==='playing'&&result.open){result.close();runRecap.hidden=true;previewRecapOutcome=null;lastEvent=0;cmd('character:'+selectedCharacter);}}
+  }game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);if(/screamer shrieks/i.test(ev.text))ambience.screamerShriek();if(ev.text==='Shield bash!')lastBashEventAt=performance.now();}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();stopRumble();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;document.getElementById('restart')!.hidden=host!==id;updateRunRecap(m.game);const endOutcome=game!.status==='victory'?'victory':game!.status==='defeat'?'defeat':null;if(endOutcome&&stungFor!==endOutcome){ambience.endingSting(endOutcome);stungFor=endOutcome;}result.showModal();}else if(game!.status==='playing'&&result.open){result.close();runRecap.hidden=true;previewRecapOutcome=null;stungFor=null;lastEvent=0;cmd('character:'+selectedCharacter);}}
   else if(m.type==='error'){if(!everJoined){sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;stopped=true;ws?.close();$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}else{toast(m.text);if(/expired|not found/.test(m.text)){stopped=true;sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;setTimeout(()=>location.reload(),2000);}}}
  };
  ws.onclose=e=>{release();if(stopped)return;if(e.code===4000||e.code===4001){stopped=true;sessionStorage.removeItem('ss-session');toast(e.reason);$('connection').textContent=e.reason;setTimeout(()=>location.reload(),2500);return;}if(everJoined&&attempts<8){toast('Connection lost. Reconnecting…');setTimeout(()=>connect('resume'),Math.min(8000,500*2**attempts++));}else{$('connection').textContent='Unable to connect. Try again shortly.';$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}};
@@ -842,6 +893,7 @@ $('playerName').textContent=p.name;$('hud').classList.toggle('low-health',p.hp>0
  }
  updateObjectiveHud(p);
  updateDifficultyUi();
+ updateBashHint();
  checkLoreUnlocks();
  if(journal.open)updateJournal();
 }
@@ -859,6 +911,7 @@ function frame(now:number){const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame
   }
  }else if(padConnected)rumblePad=pad as RumblePad;
  let strafe=touch.mx+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0),forward=touch.forward+(keys.has('KeyW')?1:0)-(keys.has('KeyS')?1:0),attack=mouse.attack||touch.attack,block=mouse.block||touch.block,interact=keys.has('KeyE')||touch.interact;
+ if(game){const bashPlayer=me();if(bashPlayer){const capable=weaponStats(bashPlayer.weapon).shield;if(bashChordReady({block,attack,previousAttack:attackWasDown,shieldCapable:capable,alive:bashPlayer.hp>0,stamina:bashPlayer.stamina??100,cooldownRemaining:bashCooldownRemaining()}))sendBash();attackWasDown=attack;}}
  if(pad){const d=readPad(pad,padPrev,deadzoneAmount);if(!game||guide.open||result.open||journal.open)menuGamepad(pad);else if(!document.hidden){strafe+=d.mx;forward+=d.forward;yaw+=d.lookX*dt*2.6*padSensitivity;pitch=clamp(pitch-d.lookY*dt*1.8*padSensitivity*(invert?-1:1),-1.05,1.05);attack ||=d.attack;block ||=d.block;interact ||=d.interact;if(pad.buttons.some(b=>b.pressed))combatAudio.unlock();if(d.toggle)cameraToggle();if(d.heal)cmd('heal');if(d.sweep)cmd('sweep');if(d.menu)openGuide();for(const action of d.commands)cmd(action);}padPrev=d.previous;}
  const p=me();if(game&&p){if(now-lastSend>=50){const inactive=guide.open||result.open||journal.open||document.hidden;send({type:'input',input:{mx:inactive?0:Math.cos(yaw)*strafe+Math.sin(yaw)*forward,mz:inactive?0:Math.sin(yaw)*strafe-Math.cos(yaw)*forward,yaw,attack:!inactive&&attack,block:!inactive&&block,interact:!inactive&&interact,seq:seq++}});lastSend=now;}if(now-lastHud>100){updateHud(p);lastHud=now;}}
 updateCaptions(now);pollCaptionWeather(dt);pollCaptionActors(p,dt);
