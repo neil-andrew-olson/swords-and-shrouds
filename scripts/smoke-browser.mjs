@@ -198,7 +198,8 @@ const WS_INSTRUMENT = `(()=>{
       siege:game.siege?{castle:game.siege.castle,starts:game.siege.starts,active:!!game.siege.active,boss:!!game.siege.boss,bossName:game.siege.bossName??null,bossHp:game.siege.bossHp??null,bossId:game.siege.bossId??null,index:game.siege.index??null,waveSize:game.siege.waveSize??null,bossKilled:!!game.siege.bossKilled}:null,
       nextSiege:game.nextSiege??null,
       stats:game.stats??null,
-      corrupted:((game.actors||[]).filter(a=>a&&a.kind==='corrupted').map(a=>({id:a.id,name:a.name,hp:a.hp,maxHp:a.maxHp})).slice(0,40))
+      corrupted:((game.actors||[]).filter(a=>a&&a.kind==='corrupted').map(a=>({id:a.id,name:a.name,hp:a.hp,maxHp:a.maxHp,caster:!!a.caster,charge:+(Number(a.casterCharge)||0).toFixed(3),cd:+(Number(a.casterCd)||0).toFixed(3),target:a.casterTarget??null,aim:a.casterAim??null,appearance:a.appearance??null})).slice(0,40)),
+      projectiles:((game.projectiles||[]).map(p=>({id:p.id,caster:p.caster,kind:p.kind,x:p.x,z:p.z,px:p.px,pz:p.pz,dx:p.dx,dz:p.dz,speed:p.speed,damage:p.damage,hit:p.hit??null,hitId:p.hitId??null,hitAt:p.hitAt??null})).slice(0,40))
     };
   }
   class QAWebSocket extends O {
