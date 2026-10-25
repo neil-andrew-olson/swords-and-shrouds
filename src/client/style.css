@@ -274,3 +274,22 @@ body.touch-device #perf{display:none}
  #bossSiegeBar{top:calc(34px + env(safe-area-inset-top));width:min(360px,44vw)}
  #bossSiegeName{font-size:13px}
 }
+/* =============================================================================================
+   Cycle 12 — chronicle entries + end-of-run recap (created by main.ts).
+   ============================================================================================= */
+.journal-lore{display:flex;flex-direction:column;gap:6px}
+.journal-lore-entry{display:flex;flex-direction:column;gap:2px;padding:7px 9px;border:1px solid #ffffff10;border-radius:5px;background:#ffffff05;font-size:12px;color:#cfc6ab}
+.journal-lore-entry strong{font-size:12px;color:#e9d6a8;letter-spacing:.3px}
+.journal-lore-entry span{color:#9ca9a4;line-height:1.45}
+.journal-lore-entry.locked{opacity:.74;border-style:dashed}
+.journal-lore-entry.locked strong{color:#8f9a91}
+#runRecap{margin-top:12px;padding-top:10px;border-top:1px solid #cba56833;max-height:min(46vh,360px);overflow-y:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+#runRecap[hidden]{display:none!important}
+#runRecapTitle{margin:0 0 8px;font-size:10px;letter-spacing:2px;color:var(--gold);text-transform:uppercase}
+.run-recap-rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 18px;font-size:12px}
+.run-recap-row{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dotted #ffffff14;padding:3px 0;color:#cfc6ab}
+.run-recap-row strong{color:#e9d6a8;font-weight:600}
+.run-recap-epilogue{margin:10px 0 0;font-size:12px;line-height:1.5;color:#b9c0b5;font-style:italic}
+#result{max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);overflow-y:auto;-webkit-overflow-scrolling:touch}
+@media(max-width:700px){#runRecap{max-height:38vh}.run-recap-rows{grid-template-columns:1fr}}
+@media(pointer:coarse) and (max-height:520px){#result{max-height:calc(100dvh - 10px)}#runRecap{max-height:30vh}}

@@ -154,6 +154,10 @@ export class WorldView{
   regionWeights:{march:number;moor:number;crown:number;corruption:number}={march:1,moor:0,crown:0,corruption:0};
   ambient!:THREE.AmbientLight;
   private exposureTarget=1.5;
+  // Cycle-12 campaign-ending mood: golden-dawn victory / crimson-ash defeat, applied on top of the
+  // existing regional grade (fog + exposure + saturation/tint, no new post chain).
+  private moodMode:'normal'|'victory'|'defeat'='normal';private moodOverride:'normal'|'victory'|'defeat'|null=null;
+  private moodMix=0;private moodSat=1;private moodExposure=0;private moodFogAdd=0;private readonly moodFogTint=new THREE.Color(0xffffff);private readonly moodTint=new THREE.Color(0xffffff);
   private lastSkyTint=new THREE.Color(0xffffff);private lastMoonTint=new THREE.Color(0xffffff);
   // ---- cycle-4 weather state (pooled particles, region phase machine) ----
   private weatherStates:{march:{phase:number;name:string;target:number;intensity:number;t:number;next:number};moor:{phase:number;name:string;target:number;intensity:number;t:number;next:number};crown:{phase:number;name:string;target:number;intensity:number;t:number;next:number}}={march:{phase:0,name:'clear',target:.12,intensity:.12,t:0,next:215},moor:{phase:0,name:'calm',target:.2,intensity:.2,t:0,next:240},crown:{phase:0,name:'clear',target:.18,intensity:.18,t:0,next:225}};
@@ -710,7 +714,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    return {calls:info.render.calls,triangles:info.render.triangles,software:this.softwareRenderer,weather:{region:this.weatherRegion,phase:this.weatherStates[this.weatherRegion].name,intensity:+this.weatherStates[this.weatherRegion].intensity.toFixed(3)},contentFocus:this.qaView?{name:this.qaView.name,x:this.qaView.x,z:this.qaView.z}:null,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssObjectives?:()=>unknown;__ssBossVisual?:()=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssObjectives?:()=>unknown;__ssBossVisual?:()=>unknown;__ssMood?:()=>unknown;__ssSetMood?:(mode?:'normal'|'victory'|'defeat'|null)=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
    win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
@@ -729,6 +733,8 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    win.__ssWeaponReadiness=()=>view.weaponReadiness();
    win.__ssObjectives=()=>view.objectivesInfo();
    win.__ssBossVisual=()=>view.bossVisual();
+   win.__ssMood=()=>view.moodInfo();
+   win.__ssSetMood=(mode?:'normal'|'victory'|'defeat'|null)=>view.setMood(mode===undefined?null:mode);
    win.__ssCharacterFx=()=>({quality:view.quality,clothWind:view.characterClothWind});
    win.__ssEnemyVariants=()=>view.enemyVariants();
    win.__ssClearWeather=()=>view.clearWeather();
@@ -976,6 +982,39 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     (this.bossAura.material as THREE.MeshBasicMaterial).opacity=op;
    }
    this.bossState.active=true;this.bossState.actorId=id;this.bossState.scale=1.15;this.bossState.auraVisible=!!this.bossAura?.visible;this.bossState.tint='#8f2a38';this.bossState.reducedMotion=reduced;
+  }
+  /** Live reduced-motion state: QA override > stored preference > media query. */
+  private reducedActive(){let media=false;try{media=matchMedia('(prefers-reduced-motion: reduce)').matches;}catch{}return this.reducedMotionOverride??(this.reducedMotion||media);}
+  /** Campaign-ending mood targets + smooth (non-oscillating) blend; reduced motion snaps. */
+  private updateMood(g:Game|undefined,dt:number){
+   const override=this.moodOverride;
+   const mode:'normal'|'victory'|'defeat'=override??(g?.status==='victory'?'victory':g?.status==='defeat'?'defeat':'normal');
+   this.moodMode=mode;
+   let sat=1,exposure=0,fogAdd=0,fogTint=0xffffff,tintR=1,tintG=1,tintB=1,mixTarget=0;
+   if(mode==='victory'){
+    // Golden dawn: gentle desaturation, warm tint, slightly clearer air and lifted exposure.
+    sat=.9;exposure=.07;fogAdd=-0.0006;fogTint=0xd9c089;tintR=1.06;tintG=1.0;tintB=.86;mixTarget=1;
+   }else if(mode==='defeat'){
+    // Cold crimson/ash: heavier fog, cooler darker exposure, muted crimson tint.
+    sat=.8;exposure=-.14;fogAdd=.011;fogTint=0x5a2a32;tintR=1.08;tintG=.86;tintB=.9;mixTarget=1;
+   }
+   const reduced=this.reducedMotionOverride??this.reducedMotion;
+   const k=reduced?1:1-Math.exp(-Math.max(0,dt)*(mixTarget?1.1:1.6));
+   this.moodMix+=(mixTarget-this.moodMix)*k;
+   this.moodSat+=(sat-this.moodSat)*k;
+   this.moodExposure+=(exposure-this.moodExposure)*k;
+   this.moodFogAdd+=(fogAdd-this.moodFogAdd)*k;
+   this.moodFogTint.setHex(fogTint);
+   this.moodTint.setRGB(tintR,tintG,tintB);
+  }
+  /** window.__ssSetMood(mode|null): QA-only override for victory/defeat world-mood captures. */
+  setMood(mode:'normal'|'victory'|'defeat'|null){
+   this.moodOverride=(mode==='victory'||mode==='defeat'||mode==='normal')?mode:null;
+   return {ok:true,override:this.moodOverride,mood:this.moodInfo()};
+  }
+  /** window.__ssMood(): current campaign-ending world mood state (read-only). */
+  moodInfo(){
+   return {mode:this.moodMode,override:this.moodOverride,mix:+this.moodMix.toFixed(3),tint:'#'+this.moodTint.getHexString(),fog:{color:'#'+this.fog.color.getHexString(),density:+this.fog.density.toFixed(5)},saturation:+this.lastSaturation.toFixed(3),exposureBias:+(this.moodExposure*this.moodMix).toFixed(3),fogAdd:+(this.moodFogAdd*this.moodMix).toFixed(5),reducedMotion:this.reducedActive()};
   }
   /** window.__ssBossVisual(): QA-readable boss presentation state. */
   bossVisual(){const a=this.bossState.actorId?this.lastGame?.actors.find(x=>x.id===this.bossState.actorId):undefined;return {...this.bossState,x:a?.x??null,z:a?.z??null,hp:a?.hp??null,maxHp:a?.maxHp??null,bossHp:this.lastGame?.siege?.bossHp??null,bossName:this.lastGame?.siege?.bossName??null};}
@@ -1236,7 +1275,8 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.fogTarget.lerp(this.tmpColor.setHex(0x342d42),moor);
    this.fogTarget.lerp(this.tmpColor.setHex(0x6f93b0),crown);
    this.fogTarget.lerp(this.tmpColor.setHex(0x3a1a2e),corruption*0.45);
-   const targetDensity=0.0122*march+0.0208*moor+0.0172*crown+corruption*0.003+this.weatherFogAdd;
+   if(this.moodMix>0.001)this.fogTarget.lerp(this.moodFogTint,this.moodMix*0.55);
+   const targetDensity=0.0122*march+0.0208*moor+0.0172*crown+corruption*0.003+this.weatherFogAdd+this.moodFogAdd*this.moodMix;
    const colorBlend=1-Math.exp(-Math.max(0,dt)*1.6);
    this.fogCurrent.lerp(this.fogTarget,colorBlend);this.fog.color.copy(this.fogCurrent);
    this.fog.density+=(targetDensity-this.fog.density)*(1-Math.exp(-Math.max(0,dt)*1.1));
@@ -1257,18 +1297,18 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    // Keep Night night at every tier: low tier loses bloom/shadow contrast on software renderers,
    // so pull exposure down slightly instead of letting the whole frame read daylight-flat.
    const tierExposureBias=this.quality==='low'?-0.09:this.quality==='medium'?-0.03:0;
-   this.exposureTarget=1.55*march+1.37*moor+1.62*crown+tierExposureBias;
+   this.exposureTarget=1.55*march+1.37*moor+1.62*crown+tierExposureBias+this.moodExposure*this.moodMix;
    this.renderer.toneMappingExposure+=(this.exposureTarget-this.renderer.toneMappingExposure)*(1-Math.exp(-Math.max(0,dt)*1.0));
    if(this.weatherFlash>0)this.renderer.toneMappingExposure+=this.weatherFlash*.16;
    const grade=1-Math.exp(-Math.max(0,dt)*1.2);
    this.tmpColor2.setRGB(1.03,1.05,1.0);this.tmpColor3.setRGB(0.94,0.9,1.05);
    const tintR=1.03*march+0.94*moor+0.97*crown, tintG=1.05*march+0.9*moor+1.0*crown, tintB=1.0*march+1.05*moor+1.08*crown;
    this.tmpColor.setRGB(tintR,tintG,tintB);
-   this.lastSaturation=1.05*march+0.82*moor+1.12*crown;
+   this.lastSaturation=(1.05*march+0.82*moor+1.12*crown)*(1+(this.moodSat-1)*this.moodMix);
    this.lastSkyTint.copy(this.tmpColor2);
    this.lastMoonTint.copy(this.moon.color);this.lastAmbientTint.copy(this.ambient.color);
    this.tmpV2.set(this.tmpColor.r,this.tmpColor.g,this.tmpColor.b);
-   this.postfx?.setGrade(1.05*march+0.82*moor+1.12*crown, this.tmpV2);
+   this.postfx?.setGrade((1.05*march+0.82*moor+1.12*crown)*(1+(this.moodSat-1)*this.moodMix), this.tmpV2.set(this.tmpV2.x*(1+(this.moodTint.r-1)*this.moodMix),this.tmpV2.y*(1+(this.moodTint.g-1)*this.moodMix),this.tmpV2.z*(1+(this.moodTint.b-1)*this.moodMix)));
    // Sky tint: dome/stars/moon disc follow the region palette (kept close to white so stars stay).
    const parts=this.sky.userData.parts as {dome?:THREE.Mesh;halo?:THREE.Mesh;outerHalo?:THREE.Mesh;stars?:THREE.Points;moonDisc?:THREE.Mesh}|undefined;
    if(parts){
@@ -1500,7 +1540,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.applyCombatCamera(dt);
    if(this.qaBody&&this.qaBodyActor){this.camera.getWorldQuaternion(this.rainQuat);this.tmpV2.set(0,0,-1).applyQuaternion(this.rainQuat);this.tmpV2.y=0;const flen=Math.hypot(this.tmpV2.x,this.tmpV2.z)||1;this.tmpV2.x/=flen;this.tmpV2.z/=flen;this.qaBody.position.set(this.camera.position.x+this.tmpV2.x*this.qaBodyDistance,0,this.camera.position.z+this.tmpV2.z*this.qaBodyDistance);this.qaBody.visible=true;this.qaBody.rotation.y=Math.atan2(this.camera.position.x-this.qaBody.position.x,this.camera.position.z-this.qaBody.position.z);this.qaBody.updateMatrixWorld(true);this.qaBodyRig?.update(this.qaBodyActor,false,dt*this.visualScale);}
    if(g&&!this.firstGameFrameMarked){this.firstGameFrameMarked=true;try{performance.mark('ss:firstGameFrame');}catch{}}
-   if(g)this.updateBossPresentation(g,time);
+   if(g)this.updateMood(g,dt);this.updateBossPresentation(g,time);
    if(g)this.updateObjectiveMarkers(g,me);
    if(this.postfx)this.postfx.render();else this.renderer.render(this.scene,this.camera);
   }

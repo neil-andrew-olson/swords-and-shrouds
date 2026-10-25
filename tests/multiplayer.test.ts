@@ -23,6 +23,17 @@ const bad=await client(url);clients.push(bad);bad.send({type:'join',code:'XXXXXX
  assert.equal(sb.boss,true);assert.equal(sb.bossName,'Shroud Warden');assert.equal(sa.bossId,sb.bossId,'same siege boss id in co-op');assert.ok(sa.bossId,'boss id populated');
  const bossA=latest(resumed).game.actors.find((x:any)=>x.boss),bossB=latest(b).game.actors.find((x:any)=>x.boss);
  assert.ok(bossA&&bossB,'boss actor present in both co-op snapshots');assert.equal(bossA.id,bossB.id);assert.equal(bossA.name,'Shroud Warden');assert.equal(bossA.hp,bossB.hp);
+ // Cycle-12 Shroud Screamer co-op sync: a forced index-3 siege spawns one screamer seen identically by
+ // every client, and the default/invalid-difficulty rooms still expose an explicit difficulty snapshot.
+ roomGame.siege=null;roomGame.actors=roomGame.actors.filter((a:any)=>a.kind==='player');
+ process.env.SS_QA='1';b.send({type:'qa-siege',index:3});await wait(400);process.env.SS_QA='';delete process.env.SS_QA;
+ const s3a=latest(resumed).game,s3b=latest(b).game;
+ assert.equal(s3a.difficulty,'warden','co-op snapshot keeps the host difficulty');assert.equal(s3b.difficulty,'warden');
+ assert.equal(s3a.siege.index,3);assert.equal(s3a.siege.boss,false);
+ const scrA=s3a.actors.find((a:any)=>a.screamer),scrB=s3b.actors.find((a:any)=>a.screamer);
+ assert.ok(scrA&&scrB,'screamer actor present in both co-op snapshots');assert.equal(scrA.id,scrB.id);assert.equal(scrA.name,'Shroud Screamer');assert.equal(scrA.kind,'corrupted');assert.equal(scrA.appearance,'skeleton-armoured');assert.equal(scrA.hp,scrB.hp);assert.equal(s3a.stats.screamers,1);assert.equal(s3b.stats.screamers,1);
+ const otherState=other.messages.filter((m:any)=>m.type==='state').at(-1);
+ assert.equal(otherState.game.difficulty,'knight','default/invalid-difficulty room snapshot is explicit knight');
  }finally{clients.forEach(c=>c.ws.terminate());await s.close();}
 });
 

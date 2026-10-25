@@ -30,6 +30,6 @@ export function characterAssetFallback(a:Actor):string|undefined {
 export function characterAsset(a:Actor):string {
   if(a.kind==='player') return a.appearance && isPlayerCharacter(a.appearance) ? a.appearance : 'templar';
   if(a.kind==='soldier') return a.role==='defender'?'templar':a.role==='flanker'?'ranger':a.role==='heavy'?'berserker':'ally';
-  if(a.kind==='corrupted') return 'fallen';
+  if(a.kind==='corrupted') return a.appearance==='skeleton-armoured'?'skeleton-armoured':'fallen';
   return undeadVariant(a);
 }

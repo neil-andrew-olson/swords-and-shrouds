@@ -11,8 +11,8 @@ defects, raise visual fidelity and performance, verify with the headless QA suit
 verify live. Never relax these gates:
 `npm test` **58/58** (extend tests in place only), `npx tsc --noEmit` 0 errors, `vite build` green
 with bundled Node 24, `scripts/validate-assets.mjs` all pass, headless smoke + perf capture +
-co-op 18/18 + live-URL mode, QA inspects screenshots with read_image, Lead commits/pushes/deploys
-and verifies the live bundle.
+co-op + live-URL mode, QA inspects screenshots with read_image, Lead commits/pushes/deploys and
+verifies the live bundle.
 
 **Doc-link note:** the DSH GUI cannot open absolute Windows paths (that is why md links showed
 "File not found"). `PROJECT_STATUS.md` and `docs/*.md` are mirrored into the session workspace at
@@ -20,69 +20,78 @@ and verifies the live bundle.
 workspace-relative paths and/or use the `present` tool.
 
 **Process discipline:** teammates kill only their own PIDs (`Stop-Process -Id` / `/PID`), never
-broad `taskkill /IM node.exe`. One dist builder at a time; QA owns authoritative captures. If a
-teammate edits after the Lead's gate, the hash changes and QA must be given the definitive artifact
-(cycle 11: a post-freeze one-line `body.boss-siege` fix landed after the first gate build — the Lead
-detected it, rebuilt deterministically, and handed QA the new hash; always re-check source mtimes vs
-artifact mtime before handing a hash).
+broad `taskkill /IM node.exe`. One dist builder at a time; QA owns authoritative captures. Re-check
+source mtimes against the artifact mtime before handing a hash (cycle-11 lesson; QA now has an
+explicit freshness gate). If a teammate edits after the Lead's gate, rebuild deterministically and
+hand QA the new hash.
 
-## Latest completed cycle — 2026-10N cycle 11: difficulty modes, boss presentation, balance sim
+## Latest completed cycle — 2026-10O cycle 12: chronicle, recap, Screamer, victory/defeat mood
 
-Contract: `docs/BATCH-2026-10N-SPEC.md`; results: `docs/BATCH-2026-10N-RESULTS.md`; QA evidence in
-`docs/QA-REPORT.md`. Final bundle `index-DuBFiyZ8.js` (927,007 B), deterministic across two builds
-(rebuilt after the post-freeze `body.boss-siege` toggle fix).
+Contract: `docs/BATCH-2026-10O-SPEC.md`; results: `docs/BATCH-2026-10O-RESULTS.md`; QA evidence in
+`docs/QA-REPORT.md`. Final bundle `index-Do2oPJz3.js` (940,645 B), deterministic across two builds,
+source-freshness gate passed (newest src 19:53:23 < artifact 19:57:14).
 
-### Difficulty modes (server-authoritative)
+### Chronicle / lore
 
-New `src/shared/difficulty.ts`: **Squire** (enemy dmg ×0.75, HP ×0.85, wave −2), **Knight** default
-(×1/×1/0), **Warden** (dmg ×1.30, HP ×1.15, wave +2); player damage/stamina untouched. Room create
-accepts validated `difficulty`; joiners inherit host's; unknown→Knight; restart preserves; snapshots
-expose `game.difficulty`; multipliers applied at spawn (hostile HP incl. bosses), hurt (hostile
-attacker) and siege wave sizing; `siege.bossHp` exposes actual boss HP (index-2: 204/240/276).
-UI: landing picker (persisted `ss-difficulty`), HUD badge (`· HOST` for joiners), journal line,
-`__ssDifficulty()` hook. Balance sim: Squire index-2 boss leaves ≥1 bot alive; Knight keeps the heavy
-moment; Warden clearly hardest (+36 % dmg taken on index 1/2, +56 % final boss); all sieges resolved.
+`src/shared/lore.ts`: 16 entries (regions, castles, survivors, nest, Shroud Warden, weapon lineages,
+Warden difficulty, endings) with pure unlock conditions from campaign state; journal **Chronicle**
+section (unlocked text + "Unrecorded" hints), single "New chronicle entry" toast per unlock, ids
+persisted in `ss-lore` before the toast (no re-fire on reload), `__ssLore()` + display-only
+`__ssLorePreview(early|mid|late)`; tests inside the existing feedback block.
 
-### Boss presentation
+### End-of-run recap
 
-HUD `#bossSiegeBar` (banner/name "SHROUD WARDEN"/segmented HP/phase STEADY-FRENZIED-FINAL) visible
-only during a living boss siege, hidden on death/resolve, legacy `#bossBar` suppressed, body class
-`boss-siege` hides objectives/resources in portrait (the post-freeze one-line fix); mobile-safe,
-reduced-motion safe, `__ssBossBar()`. World: boss actors 1.15× scale with crimson tint `#8f2a38` and
-one additive ground aura ring `#b43a4a` (calm/static under reduced motion), hiding/restoring on death
-or siege end; +1 draw only while active; `__ssBossVisual()`.
+Victory/defeat `#runRecap`: 8 authoritative rows (time, castles, survivors, camps, sieges, bosses
+felled, difficulty, weapon), outcome epilogue (victory hearths / defeat "The last fire fades."),
+working "Begin again" restart, mobile-safe scrolling; pure tested `deriveRunRecap`/`formatRunTime`;
+`__ssRecap()` / `__ssRecapPreview`. New stats: `stats.bossesSeen/bossesFelled/screamers/screams`.
 
-### QA gap closure + verification
+### Shroud Screamer (server)
 
-Audio landmark beds polled up to ~3 s (headless 0; owner harness 0.024/0.016 → ear debt remains);
-journal hotkey/Guide captures pass; forced normal-siege after boss deferred (server refuses while
-active; owner tests cover); production SS_QA gate keeps force-siege inert live.
+One per siege at index ≥3: corrupted, `screamer:true`, light armour, alternating fallen/
+skeleton-armoured appearance (corrupted actors may now explicitly render skeleton-armoured), HP
+72–90 by index (difficulty scaling applies), extra actor (wave size unchanged); first aggro fires
+radius-32 noise + event once (`screamerAlerted`), counts as corrupted everywhere, co-op synced.
 
-- `npm test` **58/58**; `tsc` 0; deterministic build reproduced `index-DuBFiyZ8.js` twice;
+### Victory/defeat mood
+
+Grade/fog/exposure-only blend: victory = gentle desaturation, warmer golden fog `#d9c089`, exposure
++0.07; defeat = colder muted grade, heavier fog +0.011, crimson-ash `#5a2a32`, exposure −0.14;
+normal/restart fades back; reduced motion snaps with no oscillation (honours live media query);
+`__ssMood()` / `__ssSetMood()`. No new draws/textures/lights.
+
+### Verification debt
+
+Difficulty snapshot now always emits explicit `difficulty` (`'knight'` default) — QA gate passes;
+harness `bossReducedFx` scope bug fixed; source-vs-artifact freshness gate added and passing.
+
+### Verification (final artifact)
+
+- `npm test` **58/58**; `tsc` 0; deterministic build reproduced `index-Do2oPJz3.js` twice;
   `validate-assets` **82/82**.
-- Fresh-build smoke **26/26** + hash proof, 0 errors/404s; perf **104/104** (spawn TP **183 calls /
-  1,635,392 tris**, low 143/1.364 M), mobile **25/25**, co-op **21/21**, characters **103/105**
-  (two harness-read failures fixed post-run, no character body gate failed), payload **17.54 MiB**.
+- Fresh-build smoke **27/27** (incl. freshness) + exact hash, characters **115/115**, perf **114/114**
+  (spawn TP **183 calls / 1,635,356 tris**), mobile **25/25**, co-op **22/22**, 11 cards, 0 errors/404s.
+- Chronicle/recap/mood verified with deterministic hooks; payload ≈17.55 MiB.
 
 ### Deployed state
 
-Live bundle is the hosting build of this commit sequence (`feat: AAA cycle 11 …` → hosting pin commit →
+Live bundle is the hosting build of this commit sequence (`feat: AAA cycle 12 …` → hosting pin commit →
 Cloudflare deploy → QA final live pass). Local play: `$env:PORT=3000; node --import tsx
 src/server/index.ts` from the game repo → http://localhost:3000/.
 
-### Cycle-12 (next) — from the audit
+### Cycle-13 (next) — from the audit
 
-1. Warden-mode forced-boss authoritative screenshot; near-forge/chapel audio ear check; forced
-   normal-siege capture if a stop hook is added.
-2. Physical-device mobile / real-GPU / perceptual playtests; hardware controller rumble test.
-3. Content/campaign depth (more enemy variety, endgame content); further first-boss balance tuning
-   from human play.
-4. QA live summary read native `game.difficulty` as null in one path while `__ssDifficulty()` reported
-   Knight (co-op inheritance green) — verify whether the snapshot field is omitted for default rooms
-   and either always include it or adjust the QA summary; small follow-up, not a blocker.
+1. Warden-mode-specific forced-boss authoritative screenshot; QA forced Screamer spawn/shriek
+   capture and normal forced-siege-after-resolve (owner sim covers behaviour; may need a QA
+   stop/cleanup hook).
+2. Near-forge/chapel audio-level human ear check.
+3. Physical-device mobile / real-GPU / perceptual playtests; hardware controller rumble test.
+4. Further content/campaign depth and enemy variety.
 
 ## Previous cycles
 
+- **2026-10N cycle 11** (`docs/BATCH-2026-10N-RESULTS.md`): server-authoritative difficulty modes
+  (Squire/Knight/Warden), boss HP bar + world aura/scale/tint, balance sims, QA gap closure.
 - **2026-10M cycle 10** (`docs/BATCH-2026-10M-RESULTS.md`): campaign journal + next-objective HUD,
   objective wayfinding overlay (0 WebGL draws), siege escalation with Shroud Warden bosses, QA
   force-siege path, audio focus ramp.

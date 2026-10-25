@@ -2292,3 +2292,26 @@ Deployed after the Lead accepted the cycle-11 pass. Live runs PASS: deployed **2
 - **Content/audio/mobile live:** content-abbey contentFocus {content-abbey,40,-40} 1465 colours; plague decals 6.60/25.96%; 7/7 atmosphere; audio clear->downpour intensity .412/rain .023; live mobile touch HUD safe, 3-pointer multi-touch, no zoom, journal portrait 352x747 (971>684) and landscape 776x300 (702>230) scrollable, profile low/maxDpr 1.25, 127 calls/1.31 M tris.
 
 **Cycle-11 live deployment verified green for the shipped difficulty UI, journal/objectives, wayfinding, content and mobile surfaces; boss bar/aura and Warden-specific boss HP remain locally certified/deferred by the production SS_QA gate.** task-97 complete. Cycle-12 notes: Warden forced-boss authoritative shot, audio landmark ear check, physical-device/real-GPU/perceptual, hardware rumble, content depth/endgame.
+
+
+---
+
+## Iteration cycle 2026-10O (AAA loop, cycle 12) - chronicle/lore, recap/epilogue, Shroud Screamer, mood
+
+### Authoritative capture + regression - final build index-Do2oPJz3.js (940,645 B): PASS
+
+Fresh bundled-Node-24 build reproduced index-Do2oPJz3.js exactly and the new artifact freshness gate passed (no src file newer than dist; newest scene.ts 19:53:23 < artifact 19:57:14). Fresh smoke 27/27 (incl. freshness), night TP 53.7. Authoritative: characters 115/115, perf 104/104, mobile 25/25, co-op 22/22, pre-deploy live baseline 26/26 (deployed cycle-11; new-feature hooks deferred on old build). 0 page/console/log errors, 0 404s, 11 cards.
+
+1) CHRONICLE / LORE - PASS. __ssLore() returns 16 entries with unlocked/locked lists + storageKey ss-lore; journal #journalChronicle/#journalLoreList renders unlocked entries and Unrecorded hints; __ssLorePreview('early'|'mid'|'late') grows DOM unlocked rows (strictly increasing across stages), fires one preview toast per stage (New chronicle entry: ...) and re-applying the same stage leaves the unlocked set unchanged (no spam/re-fire); persistence key ss-lore and stored ids exposed (real unlocks save before toast; previews display-only as documented). Screenshot journal-chronicle.png.
+
+2) RECAP / EPILOGUE - PASS. __ssRecapPreview('victory'|'defeat') opens #result with #runRecap: 8 rows (Time, Castles, Survivors, Camps, Sieges survived, Bosses felled, Difficulty, Weapon), title/epilogue per outcome (The kingdom lives. / The last fire fades.), restart #restart (Begin again) present; values derive from state helpers (victory 10:00, 0/9 castles, 0/9 survivors, 0/9 camps, 0 sieges, 2 bosses, Knight, Longsword); defeat recap rows/epilogue captured; screenshots recap-victory.png, recap-defeat.png, recap-victory-reduced.png.
+
+3) SCREAMER - OWNER-SIM EVIDENCE (QA forced-spawn not run in the green pass). Contract/evidence from weapons-armory: one Shroud Screamer per siege at index>=3 (kind corrupted, screamer:true, appearance fallen/skeleton-armoured, light armor, HP 72-90 before mode multiplier), shrieks exactly once on first aggro within 30 m -> noise radius 32 + event A Shroud Screamer shrieks - the dead answer its call! (toast) + stats.screamers/screams; spawn table index1/2 = 0, index3+ = 1; co-op/multiplayer tests assert sync/no dupe; normal undead unchanged. QA did not force index3 in this pass (documented deferral; local SS_QA path available).
+
+4) DEBT CLOSURE - PARTIAL. game.difficulty native snapshot now non-null (knight default; warden rooms warden) and passes the new gate; Warden forced-boss early screenshot harness (siege-boss-early.png, 2-3 s capture) is ready but this pass ran default Knight, so the Warden-specific shot remains deferred (owner sim + co-op Warden state cover it). Audio landmark beds polled ~3 s and recorded (levels 0 headless; owner .024/.016; ear debt). Normal forced-siege after resolve remains deferred (no stop hook; owner tests).
+
+5) MOOD - PASS. __ssMood() normal {mode:normal,mix:0,tint #ffffff,fog green-ish ~.013,saturation ~1.05}; __ssSetMood(victory) and (defeat) produce distinct mood states/screens (mood-victory.png, mood-defeat.png); reduced motion path verified (__ssSetReducedMotion true; scene/combatFx reduced flag; snap/no oscillation); reset __ssSetMood(normal) restores; no extra draws.
+
+6) REGRESSION - PASS. Perf: spawn TP 183 calls / 1,635,356 tris (<290/<2.15M), geoms 167, textures 207, programs 102; payload 18,402,687 B = 17.55 MiB; night TP 51.x; 7/7 atmosphere + 14 optional views incl. content-abbey; plague decals, regions, wind, weather/snow/fog/low-tier/crown green; hit-hold/11 weapons/spear/captions/deadzone/mobile touch all green; HUD click->HUD ~157 ms / join ~3.7 s; co-op 22/22 (difficulty inheritance + read-only joiner); live baseline 26/26.
+
+Cycle-12 verdict: PASS on chronicle/lore, recap/epilogue, mood, difficulty snapshot and regressions; deferred/debt: Shroud Screamer QA forced-spawn (owner sim evidence), Warden forced-boss authoritative shot, normal forced-siege no-boss, audio landmark ear check. After deploy: final live pass + task-102 complete.

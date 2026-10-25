@@ -5,7 +5,8 @@ import {Ambience} from './ambience';
 import {WEAPON_IDS,WEAPONS,weaponStats} from '../shared/weapons';
 import {WorldView} from './scene';
 import {weaponCombatProfile} from './equipment';
-import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue,touchStickVector,touchSensitivityValue,deriveObjectiveLine,deriveJournalSummary,type JournalInput,type JournalSummary,type ObjectiveLine,type ObjectivePoint,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,type DifficultyId,isDifficultyId,difficultyId,difficultyChoice,bossBarState,type BossBarModel} from './controller';
+import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue,touchStickVector,touchSensitivityValue,deriveObjectiveLine,deriveJournalSummary,type JournalInput,type JournalSummary,type ObjectiveLine,type ObjectivePoint,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,type DifficultyId,isDifficultyId,difficultyId,difficultyChoice,bossBarState,type BossBarModel,deriveRunRecap,type RunRecap} from './controller';
+import {LORE_ENTRIES,LORE_STORAGE_KEY,loreEntryViews,unlockedLoreIds,newlyUnlockedLore,formatLoreToast,type LoreEntry,type LoreState} from '../shared/lore';
 import {dist,clamp,BOUNDS,REGIONS,CASTLES,CAMPS,NEST} from '../shared/world';
 import type {Game,Actor} from '../shared/types';
 type PerfSnapshot={fps?:number;frameMs?:number;calls?:number;triangles?:number;points?:number;geometries?:number;textures?:number;programs?:number;quality?:string;tier?:string};
@@ -53,6 +54,7 @@ journal.innerHTML=`<div class="journal-head"><div><span class="eyebrow">CAMPAIGN
  <section class="journal-section" id="journalSieges"><h3>Sieges</h3><p id="journalSiegesLine"></p></section>
  <section class="journal-section" id="journalWeapon"><h3>Your weapon</h3><p id="journalWeaponLine"></p></section>
  <section class="journal-section" id="journalControls"><h3>Controls</h3><div id="journalControlsLine" class="journal-controls"></div></section>
+ <section class="journal-section" id="journalChronicle"><h3>Chronicle</h3><div id="journalLoreList" class="journal-lore"></div></section>
  <section class="journal-section" id="journalTips"><h3>Field notes</h3><ul id="journalTipsList"></ul></section>
 </div>`;
 document.body.append(journal);
@@ -102,6 +104,81 @@ bossSiegeBar.setAttribute('aria-live','polite');
 bossSiegeBar.innerHTML='<div id="bossSiegeBanner">BOSS SIEGE · <span id="bossSiegeCastle"></span></div><div id="bossSiegeName">SHROUD WARDEN</div><div id="bossSiegeTrack"><div id="bossSiegeFill"></div></div><div id="bossSiegeMeta"><span id="bossSiegeHp"></span><span id="bossSiegePhase">STEADY</span></div>';
 $('hud').append(bossSiegeBar);
 const bossSiegeElements={bar:bossSiegeBar,castle:$('bossSiegeCastle'),name:$('bossSiegeName'),fill:$('bossSiegeFill'),hp:$('bossSiegeHp'),phase:$('bossSiegePhase')};
+
+// ---- Chronicle/lore persistence + end-of-run recap DOM ----
+function loadLoreIds():Set<string>{
+ try{const raw=localStorage.getItem(LORE_STORAGE_KEY);const parsed=raw?JSON.parse(raw):[];return new Set(Array.isArray(parsed)?parsed.filter((x):x is string=>typeof x==='string'):[]);}catch{return new Set();}
+}
+const knownLoreIds:Set<string>=loadLoreIds();
+let previewLoreStage:'early'|'mid'|'late'|null=null;
+let lastRunRecap:RunRecap|null=null;
+let previewRecapOutcome:'victory'|'defeat'|null=null;
+function saveLoreIds(){try{localStorage.setItem(LORE_STORAGE_KEY,JSON.stringify([...knownLoreIds]));}catch{}}
+function loreState():LoreState|null{
+ if(!game)return null;
+ const stats=game.stats as {bossesFelled?:number;bossesSeen?:number};
+ const castlesHeld=game.castles.filter(c=>c.friendly).length;
+ const survivorsRescued=game.camps.filter(c=>c.rescued).length;
+ const allCastles=castlesHeld===game.castles.length,allSurvivors=survivorsRescued===game.camps.length;
+ const bossesFelled=stats.bossesFelled??(game.siege?.bossKilled?1:0);
+ return {castlesHeld,castlesTotal:game.castles.length,survivorsRescued,survivorsTotal:game.camps.length,campsRescued:survivorsRescued,campsTotal:game.camps.length,siegesSurvived:game.stats.sieges,nestSealed:allCastles&&allSurvivors,nestVulnerable:allCastles&&allSurvivors&&game.nest.hp>0,bossSeen:!!(game.siege?.boss)||(stats.bossesSeen??0)>0,bossKilled:bossesFelled>0,weaponsRecovered:game.armory.length,difficulty:difficultyId(game.difficulty),victory:game.status==='victory',defeat:game.status==='defeat'};
+}
+function checkLoreUnlocks(){
+ const state=loreState();if(!state)return;
+ const fresh=newlyUnlockedLore(knownLoreIds,state);
+ if(!fresh.length)return;
+ for(const entry of fresh)knownLoreIds.add(entry.id);
+ saveLoreIds();
+ const text=formatLoreToast(fresh);
+ if(text)toast(text);
+}
+function renderLore(state:LoreState|null){
+ const list=$('journalLoreList');if(!list)return;
+ const previewIds=previewLoreStage?({
+  early:['region-march','castle-keep','survivors-mill'],
+  mid:['region-march','region-moor','castle-keep','castle-border','survivors-mill','warden-seen','weapon-lineage'],
+  late:LORE_ENTRIES.map(entry=>entry.id)
+ }[previewLoreStage]):null;
+ const views=loreEntryViews(state??{castlesHeld:0,castlesTotal:9,survivorsRescued:0,survivorsTotal:9,campsRescued:0,campsTotal:9,siegesSurvived:0,nestSealed:false,nestVulnerable:false,bossSeen:false,bossKilled:false,weaponsRecovered:1,difficulty:'knight',victory:false,defeat:false},knownLoreIds);
+ const unlocked=previewIds?new Set(previewIds):new Set([...knownLoreIds,...(state?unlockedLoreIds(state):[])]);
+ list.replaceChildren(...views.map(view=>{
+  const isUnlocked=unlocked.has(view.id);
+  const row=document.createElement('div');row.className='journal-lore-entry'+(isUnlocked?' unlocked':' locked');
+  const title=document.createElement('strong');title.textContent=isUnlocked?view.title:'Unrecorded — '+view.title;
+  const detail=document.createElement('span');detail.textContent=isUnlocked?view.text:'Hint: '+view.hint;
+  row.append(title,detail);return row;
+ }));
+}
+const runRecap=document.createElement('div');
+runRecap.id='runRecap';runRecap.hidden=true;
+runRecap.innerHTML='<h3 id="runRecapTitle">RUN RECAP</h3><div id="runRecapRows" class="run-recap-rows"></div><p id="runRecapEpilogue" class="run-recap-epilogue"></p>';
+$('stats')?.after(runRecap);
+function updateRunRecap(source:typeof game){
+ if(!source)return null;
+ const player=source.actors.find(a=>a.id===id);
+ const stats=source.stats as {bossesFelled?:number};
+ const castlesHeld=source.castles.filter(c=>c.friendly).length;
+ const survivorsRescued=source.camps.filter(c=>c.rescued).length;
+ const recap=deriveRunRecap({outcome:source.status==='victory'?'victory':'defeat',time:source.time,castlesHeld,castlesTotal:source.castles.length,survivorsRescued,survivorsTotal:source.camps.length,campsRescued:survivorsRescued,campsTotal:source.camps.length,siegesSurvived:source.stats.sieges,bossesFelled:stats.bossesFelled??(source.siege?.bossKilled?1:0),difficulty:source.difficulty,weaponName:weaponStats(player?.weapon).name});
+ lastRunRecap=recap;
+ runRecap.hidden=false;
+ const rows=$('runRecapRows');
+ rows.replaceChildren(...recap.rows.map(row=>{const line=document.createElement('div');line.className='run-recap-row';const label=document.createElement('span');label.textContent=row.label;const value=document.createElement('strong');value.textContent=row.value;line.append(label,value);return line;}));
+ $('runRecapEpilogue').textContent=recap.epilogue;
+ return recap;
+}
+function previewRunRecap(outcome:'victory'|'defeat'){
+ const base=loreState();
+ const recap=deriveRunRecap({outcome,time:base?Math.round(600+base.castlesHeld*90):754,castlesHeld:base?.castlesHeld??6,castlesTotal:9,survivorsRescued:base?.survivorsRescued??5,survivorsTotal:9,campsRescued:base?.campsRescued??5,campsTotal:9,siegesSurvived:base?.siegesSurvived??2,bossesFelled:outcome==='victory'?2:1,difficulty:base?.difficulty??selectedDifficulty,weaponName:weaponStats(me()?.weapon).name});
+ lastRunRecap=recap;previewRecapOutcome=outcome;
+ $('resultTitle').textContent=recap.title;$('resultCopy').textContent=outcome==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';
+ $('stats').textContent='';runRecap.hidden=false;
+ $('runRecapRows').replaceChildren(...recap.rows.map(row=>{const line=document.createElement('div');line.className='run-recap-row';const label=document.createElement('span');label.textContent=row.label;const value=document.createElement('strong');value.textContent=row.value;line.append(label,value);return line;}));
+ $('runRecapEpilogue').textContent=recap.epilogue;
+ if(!result.open)result.showModal();
+ return recap;
+}
+
 const me=()=>game?.actors.find(a=>a.id===id);
 const send=(value:unknown)=>{if(ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify(value));};
 let sound:AudioContext|undefined;function tone(freq=180){if(audioPaused||!$<HTMLInputElement>('sound').checked)return;try{sound??=new AudioContext();void sound.resume();const o=sound.createOscillator(),gain=sound.createGain();o.type='triangle';o.frequency.setValueAtTime(freq,sound.currentTime);o.frequency.exponentialRampToValueAtTime(freq*.5,sound.currentTime+.13);gain.gain.setValueAtTime(.04,sound.currentTime);gain.gain.exponentialRampToValueAtTime(.001,sound.currentTime+.15);o.connect(gain);gain.connect(sound.destination);o.start();o.stop(sound.currentTime+.16);}catch{}}
@@ -380,6 +457,7 @@ function updateJournal(){
  const castleEl=$('journalCastles'),survivorEl=$('journalSurvivorsLine'),campsEl=$('journalCampsLine'),nestEl=$('journalNestLine'),siegeEl=$('journalSiegesLine'),weaponEl=$('journalWeaponLine'),regionEl=$('journalRegionList'),controlsEl=$('journalControlsLine'),difficultyEl=$('journalDifficulty');
  const difficulty=difficultyChoice(currentDifficulty());
  difficultyEl.textContent=`Difficulty: ${difficulty.label} — ${difficulty.description}${difficultyIsHostChoice()?' (host\u2019s choice, read-only for joiners)':''}`;
+ renderLore(loreState());
  let summary:JournalSummary|null=null;
  if(game&&me())summary=previewSummary(deriveJournalSummary(journalInput(me()!)));
  else if(previewJournalStage)summary=previewJournalDemo();
@@ -428,7 +506,7 @@ for(const location of ['landing','armory']){
 }
 
 // ---- Read-only QA hooks: character selector state + controller/pad state (no gameplay effect) ----
-const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown;__ssAudioState?:()=>unknown;__ssAudioFocus?:(x?:number|null,z?:number|null)=>unknown;__ssObjectives?:()=>unknown;__ssJournal?:()=>unknown;__ssJournalPreview?:(stage?:string|null)=>unknown;__ssObjectivePreview?:(text?:string|null)=>unknown;__ssForceSiege?:(index?:number|null)=>unknown;__ssDifficulty?:()=>unknown;__ssBossBar?:()=>unknown};
+const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown;__ssAudioState?:()=>unknown;__ssAudioFocus?:(x?:number|null,z?:number|null)=>unknown;__ssObjectives?:()=>unknown;__ssJournal?:()=>unknown;__ssJournalPreview?:(stage?:string|null)=>unknown;__ssObjectivePreview?:(text?:string|null)=>unknown;__ssForceSiege?:(index?:number|null)=>unknown;__ssDifficulty?:()=>unknown;__ssBossBar?:()=>unknown;__ssLore?:()=>unknown;__ssLorePreview?:(stage?:string|null)=>unknown;__ssRecap?:()=>unknown;__ssRecapPreview?:(outcome?:string|null)=>unknown};
 qaHooks.__ssCharacterSelect=()=>({
  appearanceField:'appearance',
  landingSelectId:characterSelectors[0]?.id??null,
@@ -555,6 +633,38 @@ qaHooks.__ssBossBar=()=>{
  const model=bossBarState(siege?{boss:siege.boss,active:siege.active,castle:siege.castle,bossName:siege.bossName,bossHp:siege.bossHp,bossId:siege.bossId,index:siege.index,bossKilled:siege.bossKilled}:null,bossActor?{hp:bossActor.hp,maxHp:bossActor.maxHp}:undefined);
  return {...model,elementId:'bossSiegeBar',nameId:'bossSiegeName',fillId:'bossSiegeFill',hpId:'bossSiegeHp',phaseId:'bossSiegePhase',bannerId:'bossSiegeBanner',hidden:bossSiegeBar.hidden,phaseClass:model.visible?`phase-${model.phase}`:null,fillWidth:$('bossSiegeFill').style.width||null};
 };
+/** Read-only chronicle state for QA: entries (unlocked text vs unrecorded hints), stored ids. */
+qaHooks.__ssLore=()=>{
+ const state=loreState();
+ const views=loreEntryViews(state??{castlesHeld:0,castlesTotal:9,survivorsRescued:0,survivorsTotal:9,campsRescued:0,campsTotal:9,siegesSurvived:0,nestSealed:false,nestVulnerable:false,bossSeen:false,bossKilled:false,weaponsRecovered:1,difficulty:'knight',victory:false,defeat:false},knownLoreIds);
+ return {storageKey:LORE_STORAGE_KEY,entries:views,unlocked:views.filter(entry=>entry.unlocked).map(entry=>entry.id),locked:views.filter(entry=>!entry.unlocked).map(entry=>entry.id),stored:[...knownLoreIds],state,previewStage:previewLoreStage};
+};
+/** QA-only display preview of chronicle unlock stages (renders journal + one toast; no persistence). */
+qaHooks.__ssLorePreview=(stage?:string|null)=>{
+ previewLoreStage=stage==='early'||stage==='mid'||stage==='late'?stage:null;
+ renderLore(loreState());
+ if(previewLoreStage){
+  const ids=previewLoreStage==='early'?['region-march']:previewLoreStage==='mid'?['region-moor','castle-border','warden-seen']:['region-crown','castle-citadel','nest-sealed','end-victory'];
+  const title=LORE_ENTRIES.find(entry=>entry.id===ids[0])?.title??'Chronicle';
+  toast(`New chronicle entry: ${title}`);
+ }
+ return qaHooks.__ssLore?.();
+};
+/** Read-only end-of-run recap model + DOM handles (QA can gate values/epilogue). */
+qaHooks.__ssRecap=()=>({
+ model:lastRunRecap,
+ previewOutcome:previewRecapOutcome,
+ resultOpen:result.open,
+ containerId:'runRecap',titleId:'runRecapTitle',rowsId:'runRecapRows',epilogueId:'runRecapEpilogue',restartId:'restart',
+ rows:$('runRecapRows')?[...$('runRecapRows').querySelectorAll('.run-recap-row')].map(row=>({label:row.querySelector('span')?.textContent??'',value:row.querySelector('strong')?.textContent??''})):[]
+});
+/** QA-only display preview of the victory/defeat recap (no gameplay effect; does not send restart). */
+qaHooks.__ssRecapPreview=(outcome?:string|null)=>{
+ previewRecapOutcome=outcome==='victory'||outcome==='defeat'?outcome:null;
+ if(!previewRecapOutcome){if(result.open)result.close();runRecap.hidden=true;return qaHooks.__ssRecap?.();}
+ previewRunRecap(previewRecapOutcome);
+ return qaHooks.__ssRecap?.();
+};
 
 // ---- Progressive world loading: show real asset counts, gate joining on the core set only ----
 const defaultConnectionText=$('connection').textContent;
@@ -602,7 +712,7 @@ async function connect(mode:'create'|'join'|'resume'){
   if(m.type==='welcome'){cmd('character:'+selectedCharacter);id=m.id;code=m.code;token=m.token;everJoined=true;attempts=0;seq=0;sessionStorage.setItem('ss-session',JSON.stringify({code,token}));$('landing').hidden=true;$('hud').hidden=false;$('roomCode').textContent=code;toast('Campaign started. Clear the Fallen Keep, then hold E / A at its banner.');}
   else if(m.type==='state'){if(!document.hidden){for(const cue of combatCues(game,m.game,id)){combatAudio.play(cue);if(cue.kind==='impact'||cue.kind==='hurt')ambience.duck(1);else if(cue.kind==='swing'||cue.kind==='block')ambience.duck(.55);if(cue.kind==='hurt'){const hudActor=m.game.actors.find((a:Actor)=>a.id===id);const weight=weaponCombatProfile(hudActor?.weapon).weight;rumble(clamp(.16+.24*weight,.2,.55),150);$('hud').classList.remove('hurt-flash');void $('hud').offsetWidth;$('hud').classList.add('hurt-flash');view.shake=Math.max(view.shake,.24);}else if(cue.kind==='block')rumble(.3,90);}for(const event of eventCues(game,m.game)){combatAudio.playEvent(event);if(event==='capture'){rumble(.22,170);const captured=m.game.castles.find((c:{id:string;name:string;friendly:boolean})=>c.friendly&&!game?.castles.find(o=>o.id===c.id)?.friendly);if(captured)showCaption('castle-captured',captured.name);}}
    if(game?.status==='playing'){const wasSiege=!!game.siege?.active,nowSiege=!!m.game.siege?.active;if(nowSiege&&!wasSiege){const target=m.game.castles.find((c:{id:string;name:string})=>c.id===m.game.siege?.castle);const bossName=(m.game.siege as {bossName?:string}|null)?.bossName;showCaption('siege-start',target?.name?`${target.name}${bossName?` · ${bossName} leads the wave`:''}`:bossName??undefined);}else if(!nowSiege&&wasSiege)showCaption('siege-end');}
-  }game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();stopRumble();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;$('restart').hidden=host!==id;result.showModal();}else if(game!.status==='playing'&&result.open){result.close();lastEvent=0;cmd('character:'+selectedCharacter);}}
+  }game=m.game;host=m.host;const p=me();if(p&&lastEvent===0)yaw=p.yaw;for(const ev of game!.events)if(ev.id>lastEvent){lastEvent=ev.id;toast(ev.text);tone(260);}if(game!.status!=='playing'&&!result.open){document.exitPointerLock?.();stopRumble();$('resultTitle').textContent=game!.status==='victory'?'The kingdom lives.':'The last fire fades.';$('resultCopy').textContent=game!.status==='victory'?'Nine castles reclaimed across three regions. Every survivor saved. The plague is ended.':'Every stronghold has fallen. Gather your fellowship and try again.';$('stats').textContent=`${game!.stats.captures} captures · ${game!.stats.rescues} rescues · ${game!.stats.sieges} sieges repelled · ${game!.stats.kills} undead defeated`;$('restart').hidden=host!==id;updateRunRecap(m.game);result.showModal();}else if(game!.status==='playing'&&result.open){result.close();runRecap.hidden=true;previewRecapOutcome=null;lastEvent=0;cmd('character:'+selectedCharacter);}}
   else if(m.type==='error'){if(!everJoined){sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;stopped=true;ws?.close();$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}else{toast(m.text);if(/expired|not found/.test(m.text)){stopped=true;sessionStorage.removeItem('ss-session');$('connection').textContent=m.text;setTimeout(()=>location.reload(),2000);}}}
  };
  ws.onclose=e=>{release();if(stopped)return;if(e.code===4000||e.code===4001){stopped=true;sessionStorage.removeItem('ss-session');toast(e.reason);$('connection').textContent=e.reason;setTimeout(()=>location.reload(),2500);return;}if(everJoined&&attempts<8){toast('Connection lost. Reconnecting…');setTimeout(()=>connect('resume'),Math.min(8000,500*2**attempts++));}else{$('connection').textContent='Unable to connect. Try again shortly.';$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=false;}};
@@ -732,6 +842,7 @@ $('playerName').textContent=p.name;$('hud').classList.toggle('low-health',p.hp>0
  }
  updateObjectiveHud(p);
  updateDifficultyUi();
+ checkLoreUnlocks();
  if(journal.open)updateJournal();
 }
 function frame(now:number){const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame=now;let pads:Gamepad[]=[];try{pads=Array.from(navigator.getGamepads?.()??[]).filter((p):p is Gamepad=>!!p&&p.connected&&p.mapping==='standard');}catch{}const pad=pads.find(p=>p.index===padIndex)||pads[0];if(pad){padIndex=pad.index;padName=pad.id;}else{padName='';padPrev=[];menuPrev=[];}

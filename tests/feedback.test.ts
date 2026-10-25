@@ -1,4 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue,compassBearing,deriveObjectiveLine,deriveJournalSummary,bossBarState,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,difficultyId,difficultyChoice,isDifficultyId,type JournalInput} from '../src/client/controller';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue,compassBearing,deriveObjectiveLine,deriveJournalSummary,bossBarState,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,difficultyId,difficultyChoice,isDifficultyId,deriveRunRecap,formatRunTime,type JournalInput} from '../src/client/controller';import {LORE_ENTRIES,unlockedLoreIds,newlyUnlockedLore,loreEntryViews,formatLoreToast,type LoreState} from '../src/shared/lore';
 test('combat feedback ignores joins, replayed snapshots and reconnect gaps',()=>{const g=createGame();addPlayer(g,'p','P');assert.deepEqual(combatCues(undefined,g,'p'),[]);assert.deepEqual(combatCues(g,g,'p'),[]);const next=structuredClone(g);next.time=2;next.actors.find(a=>a.id==='p')!.hp=1;assert.deepEqual(combatCues(g,next,'p'),[]);});
 test('combat feedback follows confirmed swings and health loss with range and impact limits',()=>{const g=createGame();g.actors=[];const p=addPlayer(g,'p','P');for(let i=0;i<5;i++)spawn(g,'zombie',p.x+1,p.z);spawn(g,'zombie',70,-400);const next=structuredClone(g);next.time=.1;const n=next.actors.find(a=>a.id==='p')!;n.attackSerial=1;n.hp-=10;n.weapon='hammer';for(const a of next.actors)if(a.kind==='zombie')a.hp-=5;const cues=combatCues(g,next,'p');assert.equal(cues.filter(c=>c.kind==='impact').length,3);assert.equal(cues.filter(c=>c.kind==='swing').length,1);assert.equal(cues.find(c=>c.kind==='swing')!.weapon,'hammer');assert.ok(cues.some(c=>c.kind==='hurt'));assert.ok(cues.some(c=>c.kind==='equip'));assert.ok(cues.filter(c=>c.kind==='impact').every(c=>c.material==='flesh'));assert.ok(cues.every(c=>c.volume>0&&c.volume<=1));assert.deepEqual(combatCues(next,{...next,time:.2},'p'),[]);
 const armed=structuredClone(next),replay=structuredClone(armed);replay.time=.3;assert.deepEqual(combatCues(armed,replay,'p'),[]);
@@ -134,4 +134,35 @@ assert.equal(bossBarState({...bossSiege,active:true},{hp:1,maxHp:240}).segmentsF
 assert.equal(bossBarState({...bossSiege,active:true},{hp:280,maxHp:280}).ratio,1);
 const noActor=bossBarState({...bossSiege,active:true,bossHp:240});
 assert.equal(noActor.hp,240);assert.equal(noActor.maxHp,240);assert.equal(noActor.ratio,1);
-});
+
+// Chronicle/lore unlock helpers + entry formatting (cycle-12).
+const zeroLore:LoreState={castlesHeld:0,castlesTotal:9,survivorsRescued:0,survivorsTotal:9,campsRescued:0,campsTotal:9,siegesSurvived:0,nestSealed:false,nestVulnerable:false,bossSeen:false,bossKilled:false,weaponsRecovered:1,difficulty:'knight',victory:false,defeat:false};
+const fullLore:LoreState={castlesHeld:9,castlesTotal:9,survivorsRescued:9,survivorsTotal:9,campsRescued:9,campsTotal:9,siegesSurvived:3,nestSealed:true,nestVulnerable:true,bossSeen:true,bossKilled:true,weaponsRecovered:11,difficulty:'warden',victory:true,defeat:false};
+assert.ok(LORE_ENTRIES.length>=12&&LORE_ENTRIES.length<=16);
+assert.equal(new Set(LORE_ENTRIES.map(entry=>entry.id)).size,LORE_ENTRIES.length);
+assert.deepEqual(unlockedLoreIds(zeroLore),[]);
+const earlyLore={...zeroLore,castlesHeld:1,survivorsRescued:1};
+assert.ok(unlockedLoreIds(earlyLore).includes('region-march'));
+assert.ok(unlockedLoreIds(earlyLore).includes('castle-keep'));
+assert.ok(!unlockedLoreIds(earlyLore).includes('region-moor'));
+assert.equal(unlockedLoreIds(fullLore).length,LORE_ENTRIES.length-1);assert.ok(!unlockedLoreIds(fullLore).includes('end-defeat'));
+assert.equal(newlyUnlockedLore([],fullLore).length,LORE_ENTRIES.length-1);
+assert.equal(newlyUnlockedLore(LORE_ENTRIES.map(entry=>entry.id),fullLore).length,0);
+assert.equal(newlyUnlockedLore(['region-march'],fullLore).length,LORE_ENTRIES.length-2);
+assert.equal(formatLoreToast([]),null);
+const firstEntry=LORE_ENTRIES[0]!;
+assert.equal(formatLoreToast([firstEntry]),`New chronicle entry: ${firstEntry.title}`);
+assert.ok(formatLoreToast([firstEntry,LORE_ENTRIES[1]!])!.startsWith('New chronicle entries:'));
+const lockedView=loreEntryViews(zeroLore).find(view=>view.id==='region-moor')!;
+assert.equal(lockedView.unlocked,false);assert.equal(lockedView.text,'');assert.ok(lockedView.hint.length>4);
+const knownLocked=loreEntryViews(zeroLore,['region-moor']).find(view=>view.id==='region-moor')!;
+assert.equal(knownLocked.unlocked,true);assert.ok(knownLocked.text.length>10);
+// End-of-run recap derivation (cycle-12).
+assert.equal(formatRunTime(0),'0:00');assert.equal(formatRunTime(65),'1:05');assert.equal(formatRunTime(3725),'1:02:05');
+const victoryRecap=deriveRunRecap({outcome:'victory',time:754,castlesHeld:9,castlesTotal:9,survivorsRescued:9,survivorsTotal:9,campsRescued:9,campsTotal:9,siegesSurvived:3,bossesFelled:2,difficulty:'warden',weaponName:'War spear'});
+assert.equal(victoryRecap.title,'The kingdom lives.');assert.equal(victoryRecap.timeText,'12:34');assert.equal(victoryRecap.difficultyLabel,'Warden');assert.equal(victoryRecap.rows.length,8);
+assert.deepEqual(victoryRecap.rows.map(row=>row.label),['Time','Castles','Survivors','Camps','Sieges survived','Bosses felled','Difficulty','Weapon']);
+assert.equal(victoryRecap.rows[1]!.value,'9 / 9');assert.equal(victoryRecap.rows[5]!.value,'2');assert.equal(victoryRecap.rows[6]!.value,'Warden');assert.equal(victoryRecap.rows[7]!.value,'War spear');
+assert.ok(victoryRecap.epilogue.includes('hearths'));
+const defeatRecap=deriveRunRecap({outcome:'defeat',time:12,castlesHeld:0,castlesTotal:9,survivorsRescued:0,survivorsTotal:9,campsRescued:0,campsTotal:9,siegesSurvived:0,bossesFelled:0,difficulty:'bogus',weaponName:'Longsword'});
+assert.equal(defeatRecap.title,'The last fire fades.');assert.equal(defeatRecap.timeText,'0:12');assert.equal(defeatRecap.difficultyLabel,'Knight');assert.equal(defeatRecap.difficultyId,'knight');assert.ok(defeatRecap.epilogue.includes('Begin anew'));});

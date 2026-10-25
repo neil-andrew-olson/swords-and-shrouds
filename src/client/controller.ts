@@ -205,3 +205,53 @@ export function bossBarState(siege:BossSiege,bossActor?:{hp:number;maxHp:number}
 
 
 
+
+/* ---------------------------------------------------------------------------------------------
+ * End-of-run recap: authoritative stats → display rows + epilogue (pure, tested).
+ * ------------------------------------------------------------------------------------------- */
+export type RunOutcome='victory'|'defeat';
+export type RunRecapRow={label:string;value:string};
+export type RunRecap={
+ outcome:RunOutcome;title:string;epilogue:string;timeSeconds:number;timeText:string;
+ castlesHeld:number;castlesTotal:number;survivorsRescued:number;survivorsTotal:number;
+ campsRescued:number;campsTotal:number;siegesSurvived:number;bossesFelled:number;
+ difficultyId:DifficultyId;difficultyLabel:string;weaponName:string;rows:RunRecapRow[];
+};
+export function formatRunTime(seconds:number):string{
+ const total=Math.max(0,Math.round(Number.isFinite(seconds)?seconds:0));
+ const hours=Math.floor(total/3600),minutes=Math.floor((total%3600)/60),secs=total%60;
+ const mm=String(minutes).padStart(2,'0'),ss=String(secs).padStart(2,'0');
+ return hours>0?`${hours}:${mm}:${ss}`:`${minutes}:${ss}`;
+}
+export function deriveRunRecap(input:{
+ outcome:RunOutcome;time:number;castlesHeld:number;castlesTotal:number;
+ survivorsRescued:number;survivorsTotal:number;campsRescued:number;campsTotal:number;
+ siegesSurvived:number;bossesFelled:number;difficulty:unknown;weaponName:string;
+}):RunRecap{
+ const difficultyIdValue=difficultyId(input.difficulty);
+ const choice=difficultyChoice(difficultyIdValue);
+ const victory=input.outcome==='victory';
+ const timeText=formatRunTime(input.time);
+ return {
+  outcome:input.outcome,
+  title:victory?'The kingdom lives.':'The last fire fades.',
+  epilogue:victory?'The nest is broken and the hearths burn again. The kingdom will remember the fellowship that would not let it die.':'The last fire fades — but the map is drawn for the next fellowship. Begin anew, and take the kingdom back.',
+  timeSeconds:Math.max(0,Math.round(input.time)),timeText,
+  castlesHeld:input.castlesHeld,castlesTotal:input.castlesTotal,
+  survivorsRescued:input.survivorsRescued,survivorsTotal:input.survivorsTotal,
+  campsRescued:input.campsRescued,campsTotal:input.campsTotal,
+  siegesSurvived:Math.max(0,Math.round(input.siegesSurvived)),
+  bossesFelled:Math.max(0,Math.round(input.bossesFelled)),
+  difficultyId:difficultyIdValue,difficultyLabel:choice.label,weaponName:input.weaponName,
+  rows:[
+   {label:'Time',value:timeText},
+   {label:'Castles',value:`${input.castlesHeld} / ${input.castlesTotal}`},
+   {label:'Survivors',value:`${input.survivorsRescued} / ${input.survivorsTotal}`},
+   {label:'Camps',value:`${input.campsRescued} / ${input.campsTotal}`},
+   {label:'Sieges survived',value:String(Math.max(0,Math.round(input.siegesSurvived)))},
+   {label:'Bosses felled',value:String(Math.max(0,Math.round(input.bossesFelled)))},
+   {label:'Difficulty',value:choice.label},
+   {label:'Weapon',value:input.weaponName||'Unknown'}
+  ]
+ };
+}
