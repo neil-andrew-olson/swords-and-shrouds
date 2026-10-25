@@ -77,6 +77,9 @@ src/server/index.ts` from the game repo → http://localhost:3000/.
 2. Physical-device mobile / real-GPU / perceptual playtests; hardware controller rumble test.
 3. Content/campaign depth (more enemy variety, endgame content); further first-boss balance tuning
    from human play.
+4. QA live summary read native `game.difficulty` as null in one path while `__ssDifficulty()` reported
+   Knight (co-op inheritance green) — verify whether the snapshot field is omitted for default rooms
+   and either always include it or adjust the QA summary; small follow-up, not a blocker.
 
 ## Previous cycles
 
