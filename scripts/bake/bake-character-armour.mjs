@@ -154,93 +154,57 @@ function spike(geo, base, dir, length, radius, sides = 6) {
 /* ---------------------------------------------------------------- per-body armour sets */
 const ARMOUR = {
   templar: {
-    palette: {metal: [0.72, 0.70, 0.65], cloth: [0.84, 0.82, 0.74], accent: [0.82, 0.62, 0.22]},
+    palette: {metal: [0.42, 0.42, 0.44], cloth: [0.38, 0.11, 0.10], accent: [0.52, 0.40, 0.18]},
     pieces: ['greathelm', 'cuirass', 'tabard', 'largePauldrons', 'bracers', 'belt'],
   },
   hero: {
-    palette: {metal: [0.68, 0.70, 0.74], cloth: [0.32, 0.35, 0.42], accent: [0.62, 0.54, 0.36]},
+    palette: {metal: [0.41, 0.43, 0.47], cloth: [0.18, 0.26, 0.37], accent: [0.54, 0.43, 0.20]},
     // cycle-6 masked-palette debt: all-plate body, so the hue variety must live on the plate itself
     // (coloured trim bands + paint chips across the large pauldron/cuirass faces)
-    atlas: {metalChips: 1.0, metalHueAmp: 2.6, chipBoost: 1.5, chipBlocks: 1.0},
     pieces: ['visoredHelm', 'knightCuirass', 'layeredPauldrons', 'bracers', 'belt'],
   },
   ally: {
-    palette: {metal: [0.52, 0.60, 0.74], cloth: [0.22, 0.28, 0.40], accent: [0.60, 0.68, 0.84]},
+    palette: {metal: [0.41, 0.45, 0.53], cloth: [0.23, 0.32, 0.46], accent: [0.53, 0.50, 0.31]},
     pieces: ['plainHelm', 'cuirass', 'tabard', 'largePauldrons', 'bracers'],
   },
   berserker: {
-    palette: {metal: [0.48, 0.17, 0.17], cloth: [0.26, 0.18, 0.12], accent: [0.50, 0.46, 0.44]},
+    palette: {metal: [0.38, 0.37, 0.36], cloth: [0.36, 0.20, 0.12], accent: [0.46, 0.37, 0.20]},
     pieces: ['hornedHelm', 'bracers', 'furShoulder', 'belt'],
   },
   ranger: {
-    palette: {metal: [0.36, 0.44, 0.24], cloth: [0.34, 0.42, 0.26], accent: [0.64, 0.46, 0.20]},
+    palette: {metal: [0.34, 0.36, 0.33], cloth: [0.18, 0.26, 0.14], accent: [0.44, 0.37, 0.20]},
     // cycle-6 masked-palette debt: the cloak EXTERIOR is a huge smooth cloth surface, so give the
     // cloth band strong hue-separated panels/dyed patches (hood already reads on the strict mask)
-    atlas: {clothPatches: 1.0, clothHueAmp: 4.0},
     pieces: ['hood', 'longCloak', 'leatherCuirass', 'quiver', 'bracers'],
   },
   survivor: {
     // ragged camp survivor: no plate at all, patched cloth layers, bedroll/pack, walking staff,
     // rope belt ??? faded browns/tans with orange-red patch accents (distinct from the soldier bodies)
-    palette: {metal: [0.34, 0.30, 0.24], cloth: [0.42, 0.36, 0.27], accent: [0.60, 0.30, 0.14]},
+    palette: {metal: [0.32, 0.32, 0.29], cloth: [0.32, 0.26, 0.19], accent: [0.44, 0.36, 0.22]},
     pieces: ['tatteredHood', 'tatteredCloak', 'survivorPack', 'ropeBelt', 'walkingStaff'],
   },
   fallen: {
-    palette: {metal: [0.34, 0.25, 0.44], cloth: [0.12, 0.10, 0.16], accent: [0.40, 0.34, 0.42]},
-    // cycle-6 masked-palette debt: corrupted plate body ??? patina/rust hue chips across the big plates
-    atlas: {metalChips: 1.0, metalHueAmp: 3.4, patinaBoost: 1.9},
+    palette: {metal: [0.28, 0.24, 0.38], cloth: [0.13, 0.10, 0.15], accent: [0.40, 0.34, 0.22]},
     pieces: ['crestHelm', 'backPlate', 'spikedPauldrons', 'bracers'],
   },
 };
 
-/* ---------------------------------------------------------------- armour atlas (hue-rich albedo + normal/ORM) */
-function hsv(h, s, v) {
-  // h,s,v in 0..1 -> rgb 0..1
-  const i = Math.floor(h * 6);
-  const f = h * 6 - i;
-  const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
-  switch (i % 6) {
-    case 0: return [v, t, p];
-    case 1: return [q, v, p];
-    case 2: return [p, v, t];
-    case 3: return [p, q, v];
-    case 4: return [t, p, v];
-    default: return [v, p, q];
-  }
-}
-function hueShift(rgb, dh, ds, dv) {
-  // approximate: convert to HSV then shift
-  const r = rgb[0], g = rgb[1], b = rgb[2];
-  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
-  let h = 0;
-  if (d > 1e-6) {
-    if (max === r) h = ((g - b) / d) % 6;
-    else if (max === g) h = (b - r) / d + 2;
-    else h = (r - g) / d + 4;
-  }
-  h = ((h / 6) + dh + 1) % 1;
-  const s = Math.min(1, Math.max(0, (max ? d / max : 0) + ds));
-  const v = Math.min(1, Math.max(0, max + dv));
-  return hsv(h, s, v);
-}
-
-async function makeAtlas(palette, dim = 1024, opts = {}) {
-  // cycle-6 per-body hue boost: hero/fallen need coloured trim chips on big plate faces, ranger
-  // needs hue-separated panels on the cloak exterior (hood already reads) ??? atlas-only knobs.
-  const metalChips = opts.metalChips ?? 0.0;
-  const chipBlocks = opts.chipBlocks ?? 0.0;
-  const plateFamilies = opts.plateFamilies ?? 0.0;
-  const plateStripes = opts.plateStripes ?? 0.0;
-  const plateGems = opts.plateGems ?? 0.0;
-  const metalHueAmp = opts.metalHueAmp ?? 1.0;
-  const clothPatches = opts.clothPatches ?? 0.0;
-  const clothHueAmp = opts.clothHueAmp ?? 1.0;
+/* ---------------------------------------------------------------- armour atlas v5.1
+ * Coherent material bands (v):
+ *   0.00-0.40 steel plate  0.40-0.62 dark leather  0.62-0.86 faction cloth  0.86-1.00 trim band
+ * Colour variety is STRUCTURED material design (per the cycle-15b brief), not random chips:
+ *  - 24 steel plates, each with its own value/hue step, edge highlight, mid-tone inset and regular
+ *    rivet rows in 3 brass shades + dark-iron rivet shadows;
+ *  - leather straps split into 3 tone segments with brass buckles and dark/off-white stitching;
+ *  - faction cloth in 5 panels, each with its own tone step, fold shading, stitched seam lines,
+ *    off-white rule + brass emblem block/stripe in 2 extra shades;
+ *  - trim band alternating brass / steel / dark-leather segments with rivet heads at each end.
+ */
+const BAND_V5 = {metal: [0.00, 0.40], leather: [0.40, 0.22], cloth: [0.62, 0.24], accent: [0.86, 0.14]};
+async function makeAtlas(palette, dim = 1024) {
   const W = dim, H = dim;
   const NW = 256, NH = 256;
-  const hash = (x, y) => {
-    const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-    return v - Math.floor(v);
-  };
+  const hash = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
   const smooth = (x, y, s) => {
     const fx = x * s, fy = y * s;
     const x0 = Math.floor(fx), y0 = Math.floor(fy);
@@ -249,197 +213,177 @@ async function makeAtlas(palette, dim = 1024, opts = {}) {
     const a = hash(x0, y0), b = hash(x0 + 1, y0), c = hash(x0, y0 + 1), d = hash(x0 + 1, y0 + 1);
     return (a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy;
   };
-  const metal = palette.metal, cloth = palette.cloth, accent = palette.accent;
-  const metalDark = metal.map((c) => c * 0.55);
-  const metalLight = metal.map((c) => Math.min(1, c * 1.3));
-  // hue-separated patina / rust / oxide / trim colours
-  const patina = hueShift(metal, 0.42, 0.35, -0.12);     // teal-green patina
-  const rust = hueShift(metal, 0.06, 0.55, -0.18);       // warm rust
-  const oxide = hueShift(metal, -0.05, 0.18, -0.22);     // dark blue oxide
-  const rustLight = hueShift(metal, 0.08, 0.75, 0.15);   // bright rust flakes
-  const rivetGold = hueShift(accent, 0.02, 0.55, 0.28);
-  const clothDark = cloth.map((c) => c * 0.6);
-  const clothLight = cloth.map((c) => Math.min(1, c * 1.28));
-  const stainBrown = hueShift(cloth, 0.05, 0.45, -0.14);
-  const stainOlive = hueShift(cloth, 0.20, 0.40, -0.06);
-  const stainPurple = hueShift(cloth, 0.72, 0.35, -0.10);
-  const accentDark = accent.map((c) => c * 0.5);
-  const accentLight = accent.map((c) => Math.min(1, c * 1.35));
-  const accentAlt = hueShift(accent, 0.45, 0.55, 0.05);  // contrasting heraldic hue
-  const accentCream = [0.78, 0.74, 0.64];
+  const steel = palette.metal, cloth = palette.cloth, brass = palette.accent;
+  const leather = palette.leather || [cloth[0] * 0.42 + 0.03, cloth[1] * 0.34 + 0.02, cloth[2] * 0.28 + 0.012];
+  const steelDark = steel.map((c) => c * 0.70);
+  const steelMid = steel.map((c) => c * 0.92);
+  const steelLight = steel.map((c) => Math.min(1, c * 1.26));
+  const clothDark = cloth.map((c) => c * 0.62);
+  const clothMid = cloth.map((c) => c * 0.84);
+  const clothLight = cloth.map((c) => Math.min(1, c * 1.22));
+  const brassDark = brass.map((c) => c * 0.55);
+  const brassLight = brass.map((c) => Math.min(1, c * 1.34));
+  const leatherDark = leather.map((c) => c * 0.58);
+  const leatherMid = leather.map((c) => c * 0.85);
+  const leatherLight = leather.map((c) => Math.min(1, c * 1.4));
+  // palette of literal brass/iron rivet shades (brief: #c9a24b / #a87c2f / #8a6420 + #4a4038 shadow)
+  const RIVET = [[0.79, 0.635, 0.29], [0.66, 0.487, 0.176], [0.54, 0.392, 0.125], [0.29, 0.251, 0.22]];
+  const OFFWHITE = [0.86, 0.83, 0.74];
   const height = new Float32Array(NW * NH);
   const albedo = Buffer.alloc(W * H * 3);
+  const PLATE_ROWS = 4, PLATE_COLS = 6, CLOTH_PANELS = 5;
+  const plateTone = (r, c) => {
+    const h = hash(r * 31 + c * 17, 3);
+    return {val: 0.82 + 0.32 * h, hue: (h - 0.5) * 0.06, rivet: Math.floor(hash(r * 7 + c * 5, 9) * 4)};
+  };
+  const panelTone = (p) => {
+    const h = hash(p * 23 + 5, 7);
+    return {val: 0.84 + 0.30 * h, hue: (h - 0.5) * 0.07, stitch: hash(p * 11 + 3, 13) > 0.5, emblem: hash(p * 5 + 1, 21) > 0.45};
+  };
+  const shift = (rgb, dh, dv) => [rgb[0] * (1 + dv) + dh * 0.06, rgb[1] * (1 + dv * 0.9) + dh * 0.02, rgb[2] * (1 + dv * 1.1) - dh * 0.04];
   for (let y = 0; y < H; y++) {
     const v = y / H;
     for (let x = 0; x < W; x++) {
       const i = (y * W + x) * 3;
       const u = x / W;
-      const grain = (hash(x, y) - 0.5) * 0.03;
-      const mott1 = smooth(u, v, 7);
-      const mott2 = smooth(u, v, 19);
-      const mott3 = smooth(u, v, 41);
+      const grain = hash(x, y);
+      const micro = (grain - 0.5) * 0.03;
+      const fine = (hash(Math.floor(x / 2), Math.floor(y / 2)) - 0.5) * 0.02;
+      const large = smooth(u, v, 5);
+      const mid = smooth(u, v, 17);
       const hi = (Math.min(NH - 1, Math.floor(y * NH / H)) * NW) + Math.min(NW - 1, Math.floor(x * NW / W));
-      let col;
-      if (v < 0.42) {
-        // ---------------- plate: steel tones + patina/rust/oxide patches + gold rivets/trim
-        const mix = mott1;
-        let base = [
-          metalDark[0] + (metalLight[0] - metalDark[0]) * mix,
-          metalDark[1] + (metalLight[1] - metalDark[1]) * mix,
-          metalDark[2] + (metalLight[2] - metalDark[2]) * mix,
-        ];
-        const seam = 1.0;
-        const rivet = 0;
-        const trim = false;
-        let k = (0.92 + grain) * seam;
-        base = [base[0] * k, base[1] * k, base[2] * k];
-        const patinaBoost = opts.patinaBoost ?? 1.0;
-        if (mott2 > 0.72 / patinaBoost) { const t = Math.min(1, (mott2 - 0.72 / patinaBoost) * 3.2 * patinaBoost); base = base.map((c, ci) => c * (1 - t) + hueShift(patina, 0.02 * metalHueAmp, 0.05 * metalHueAmp, 0.02 * patinaBoost)[ci] * t); }
-        if (mott3 > 0.80 / patinaBoost) { const t = Math.min(1, (mott3 - 0.80 / patinaBoost) * 3.0 * patinaBoost); base = base.map((c, ci) => c * (1 - t) + hueShift(rust, 0.01 * metalHueAmp, 0.12 * metalHueAmp, 0.06 * patinaBoost)[ci] * t); }
-        if (mott2 < 0.16) { const t = Math.min(1, (0.16 - mott2) * 3.0); base = base.map((c, ci) => c * (1 - t) + oxide[ci] * t); }
-        if (mott3 > 0.88) { const t = Math.min(1, (mott3 - 0.88) * 6); base = base.map((c, ci) => c * (1 - t) + rustLight[ci] * t); }
-        // cycle-6/7: broad coloured trim bands + paint chips on the big plate faces (hero/fallen)
-        if (metalChips > 0) {
-          const chipBoost = opts.chipBoost ?? 1.0;
-          const bandY = Math.abs(((v - 0.02) * 3.2) % 1 - 0.5);      // wide horizontal trim bands
-          if (bandY > 0.47) {
-            const t = Math.min(1, (bandY - 0.47) * 12) * Math.min(1, metalChips * 1.6);
-            base = base.map((c, ci) => c * (1 - t * 0.85) + accentAlt[ci] * t * 0.85);
-          } else if (bandY > 0.40) {
-            const t = Math.min(1, (bandY - 0.40) * 14) * Math.min(1, metalChips);
-            base = base.map((c, ci) => c * (1 - t * 0.7) + accentDark[ci] * t * 0.5);
-          }
-          const cell = Math.floor(u * 7) * 17 + Math.floor(v * 6) * 31;   // coarser = bigger chips
-          const chip = hash(cell, 5);
-          if (chip > 0.80) {
-            const t = Math.min(1, (chip - 0.80) * 5) * Math.min(1, metalChips * 1.6) * Math.min(1, chipBoost);
-            const chipCol = chip > 0.93 ? accentCream : (chip > 0.87 ? accentLight : rustLight);
-            base = base.map((c, ci) => c * (1 - t) + chipCol[ci] * t);
-          }
-          const rivetCell = Math.floor(u * 14) * 13 + Math.floor(v * 10) * 29;
-          if (hash(rivetCell, 7) > 0.93) base = base.map((c, ci) => c * 0.55 + accentCream[ci] * 0.55);
-          // cycle-7: large bright/dark contrast blocks on the biggest plate faces (the strict mask
-          // plateaus just under 500 on hero because subtle chips quantise away at night tone)
-          if (chipBlocks > 0) {
-            // gentle large-scale luminance blocks: brighten some big plate areas without replacing
-            // the chip variation (hard bright/dark blocks collapse the quantised colour count)
-            const bx = Math.floor(u * 6), by = Math.floor(v * 4);
-            const block = hash(bx * 13 + by * 29, 3);
-            const tb = Math.min(1, chipBlocks);
-            if (block > 0.62) base = base.map((c, ci) => c * 1.0 + accentCream[ci] * 0.22 * tb);
-            else if (block < 0.28) base = base.map((c, ci) => c * (1 - 0.18 * tb));
-          }
-          // cycle-8 hero headroom: extra hue FAMILIES across the big plate faces (cold blue-grey,
-          // warm gold, cream, dark iron) so the strict mask has more separated colour bins
-          if (plateFamilies > 0) {
-            const cold = hueShift(metal, 0.52, 0.35, 0.06);
-            const warm = hueShift(accent, 0.03, 0.62, 0.22);
-            const fams = [accentCream, warm, cold, accentLight, [0.16, 0.16, 0.19], metal];
-            const fx = Math.floor(u * 5), fy = Math.floor(v * 4);
-            const pick = Math.floor(hash(fx * 19 + fy * 37, 11) * fams.length) % fams.length;
-            const tint = 0.18 * Math.min(1, plateFamilies);
-            const fam = fams[pick];
-            base = base.map((c, ci) => c * (1 - tint) + fam[ci] * tint);
-            // thin bright hue trim lines (high contrast, small area) add separated colour bins
-            const trimV = Math.abs((v * 6.5) % 1 - 0.5);
-            if (trimV > 0.475) {
-              const ttrim = Math.min(1, (trimV - 0.475) * 18) * 0.75 * Math.min(1, plateFamilies);
-              const trimFam = fams[(pick + 2) % fams.length];
-              base = base.map((c, ci) => c * (1 - ttrim) + trimFam[ci] * ttrim);
-            }
-            // bold vertical hue stripes: the big pauldron/cuirass faces get separated colour bins
-            if (plateStripes > 0) {
-              const sx = Math.floor(u * 9);
-              const stripeFam = fams[sx % fams.length];
-              const ts = 0.5 * Math.min(1, plateStripes);
-              base = base.map((c, ci) => c * (1 - ts) + stripeFam[ci] * ts);
-            }
-            // heraldic gem/inset chips: small but strongly saturated colour islands on the biggest
-            // plate faces (dense hue bins for the strict mask without flattening the plate)
-            if (plateGems > 0) {
-              const jewels = [[0.62, 0.10, 0.12], [0.12, 0.24, 0.62], [0.72, 0.58, 0.14],
-                [0.14, 0.42, 0.26], [0.44, 0.14, 0.50], [0.86, 0.82, 0.70]];
-              const gx = Math.floor(u * 8), gy = Math.floor(v * 5);
-              const gem = hash(gx * 23 + gy * 41, 13);
-              if (gem > 0.72) {
-                const col = jewels[Math.floor(hash(gx * 7 + gy * 11, 17) * jewels.length) % jewels.length];
-                const tg = Math.min(1, (gem - 0.72) * 8) * 0.9 * Math.min(1, plateGems);
-                base = base.map((c, ci) => c * (1 - tg) + col[ci] * tg);
-              }
-            }
-          }
-        }
-        if (rivet) base = base.map((c, ci) => c * 0.55 + rivetGold[ci] * 0.42);
-        if (trim) base = base.map((c, ci) => c * 0.78 + accentLight[ci] * 0.22);
-        col = base;
-        height[hi] = 0.5 + smooth(u, v, 6) * 0.18;
-      } else if (v < 0.80) {
-        // ---------------- cloth: two-tone drift + hue-separated stains + patchwork + stitch lines
-        const mix = smooth(u, v, 11);
-        const weave = 0.9 + 0.16 * ((Math.floor(x / 2) + Math.floor(y / 2)) % 2) + 0.06 * smooth(u, v, 60);
-        const fold = 0.86 + 0.18 * Math.sin(x * 0.021 + mott1 * 4.5);
-        let base = [
-          clothDark[0] + (clothLight[0] - clothDark[0]) * mix,
-          clothDark[1] + (clothLight[1] - clothDark[1]) * mix,
-          clothDark[2] + (clothLight[2] - clothDark[2]) * mix,
-        ];
-        if (mott2 > 0.74) { const t = Math.min(1, (mott2 - 0.74) * 2.4); base = base.map((c, ci) => c * (1 - t) + stainBrown[ci] * t); }
-        if (mott3 > 0.80) { const t = Math.min(1, (mott3 - 0.80) * 2.6); base = base.map((c, ci) => c * (1 - t) + stainOlive[ci] * t); }
-        if (mott2 < 0.12) { const t = Math.min(1, (0.12 - mott2) * 2.6); base = base.map((c, ci) => c * (1 - t) + stainPurple[ci] * t); }
-        // patchwork panels + stitch lines + hue-jittered weave: big smooth cloth surfaces (ranger
-        // hood/cloak) otherwise shade into very few quantised colours at 2.8 m
-        const panelId = Math.floor(u * 5) * 7 + Math.floor(v * 5) * 13;
-        const panelHue = (hash(panelId, 3) - 0.5) * 0.9 * clothHueAmp;
-        const panelVal = 0.86 + hash(panelId, 9) * 0.3;
-        const stitchU = Math.abs((u * 5) % 1 - 0.5) > 0.475;
-        const stitchV = Math.abs((v * 5) % 1 - 0.5) > 0.478;
-        const weaveHue = (hash(Math.floor(x / 2), Math.floor(y / 2)) - 0.5) * 0.5 * clothHueAmp;
-        base = hueShift(base, panelHue, 0.06 + 0.05 * clothHueAmp, panelVal - 1.0);
-        base = hueShift(base, weaveHue, 0.04, 0);
-        // cycle-6 ranger: dyed patches stitched onto the big cloak panels (hue-separated, strong)
-        if (clothPatches > 0) {
-          const patchCell = Math.floor(u * 7) * 23 + Math.floor(v * 6) * 37;
-          const pchip = hash(patchCell, 11);
-          if (pchip > 0.84) {
-            const t = Math.min(1, (pchip - 0.84) * 4) * Math.min(1, clothPatches * 1.8);
-            const dye = pchip > 0.955 ? accentAlt : (pchip > 0.925 ? accentLight : stainBrown);
-            base = base.map((c, ci) => c * (1 - t * 0.8) + dye[ci] * t * 0.8);
-          }
-          const panelSeam = Math.abs((u * 7) % 1 - 0.5) > 0.482 || Math.abs((v * 6) % 1 - 0.5) > 0.484;
-          if (panelSeam) base = base.map((c, ci) => c * 0.7 + accentDark[ci] * 0.4);
-        }
-        if (stitchU || stitchV) base = base.map((c, ci) => c * 0.62 + accentDark[ci] * 0.45);
-        col = [base[0] * weave * fold, base[1] * weave * fold, base[2] * weave * fold];
-        height[hi] = 0.5 + smooth(u, v, 5) * 0.22 + ((stitchU || stitchV) ? 0.16 : 0);
-      } else {
-        // ---------------- heraldry: three hue families + cross/chevron + trim lines
-        const chev = Math.abs(((x / W) * 4) % 1 - 0.5);
-        const uu = (u - 0.5) / 0.5;
-        const crossBand = Math.abs(uu) < 0.09;
-        const bandLine = (Math.abs(v - 0.86) < 0.02 || Math.abs(v - 0.94) < 0.012);
+      let col, hgt = 0.5;
+      if (v < 0.40) {
+        // ---------------- steel plates: per-plate tone steps + edge highlight + mid-tone inset + rivets
+        const bv = v / 0.40;
+        const pr = Math.min(PLATE_ROWS - 1, Math.floor(bv * PLATE_ROWS));
+        const pc = Math.min(PLATE_COLS - 1, Math.floor(u * PLATE_COLS));
+        const plate = plateTone(pr, pc);
+        const local = (bv * PLATE_ROWS) % 1;
+        const pu = (u * PLATE_COLS) % 1;
         let base;
-        if (crossBand) base = accentAlt;
-        else if (bandLine) base = accentCream;
-        else {
-          base = [
-            accentDark[0] + (accentLight[0] - accentDark[0]) * (1 - chev),
-            accentDark[1] + (accentLight[1] - accentDark[1]) * (1 - chev),
-            accentDark[2] + (accentLight[2] - accentDark[2]) * (1 - chev),
-          ];
-          if (mott2 > 0.7) base = base.map((c, ci) => c * 0.35 + accentCream[ci] * 0.65);
+        if (local > 0.30 && local < 0.72 && pu > 0.22 && pu < 0.80) base = steelMid;          // inset panel
+        else if (local < 0.18 || pu < 0.16) base = steelLight;                               // raised edge
+        else base = steelDark;
+        let c = shift(base, plate.hue, (plate.val - 1) * 0.42);
+        const brush = 1 + 0.02 * Math.sin(y * 1.7 + large * 6) + micro + fine;
+        const seamV = local < 0.018 || local > 0.982;
+        const seamU = pu < 0.010 || pu > 0.990;
+        const seam = seamV || seamU;
+        // rivet rows along the outer inset border (regular spacing, 4 shades incl. iron shadow)
+        const rv = Math.abs(local - 0.30) < 0.020 || Math.abs(local - 0.72) < 0.020;
+        const ru = Math.abs(pu - 0.22) < 0.016 || Math.abs(pu - 0.80) < 0.016;
+        const rivet = (rv && pu > 0.18 && pu < 0.84 && Math.abs((pu * 12) % 1 - 0.5) > 0.34) ||
+          (ru && local > 0.26 && local < 0.76 && Math.abs((local * 8) % 1 - 0.5) > 0.30);
+        const dirt = bv > 0.78 ? (bv - 0.78) * 1.5 : 0;
+        const scuff = bv < 0.06 ? (0.06 - bv) * 5 : 0;
+        let r = c[0] * brush, g = c[1] * brush, b = c[2] * brush;
+        if (seam) { r *= 0.56; g *= 0.57; b *= 0.60; hgt = 0.30; }
+        else hgt = 0.5 + micro * 2;
+        if (rivet && !seam) {
+          const rvCol = RIVET[plate.rivet % 4];
+          const k = 0.86 + 0.14 * mid;
+          r = rvCol[0] * k; g = rvCol[1] * k; b = rvCol[2] * k; hgt = 0.74;
         }
-        const stripe = ((Math.floor(x / 20) % 2) === 0) ? 1.05 : 0.78;
-        const k = (0.9 + grain) * stripe;
-        col = [base[0] * k, base[1] * k, base[2] * k];
-        height[hi] = 0.5 + smooth(u, v, 4) * 0.2;
+        if (hash(Math.floor(x / 40), Math.floor((y + x * 0.6) / 6)) > 0.975) { r += 0.10; g += 0.10; b += 0.10; hgt += 0.15; }
+        const wear = 1 - dirt * 0.5 + scuff * 0.28;
+        col = [r * wear, g * wear, b * wear];
+      } else if (v < 0.62) {
+        // ---------------- leather: 3 tone segments + brass buckles + dark/off-white stitching
+        const bv = (v - 0.40) / 0.22;
+        const seg = Math.min(2, Math.floor(bv * 3));
+        const segH = hash(seg * 19 + 7, 5);
+        const base = [leatherDark[0] + (leatherLight[0] - leatherDark[0]) * (0.2 + 0.5 * segH),
+          leatherDark[1] + (leatherLight[1] - leatherDark[1]) * (0.2 + 0.5 * segH),
+          leatherDark[2] + (leatherLight[2] - leatherDark[2]) * (0.2 + 0.5 * segH)];
+        let c = shift(base, (segH - 0.5) * 0.1, (segH - 0.5) * 0.2);
+        const grainL = 1 + 0.045 * Math.sin(x * 0.9 + y * 0.2) + 0.035 * (mid - 0.5) + micro + fine;
+        const stitchV = Math.abs(((bv * 3) % 1) - 0.5) > 0.478 && (Math.floor(x / 5) % 2 === 0);
+        const stitchU = Math.abs(((u * 4) % 1) - 0.5) > 0.484 && (Math.floor(y / 5) % 2 === 0);
+        const worn = bv < 0.10 ? 0.16 : 0;
+        let r = c[0] * grainL + worn, g = c[1] * grainL + worn * 0.9, b = c[2] * grainL + worn * 0.8;
+        if (stitchV || stitchU) {
+          if (segH > 0.5) { r = OFFWHITE[0] * 0.55; g = OFFWHITE[1] * 0.55; b = OFFWHITE[2] * 0.55; }
+          else { r = leatherDark[0] * 0.7; g = leatherDark[1] * 0.7; b = leatherDark[2] * 0.7; }
+          hgt = 0.64;
+        }
+        // buckle: brass plate with a dark pin, at every segment boundary
+        const buckleV = Math.abs((bv * 3) % 1) < 0.022;
+        const buckleU = Math.abs((u * 2) % 1 - 0.5) < 0.11;
+        if (buckleV && buckleU) {
+          const k = 0.9 + 0.1 * mid;
+          r = brassLight[0] * k; g = brassLight[1] * k; b = brassLight[2] * k; hgt = 0.72;
+          if (Math.abs((u * 2) % 1 - 0.5) < 0.02) { r = RIVET[3][0]; g = RIVET[3][1]; b = RIVET[3][2]; }
+        }
+        const dirt = bv > 0.85 ? (bv - 0.85) * 1.2 : 0;
+        col = [r * (1 - dirt * 0.3), g * (1 - dirt * 0.3), b * (1 - dirt * 0.3)];
+      } else if (v < 0.86) {
+        // ---------------- cloth: 5 tone panels, folds, stitched seams, off-white rule + emblem block
+        const bv = (v - 0.62) / 0.24;
+        const panelU = u * CLOTH_PANELS;
+        const pid = Math.min(CLOTH_PANELS - 1, Math.floor(panelU));
+        const panel = panelTone(pid);
+        const pu = panelU % 1;
+        const base = [clothDark[0] + (clothMid[0] - clothDark[0]) * (0.35 + 0.5 * large),
+          clothDark[1] + (clothMid[1] - clothDark[1]) * (0.35 + 0.5 * large),
+          clothDark[2] + (clothMid[2] - clothDark[2]) * (0.35 + 0.5 * large)];
+        let c = shift(base, panel.hue, (panel.val - 1) * 0.9);
+        const weave = 1 + 0.022 * ((Math.floor(x / 2) + Math.floor(y / 2)) % 2 ? 1 : -1) + 0.03 * (mid - 0.5) + micro + fine;
+        const fold = 1 + 0.055 * Math.sin(bv * Math.PI * 8 + (pid * 0.7));
+        const seamU = pu < 0.009 || pu > 0.991;
+        const stitch = (Math.abs(pu - 0.035) < 0.014 || Math.abs(pu - 0.965) < 0.014) && (Math.floor(y / 6) % 2 === 0);
+        const dirt = bv > 0.78 ? (bv - 0.78) * 1.5 : 0;
+        let r = c[0] * weave * fold, g = c[1] * weave * fold, b = c[2] * weave * fold;
+        if (seamU) { r *= 0.55; g *= 0.55; b *= 0.58; hgt = 0.32; }
+        if (stitch) {
+          if (panel.stitch) { r = OFFWHITE[0] * 0.85; g = OFFWHITE[1] * 0.85; b = OFFWHITE[2] * 0.85; }
+          else { r = clothDark[0] * 0.55; g = clothDark[1] * 0.55; b = clothDark[2] * 0.55; }
+          hgt = 0.6;
+        }
+        if (dirt) { r *= 1 - dirt * 0.35; g *= 1 - dirt * 0.35; b *= 1 - dirt * 0.3; }
+        // emblem block near the top of emblem panels: dark shadow field + brass block + off-white rule
+        if (panel.emblem && bv > 0.02 && bv < 0.085 && pu > 0.28 && pu < 0.72) {
+          const stripe = Math.floor((pu - 0.28) * 12) % 3;
+          if (stripe === 0) { r = clothDark[0] * 0.55; g = clothDark[1] * 0.55; b = clothDark[2] * 0.55; }
+          else if (stripe === 1) { const k = 0.85 + 0.15 * mid; r = brass[0] * k; g = brass[1] * k; b = brass[2] * k; }
+          else { r = OFFWHITE[0] * 0.9; g = OFFWHITE[1] * 0.9; b = OFFWHITE[2] * 0.9; }
+          hgt = 0.64;
+        }
+        if (bv < 0.012) { const k = 0.9 + 0.1 * mid; r = OFFWHITE[0] * k; g = OFFWHITE[1] * k; b = OFFWHITE[2] * k; hgt = 0.62; }
+        col = [r, g, b];
+      } else {
+        // ---------------- trim band: alternating brass / steel / dark-leather segments + rivet heads
+        const bv = (v - 0.86) / 0.14;
+        const seg = Math.min(3, Math.floor(bv * 4));
+        const local = (bv * 4) % 1;
+        let c;
+        if (seg === 0) c = brass;
+        else if (seg === 1) c = steelLight;
+        else if (seg === 2) c = leatherDark;
+        else c = brassDark;
+        const segH = hash(seg * 13 + 3, 17);
+        c = shift(c, (segH - 0.5) * 0.06, (segH - 0.5) * 0.26);
+        const localSeg = (bv - seg * 0.25) / 0.25;
+        const groove = localSeg < 0.07 || localSeg > 0.93 || local < 0.02 || local > 0.98;
+        const polish = 1 + 0.05 * Math.sin(x * 0.08 + y * 0.03) + micro + fine;
+        let r = c[0] * polish, g = c[1] * polish, b = c[2] * polish;
+        if (groove) { r *= 0.5; g *= 0.5; b *= 0.55; hgt = 0.30; }
+        const rivetTrim = (Math.abs((u * 10) % 1 - 0.5) > 0.46) && (Math.abs((localSeg * 2) % 1 - 0.5) > 0.40);
+        if (rivetTrim) {
+          const rv = RIVET[(seg + 1) % 4];
+          r = rv[0] * (0.85 + 0.15 * mid); g = rv[1] * (0.85 + 0.15 * mid); b = rv[2] * (0.85 + 0.15 * mid); hgt = 0.72;
+        }
+        if (grain > 0.95) { r *= 0.7; g *= 0.7; b *= 0.72; }
+        col = [r, g, b];
       }
       albedo[i] = Math.max(0, Math.min(255, Math.round(col[0] * 255)));
       albedo[i + 1] = Math.max(0, Math.min(255, Math.round(col[1] * 255)));
       albedo[i + 2] = Math.max(0, Math.min(255, Math.round(col[2] * 255)));
+      height[hi] = hgt;
     }
   }
   const normal = Buffer.alloc(NW * NH * 3);
-  const S = 1.3;
+  const S = 2.4;
   for (let y = 0; y < NH; y++) {
     for (let x = 0; x < NW; x++) {
       const i = y * NW + x;
@@ -458,10 +402,11 @@ async function makeAtlas(palette, dim = 1024, opts = {}) {
     const v = y / NH;
     for (let x = 0; x < NW; x++) {
       const i = (y * NW + x) * 3;
-      const n = smooth(x / NW, v, 30);
-      if (v < 0.42) { orm[i] = 205 + n * 40; orm[i + 1] = 95 + n * 45; orm[i + 2] = 150 + n * 40; }
-      else if (v < 0.80) { orm[i] = 215 + n * 30; orm[i + 1] = 205 + n * 35; orm[i + 2] = 0; }
-      else { orm[i] = 220 + n * 25; orm[i + 1] = 150 + n * 40; orm[i + 2] = 90 + n * 30; }
+      const n = smooth(x / NW, v, 26);
+      if (v < 0.40) { orm[i] = 205 + n * 40; orm[i + 1] = 118 + n * 42; orm[i + 2] = 118 + n * 42; }
+      else if (v < 0.62) { orm[i] = 200 + n * 40; orm[i + 1] = 210 + n * 32; orm[i + 2] = 0; }
+      else if (v < 0.86) { orm[i] = 210 + n * 34; orm[i + 1] = 205 + n * 34; orm[i + 2] = 0; }
+      else { orm[i] = 215 + n * 30; orm[i + 1] = 88 + n * 40; orm[i + 2] = 168 + n * 44; }
     }
   }
   const [albedoJpeg, normalJpeg, ormJpeg] = await Promise.all([
@@ -471,6 +416,7 @@ async function makeAtlas(palette, dim = 1024, opts = {}) {
   ]);
   return {albedoJpeg, normalJpeg, ormJpeg};
 }
+
 /* ---------------------------------------------------------------- piece assembly */
 function buildPieces(name, cfg, piv) {
   const pieces = [];   // {geo, bone, band}  band: metal|cloth|accent
@@ -779,6 +725,7 @@ function buildPieces(name, cfg, piv) {
   };
 
   for (const piece of cfg.pieces) {
+    const pieceStart = pieces.length;
     switch (piece) {
       case 'greathelm': case 'visoredHelm': case 'plainHelm': case 'hornedHelm': case 'crestHelm':
         addHelm(piece); break;
@@ -804,7 +751,11 @@ function buildPieces(name, cfg, piv) {
       case 'backPlate': addBackPlate(); break;
       default: throw new Error('unknown armour piece ' + piece);
     }
+    for (let pi = pieceStart; pi < pieces.length; pi++) pieces[pi].name = piece;
   }
+  // cycle-15 v5: leather straps / underlayers / packs read as leather instead of steel or cloth
+  const LEATHER_PIECES = new Set(['belt', 'quiver', 'survivorPack', 'ropeBelt', 'pack', 'leatherCuirass', 'walkingStaff']);
+  for (const piece of pieces) if (LEATHER_PIECES.has(piece.name)) piece.band = 'leather';
   void neck; void P;
   return pieces;
 }
@@ -979,9 +930,8 @@ async function processBody(name, cfg, opts = {}) {
       const inGroup = (kind === 'cloth') === (piece.band === 'cloth');
       if (!inGroup) continue;
       const n = piece.geo.p.length / 3;
-      let v0 = 0, vh = 0.42;
-      if (piece.band === 'cloth') { v0 = 0.42; vh = 0.38; }
-      else if (piece.band === 'accent') { v0 = 0.80; vh = 0.20; }
+      const band = BAND_V5[piece.band] || BAND_V5.metal;
+      const v0 = band[0], vh = band[1];
       for (let i = 0; i < n; i++) {
         const k = (idx + i) * 2;
         const lu = g.uv[k], lv = g.uv[k + 1];

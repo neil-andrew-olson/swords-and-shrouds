@@ -655,6 +655,79 @@ Staged mirrors validated before each install (76/76 armour v3, 78/78 props), ato
 `tests/armory` 5/5 after both phases. `tests/equipment` is 5/5 for the cycle-5 state; the cycle-6
 rebuild below changes the survivor staff weighting, so that assertion needs the cycle-6 update.
 
+## Batch 2026-10R — armour atlas v5 (cycle 15)
+
+Rebaked the procedural **armour atlas** for all seven bodies to replace the cycle-6/7 strict-mask
+"hue chips / chip blocks / cloth patches" look, which read as rainbow patchwork at 2–3 m.
+
+### What changed in the bake
+
+`scripts/bake/bake-character-armour.mjs` `makeAtlas()` is a new four-band coherent-material atlas
+(the old `metalChips` / `metalHueAmp` / `chipBoost` / `chipBlocks` / `plateFamilies` / `plateGems` /
+`plateStripes` / `clothPatches` / `clothHueAmp` knobs are gone; all per-body `atlas:` option blocks
+were removed, so a rebuild cannot reintroduce the debug chips):
+
+| band (v) | material | content |
+| --- | --- | --- |
+| 0.00–0.40 | steel plate | large coherent field, low-frequency value variation, brushed streaks, four×six panel seams with regular brass rivets, top-edge scuffs, bottom weathering/dirt gradient, rare diagonal scratches |
+| 0.40–0.62 | dark leather | straps / underlayers / quivers / packs, fine grain, worn top edge, dashed brass stitching |
+| 0.62–0.86 | faction cloth | clean panel colour (deep red / steel blue / moss green / rust / brown), five vertical panel seams with highlight, restrained brass emblem rules near the top, hem dirt gradient, subtle weave |
+| 0.86–1.00 | brass trim | restrained warm accent for belts/trim/crests, grooved with worn polish |
+
+Pieces are assigned to bands by their own role: `belt`, `quiver`, `survivorPack`, `ropeBelt`, `pack`,
+`leatherCuirass`, `walkingStaff` → **leather**; cloth garments (tabards, cloaks, hoods, fur, packs cloth,
+tattered layers) → **cloth**; helmets/cuirasses/pauldrons/bracers/back plates → **steel**; belts/hem
+trim bits → **trim**. Steel and trim ORM metalness was lowered (0.47–0.63 steel, 0.66–0.83 trim)
+and matching roughness raised so the night IBL no longer blows the plate fields out to pale stone.
+
+Per-body palettes were re-authored around faction identity: templar steel + deep red, hero bright steel
++ steel blue, ally blue-grey steel + steel blue, berserker dark steel + rust, ranger dull steel + moss
+green + leather, survivor brown/tan leather+cloth, fallen dark violet steel + black-purple cloth.
+
+### v5.1 structured-variety pass (strict-mask repair)
+
+The coherent v5 atlas dropped the strict silhouette-mask palette below the gate because all of the
+random chip knobs were deleted. v5.1 keeps the coherent material read and adds **structured** variety
+only (no random chips), per the cycle-15b brief:
+- steel: 24 plates (4 rows × 6 columns), each with its own value/hue step, a raised edge highlight,
+  a mid-tone inset panel and regular rivet rows in three brass shades (`#c9a24b`, `#a87c2f`, `#8a6420`)
+  with dark-iron (`#4a4038`) shadow variants;
+- leather: 3 tone segments per strap with brass buckles, dark pins and dark/off-white dashed stitching;
+- cloth: 5 panels with per-panel tone/hue steps, fold shading, stitched seam lines, an off-white rule
+  and (on emblem panels) a 3-stripe emblem block in dark shadow / brass / off-white;
+- trim: alternating brass / steel / dark-leather segments with rivet heads at each end.
+Measured with the repo counter `qa/masked-palette.py` on the installed bytes (body image + armour image,
+both images summed as the counter reports):
+
+| body | body img | armour img | total | torso mean |
+| --- | --- | --- | --- | --- |
+| templar | 293 | 1018 | **1311** | 91.3 |
+| hero | 186 | 801 | **987** | 92.4 |
+| ally | 112 | 1102 | **1214** | 92.4 |
+| berserker | 89 | 627 | **716** | 91.0 |
+| ranger | 136 | 666 | **802** | 79.9 |
+| survivor | 104 | 624 | **728** | 87.1 |
+| fallen | 101 | 676 | **777** | 90.3 |
+All seven ≥560 (target) and ≥500 (house gate 7/7); torso means inside 60–95; file sizes
+718–746 KB. Backups: `temp_sketchlab/backups/armour_v4_cycle14/` (pre-v5) and
+`armour_v5_cycle15/` (v5 coherent-only). Captures: `temp_sketchlab/armour/c15b_{front,back}_sheet.png`.
+
+### Measured (viewer close-ups, before → after)
+
+| body | tris | prims | KB | torso mean (front) |
+| --- | --- | --- | --- | --- |
+| templar | 9,312 | 3 | 701.6 | 108.0 → 93.6 |
+| hero | 9,433 | 2 | 701.6 | 105.6 → 93.6 |
+| ally | 9,267 | 3 | 698.0 | 97.7 → 94.3 |
+| berserker | 8,749 | 3 | 680.5 | 97.9 → 91.1 |
+| ranger | 9,021 | 3 | 682.5 | 93.0 → 80.2 |
+| survivor | 9,001 | 3 | 677.4 | 94.5 → 88.0 |
+| fallen | 8,874 | 2 | 674.8 | 97.5 → 90.2 |
+All ≤900 KB, tri/prim/skin/clip counts unchanged, body/anim hashes verified unchanged per file.
+Before/after captures: `temp_sketchlab/armour/c15_before_{front,back}_sheet.png`,
+`c15_final_{front,back}_sheet.png`, per-body `c15_{body}_before_after.png`; v4 bytes backed up in
+`temp_sketchlab/backups/armour_v4_cycle14/`. Validator 87/87, tests/assets + equipment + armory 5/5.
+
 ## Batch 2026-10Q — windmill tower + sails (cycle 14)
 
 Two procedural night-palette assets (no warehouse windmill existed), built by

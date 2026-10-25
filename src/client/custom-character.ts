@@ -52,7 +52,7 @@ function buildGreatHelm():Headwear{
  add(new THREE.BoxGeometry(.024,.13,.016).translate(0,-.065,.181),dark);
  add(new THREE.CylinderGeometry(.20,.175,.055,12,1,true).translate(0,-.15,0),steel);
  const geo=mergeGeometries(parts)??parts[0];
- const mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0x5c6470,metalness:.55,roughness:.56,envMapIntensity:1.05,vertexColors:true}));
+ const mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0x4a515c,metalness:.55,roughness:.56,envMapIntensity:1.05,vertexColors:true}));
  mesh.name='procedural-great-helm';
  return {style:'great-helm',tris:geo.getAttribute('position').count/3,mesh,geo};
 }
@@ -259,7 +259,9 @@ const WIND_CACHE_KEY='ss-cloth-wind';
 // Cycle-14 character look pass v4: grade the sampled albedo (saturation + gentle contrast around
 // mid-grey), calm the cool Fresnel/env wash and keep cloth opaque, so characters read as cloth/steel
 // instead of pale glowing stone. Tone targets below compensate for the grade so night gates hold.
-const LOOK_GRADE={saturation:1.3,contrast:1.08,mid:.18};
+const LOOK_GRADE={saturation:1.12,contrast:1.04,mid:.18};
+const BODY_GRADE={saturation:.95,contrast:1.03,mid:.18};
+const CLOTH_GRADE={saturation:1.15,contrast:1.04,mid:.18};
 const RIM_WEIGHTS={armour:.10,cloth:.14,body:.12};
 const LOOK_ENV={armour:1.5,cloth:1.3,body:1.4};
 const LOOK_ROUGHNESS={armour:.78,cloth:.82,body:.76};
@@ -271,8 +273,8 @@ function factionFactors(hex:number):readonly [number,number,number]{const c=new 
 function helmetStyleFor(a:Actor):'great-helm'|'hood'{if(a.kind==='soldier')return 'great-helm';const key=lookKeyFor(a);return key==='ranger'||key==='survivor'?'hood':'great-helm';}
 const CLOTH_HUE:Record<string,readonly [number,number,number]>={templar:[.95,.86,.76],hero:[.88,.93,1],berserker:[.98,.86,.74],ranger:[.84,.96,.8],ally:[.78,.86,1],survivor:[.94,.88,.78],defender:[.95,.86,.76],flanker:[.84,.96,.8],heavy:[.98,.86,.74]};
 function clothHueFor(a:Actor):readonly [number,number,number]{const key=a.kind==='soldier'?(a.role??'defender'):(a.appearance??'templar');return CLOTH_HUE[key]??[1,1,1];}
-type CharacterLookState={rimWeights:{armour:number;cloth:number};grade:{saturation:number;contrast:number};transparentMaterials:string[];capeMaterial:{name:string;color:string;transparent:boolean}|null;helm:{present:boolean;style:'great-helm'|'hood';tris:number};factionTint:string;eyes:boolean};
-let lastCharacterLook:CharacterLookState={rimWeights:{armour:RIM_WEIGHTS.armour,cloth:RIM_WEIGHTS.cloth},grade:{saturation:LOOK_GRADE.saturation,contrast:LOOK_GRADE.contrast},transparentMaterials:[],capeMaterial:null,helm:{present:false,style:'great-helm',tris:0},factionTint:'#8fa2b8',eyes:false};
+type CharacterLookState={rimWeights:{armour:number;cloth:number};grade:{saturation:number;contrast:number;body:{saturation:number;contrast:number};cloth:{saturation:number;contrast:number}};transparentMaterials:string[];capeMaterial:{name:string;color:string;transparent:boolean}|null;helm:{present:boolean;style:'great-helm'|'hood';tris:number};factionTint:string;eyes:boolean};
+let lastCharacterLook:CharacterLookState={rimWeights:{armour:RIM_WEIGHTS.armour,cloth:RIM_WEIGHTS.cloth},grade:{saturation:LOOK_GRADE.saturation,contrast:LOOK_GRADE.contrast,body:{saturation:BODY_GRADE.saturation,contrast:BODY_GRADE.contrast},cloth:{saturation:CLOTH_GRADE.saturation,contrast:CLOTH_GRADE.contrast}},transparentMaterials:[],capeMaterial:null,helm:{present:false,style:'great-helm',tris:0},factionTint:'#8fa2b8',eyes:false};
 function installCharacterLookHook(){if(typeof window==='undefined')return;const hooks=window as unknown as Record<string,unknown>;if(!hooks.__ssCharacterLook)hooks.__ssCharacterLook=()=>lastCharacterLook;}
 export function characterLookState(){return lastCharacterLook;}
 /** Called by the scene when the quality tier changes; low removes the wind shader entirely. */
@@ -282,7 +284,7 @@ export function setCharacterWindQuality(tier:'low'|'medium'|'high'){
 }
 /** Test/debug visibility into the cloth-wind state (no allocation beyond the small object). */
 export function clothWindState(){return {enabled:clothWindEnabled,materials:clothMaterials.size,time:clothWindClock.value};}
-function repairCharacterMaterials(root:THREE.Object3D,clothHue:readonly [number,number,number],clothDeep:number,faction:readonly [number,number,number]){
+function repairCharacterMaterials(root:THREE.Object3D,clothHue:readonly [number,number,number],clothDeep:number){
  root.traverse(object=>{
   if(!(object instanceof THREE.SkinnedMesh))return;
   const list=(Array.isArray(object.material)?object.material:[object.material]) as THREE.MeshStandardMaterial[];
@@ -291,7 +293,10 @@ function repairCharacterMaterials(root:THREE.Object3D,clothHue:readonly [number,
    material.userData.ssReadable=true;
    const armour=ARMOUR_MATERIAL.test(material.name||''),cloth=!armour&&CLOTH_MATERIAL.test(material.name||'');
    // Sane night-PBR response; armour keeps a touch more env response, cloth stays matte.
-   material.metalness=Math.min(material.metalness??0,.35);
+   const body=!armour&&!cloth;
+   // v5: preserve the atlas' authored steel metalness (asset-forge lowered it deliberately) instead of
+   // clamping every prim to .35, which flattened the new plates back into pale stone.
+   material.metalness=cloth?Math.min(material.metalness??0,.08):body?Math.min(material.metalness??0,.08):Math.min(material.metalness??0,.65);
    material.roughness=Math.max(material.roughness??1,armour?LOOK_ROUGHNESS.armour:LOOK_ROUGHNESS.cloth);
    const lookEnv=armour?LOOK_ENV.armour:LOOK_ENV.cloth;
    material.envMapIntensity=lookEnv;material.userData.ssEnvMapIntensity=lookEnv;material.userData.ssLookV4=true;
@@ -317,15 +322,18 @@ function repairCharacterMaterials(root:THREE.Object3D,clothHue:readonly [number,
    // a little more env response so plates read as metal next to darker cloth. Map, normal, AO and
    // ORM maps are left untouched.
    if(!bypassedMap){
-    const tintSrgb=Math.min(1,Math.max(.62,(armour?88:90)/Math.max(24,sampled)));
+    const tintSrgb=Math.min(1,Math.max(.45,96/Math.max(24,sampled)));
     material.color.multiplyScalar(Math.pow(tintSrgb,2.2));
    }
    // Cycle-14 faction armour steel: hue-only multiply so the atlas patchwork reads as deliberate steel and
    // the body mean stays inside the 65–95 gate; cloth keeps its deep faction cloth colour below.
-   if(!cloth)material.color.multiply(new THREE.Color(faction[0],faction[1],faction[2]));
+   // v5: the atlas carries the faction palette now, so no client faction multiply. Body-scan limbs get a
+   // slight warm/desaturating tone so they sit with the crafted steel/leather instead of pale blue stone.
+   if(!cloth)material.color.multiply(armour?new THREE.Color(.88,.93,1.0):new THREE.Color(.8,.74,.66));
+   else material.color.multiply(new THREE.Color(1.0,.98,.94));
    // Cycle-14: character cloth is always opaque (no ghost capes/panels) and tinted away from the
    // pale atlas purple toward a deeper per-class faction tone; double-sided stays only for cloth.
-   if(cloth){material.transparent=false;material.opacity=1;material.depthWrite=true;material.alphaTest=0;material.side=THREE.DoubleSide;material.userData.isCloth=true;material.map=null;material.color.setHex(clothDeep);material.emissive.setHex(0);material.emissiveIntensity=1;}
+   if(cloth){material.transparent=false;material.opacity=1;material.depthWrite=true;material.alphaTest=0;material.side=THREE.DoubleSide;material.userData.isCloth=true;}
    else material.userData.isCloth=false;
    // Calmer cool dusk Fresnel rim (armour .10, cloth .14, body .12) so bodies read as cloth/steel.
    const rimColour=armour?'vec3(.26,.33,.42)':'vec3(.24,.30,.38)',rimWeight=armour?RIM_WEIGHTS.armour:cloth?RIM_WEIGHTS.cloth:RIM_WEIGHTS.body;
@@ -336,9 +344,9 @@ function repairCharacterMaterials(root:THREE.Object3D,clothHue:readonly [number,
     const height=Math.max(.001,bounds.max.y-bounds.min.y);
     material.userData.windMinY=bounds.min.y;material.userData.windHeight=height;material.userData.windAmp=height*.03;
    }
-   const classTint=armour?'vec3(.96,1.0,1.06)':'vec3(1.0)';
+   const grade=armour?LOOK_GRADE:cloth?CLOTH_GRADE:BODY_GRADE;
    material.onBeforeCompile=shader=>{
-    shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>\r\nfloat ssLum=dot(diffuseColor.rgb,vec3(.299,.587,.114));\r\ndiffuseColor.rgb=mix(vec3(ssLum),diffuseColor.rgb,${LOOK_GRADE.saturation});\r\ndiffuseColor.rgb=(diffuseColor.rgb-${LOOK_GRADE.mid})*${LOOK_GRADE.contrast}+${LOOK_GRADE.mid};\r\ndiffuseColor.rgb=max(diffuseColor.rgb,vec3(0.0))*${classTint};`);
+    shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>\r\nfloat ssLum=dot(diffuseColor.rgb,vec3(.299,.587,.114));\r\ndiffuseColor.rgb=mix(vec3(ssLum),diffuseColor.rgb,${grade.saturation});\r\ndiffuseColor.rgb=(diffuseColor.rgb-${grade.mid})*${grade.contrast}+${grade.mid};\r\ndiffuseColor.rgb=max(diffuseColor.rgb,vec3(0.0));`);
     shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>',`float ssRim=pow(1.0-clamp(dot(normalize(normal),normalize(vViewPosition)),0.0,1.0),2.5);\noutgoingLight+=${rimColour}*(ssRim*${rimWeight});\n#include <opaque_fragment>`);
     if(cloth){
      // Bind-space sway before skinning: hem (norm 0) moves ~3 % of the piece, waist/head stays put.
@@ -467,8 +475,6 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
  const lookHue=clothHueFor(a);
  const soldier=a.kind==='soldier';
  const lookDeep=soldier?0x474b53:(DEEP_CLOTH[lookKey]??0x3a4258);
- const factionHex=soldier?0x8fa2b8:(FACTION_STEEL[lookKey]??0x8fa2b8);
- const faction=factionFactors(factionHex);
  let proceduralHeadwear:{group:THREE.Group;head:THREE.Object3D;style:'great-helm'|'hood'}|null=null;
  let headwearInfo:{style:'great-helm'|'hood';tris:number}|null=null;
  if(head&&(a.kind==='player'||a.kind==='soldier')){
@@ -478,11 +484,11 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
   group.add(headwear.mesh);pivot.add(group);proceduralGeometries.push(headwear.geo);
   proceduralHeadwear={group,head,style};headwearInfo={style,tris:Math.round(headwear.tris)};
  }
- repairCharacterMaterials(model,lookHue,lookDeep,faction);
+ repairCharacterMaterials(model,lookHue,lookDeep);
  // QA look-pass state: last rig wins, matching the other __ss* hooks.
  const lookMaterials:{transparentMaterials:string[];capeMaterial:CharacterLookState['capeMaterial']}={transparentMaterials:[],capeMaterial:null};
  model.traverse(o=>{if(!(o instanceof THREE.Mesh))return;for(const m of Array.isArray(o.material)?o.material:[o.material]){const mat=m as THREE.MeshStandardMaterial;if(!mat||!mat.isMeshStandardMaterial)continue;if(mat.transparent)lookMaterials.transparentMaterials.push(mat.name||'(unnamed)');if(mat.userData.isCloth&&!lookMaterials.capeMaterial)lookMaterials.capeMaterial={name:mat.name||'(unnamed)',color:'#'+mat.color.getHexString(),transparent:mat.transparent};}});
- lastCharacterLook={rimWeights:{armour:RIM_WEIGHTS.armour,cloth:RIM_WEIGHTS.cloth},grade:{saturation:LOOK_GRADE.saturation,contrast:LOOK_GRADE.contrast},...lookMaterials,helm:{present:!!headwearInfo,style:headwearInfo?.style??'great-helm',tris:headwearInfo?.tris??0},factionTint:'#'+factionHex.toString(16).padStart(6,'0'),eyes:false};
+ lastCharacterLook={rimWeights:{armour:RIM_WEIGHTS.armour,cloth:RIM_WEIGHTS.cloth},grade:{saturation:LOOK_GRADE.saturation,contrast:LOOK_GRADE.contrast,body:{saturation:BODY_GRADE.saturation,contrast:BODY_GRADE.contrast},cloth:{saturation:CLOTH_GRADE.saturation,contrast:CLOTH_GRADE.contrast}},...lookMaterials,helm:{present:!!headwearInfo,style:headwearInfo?.style??'great-helm',tris:headwearInfo?.tris??0},factionTint:'atlas',eyes:false};
  installCharacterLookHook();
  const eliteAddOn=buildEliteUndeadAddOn(model,a);
  if(eliteAddOn)proceduralGeometries.push(eliteAddOn.geometry);
