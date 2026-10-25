@@ -655,6 +655,46 @@ Staged mirrors validated before each install (76/76 armour v3, 78/78 props), ato
 `tests/armory` 5/5 after both phases. `tests/equipment` is 5/5 for the cycle-5 state; the cycle-6
 rebuild below changes the survivor staff weighting, so that assertion needs the cycle-6 update.
 
+## Batch 2026-10S — body-scan base-atlas tone pass (cycle 16)
+
+The v5.1 armour atlas reads coherently, but the **base body colour atlas** (arms / legs / torso skin +
+underlayer, a separate 512² scan texture) still read pale blue-grey next to the steel and leather.
+Cycle 16 tones that texture only: warm + desaturate + a slight value floor and a gentle overall value
+reduction, so the limbs read as a skin/leather underlayer instead of bright stone, while contrast is
+preserved so faces/hands stay readable.
+
+Builder: `scripts/bake/tone-body-atlas.mjs` (operates on the shipped GLBs, replaces only the body
+primitive's baseColor texture; verifies body indices/positions and every animation hash unchanged and
+every other texture byte-identical). Parameters: `desat 0.74`, `warm 1.10` / `blue 0.85`,
+`value 0.86`, `floor 0.03` (all CLI-overridable).
+
+| body | torso mean before → after | p50 | torso sat | arms mean/sat | legs mean/sat |
+| --- | --- | --- | --- | --- | --- |
+| templar | 101.4 → 88.9 | 102.6 → 87.7 | 0.20 → 0.34 | 86.6 → 77.3 / .34 | 79.2 → 66.6 / .36 |
+| hero | 103.3 → 90.6 | 104.2 → 89.5 | 0.16 → 0.31 | 82.2 → 73.3 / .31 | 81.8 → 69.2 / .31 |
+| ally | 101.1 → 88.5 | 99.3 → 84.7 | 0.17 → 0.32 | 84.5 → 74.6 / .29 | 81.6 → 68.8 / .33 |
+| berserker | 96.8 → 84.3 | 95.4 → 81.5 | 0.19 → 0.35 | 73.5 → 65.4 / .33 | 75.8 → 64.9 / .32 |
+| ranger | 96.2 → 84.5 | 95.3 → 81.3 | 0.19 → 0.34 | 67.9 → 61.3 / .36 | 77.3 → 65.1 / .33 |
+| survivor | 94.1 → 82.4 | 92.4 → 78.5 | 0.20 → 0.34 | 82.9 → 70.3 / .39 | 75.6 → 64.2 / .32 |
+| fallen | 100.6 → 87.8 | 97.6 → 83.7 | 0.16 → 0.32 | 66.6 → 58.1 / .36 | 76.9 → 65.3 / .31 |
+
+(stats: night viewer, front capture at 2.5 m, background/ground masked; "arms"/"legs" are fixed side
+and lower-leg boxes.)
+
+Strict silhouette-mask palette with the repo counter `qa/masked-palette.py` on the installed bytes:
+templar **1246** (228+1018) · hero **982** (181+801) · ally **1265** (163+1102) ·
+berserker **805** (178+627) · ranger **839** (171+668) · survivor **801** (177+624) ·
+fallen **850** (174+676) → **7/7 ≥801**, all ≥560. Files 726.0–752.3 KB. Body/anim
+hashes and prim/skin/clip counts unchanged; only texture index 0 differs from the pre-pass backup
+(armour textures byte-identical). Validator 87/87, tests/assets + equipment + armory 5/5.
+Backups: `temp_sketchlab/backups/v51_pre_bodytone_cycle16/` (armour v5.1 + old body atlas) and the
+`armour_v5_cycle15/` / `armour_v4_cycle14/` sets. Before/after captures:
+`temp_sketchlab/armour/c16_{before,final}_{front,back}_sheet.png`, head check `c16_{before,after}_hero_head.png`.
+
+QA gate recommendation for the limb tone: in-game front capture, measure torso and fixed forearm /
+lower-leg boxes: limb mean should be ≤ torso mean + 3 (limbs no longer brighter/paler), limb saturation
+≥ 0.25, torso mean/p50 inside 60–95, strict mask 7/7 ≥560.
+
 ## Batch 2026-10R — armour atlas v5 (cycle 15)
 
 Rebaked the procedural **armour atlas** for all seven bodies to replace the cycle-6/7 strict-mask

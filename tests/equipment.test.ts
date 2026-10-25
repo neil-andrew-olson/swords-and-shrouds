@@ -1,6 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import * as THREE from 'three';import {equipmentModel} from '../src/client/equipment';
 test('weapon fit handles sideways, flat and upright exports without oversized geometry',()=>{for(const dimensions of [[.01,100,.01],[100,.01,.01],[.01,.01,100]]){const source=new THREE.Group();const mesh=new THREE.Mesh(new THREE.BoxGeometry(...dimensions as [number,number,number]),new THREE.MeshStandardMaterial());mesh.position.set(4,8,-6);source.add(mesh);const fit=equipmentModel(source,.9);fit.updateMatrixWorld(true);const size=new THREE.Box3().setFromObject(fit).getSize(new THREE.Vector3());assert.ok(Math.abs(Math.max(size.x,size.y,size.z)-.9)<1e-5);assert.ok(size.y>.89);}});
-import {readFileSync} from 'node:fs';import {gunzipSync} from 'node:zlib';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {customCharacter,undeadEliteTier,setCharacterWindQuality,clothWindState,triggerEnemyHit,setHitFeedbackReducedMotion} from '../src/client/custom-character';import type {Actor} from '../src/shared/types';
+import {readFileSync} from 'node:fs';import {gunzipSync} from 'node:zlib';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {customCharacter,undeadEliteTier,setCharacterWindQuality,clothWindState,triggerEnemyHit,setHitFeedbackReducedMotion,runTimeScaleFor,slideFactorFor,attackTimingFor,deathVariantFor,idlePhaseFor,landingImpulseFor} from '../src/client/custom-character';import type {Actor} from '../src/shared/types';
 async function geometryAsset(name:string){const b=gunzipSync(readFileSync(`public/assets/custom/${name}.glb.gz`));const len=b.readUInt32LE(12),j=JSON.parse(b.toString('utf8',20,20+len));delete j.images;delete j.textures;delete j.samplers;
  // Keep material names/indices (armour-prim classification) but drop texture references so no image decode is needed.
  j.materials=(j.materials??[{}]).map((m:any)=>({name:m.name||'mat',doubleSided:!!m.doubleSided,pbrMetallicRoughness:{metallicFactor:m.pbrMetallicRoughness?.metallicFactor??1,roughnessFactor:m.pbrMetallicRoughness?.roughnessFactor??1}}));
@@ -20,6 +20,18 @@ assert.match((survivorShield!.parent?.name??'').replace(/^mixamorig:?/i,''),/Lef
 for(let i=0;i<90;i++){survivorActor.block=i>20&&i<30;if(i===35)survivorActor.attackSerial=1;if(i===60)survivorActor.hp=0;survivorRig.update(survivorActor,i>5&&i<20,1/30);survivorRig.model.updateMatrixWorld(true);
  const bounds=meshBounds(survivorRig.model);assert.ok(Number.isFinite(bounds.min.y)&&bounds.min.y>-.12&&bounds.min.y<.2,'survivor player ground '+i+' '+bounds.min.y);
  for(const part of ['sword','shield']){const item=survivorRig.model.getObjectByName('equipment-'+part);assert.ok(item,'survivor '+part+' present frame '+i);const size=new THREE.Box3().setFromObject(item!,true).getSize(new THREE.Vector3());assert.ok(size.length()<1.6,'survivor '+part+' size frame '+i);}}
+// Cycle-16 animation-depth pure helpers (run playback/slide, class attack timing, death variation, idle phase, landing).
+ const matchedScale=runTimeScaleFor(4.2,false);assert.ok(Math.abs(matchedScale-1)<1e-9);assert.ok(Math.abs(slideFactorFor(4.2,matchedScale,false))<1e-9,'steady run has no foot slide');
+ assert.ok(runTimeScaleFor(.2,false)>=.6&&runTimeScaleFor(12,false)<=1.35,'run timescale clamps');
+ assert.ok(slideFactorFor(8,runTimeScaleFor(8,false),false)>0,'fast run leaves residual slide at the clamp');
+ const thrust=attackTimingFor('thrust',.65),cleave=attackTimingFor('cleave',1.1),crush=attackTimingFor('crush',1.15);
+ assert.equal(thrust.clip,'attack_1');assert.equal(cleave.clip,'attack_2');assert.equal(crush.clip,'attack_2');
+ assert.ok(thrust.windupMs<cleave.windupMs&&cleave.windupMs<crush.windupMs,'windup grows by weapon class');
+ assert.ok(thrust.duration<cleave.duration&&cleave.duration<crush.duration,'thrust recovers quickest');
+ assert.equal(crush.windupMs,483,'crush windup tied to 1.15 s cooldown');assert.equal(crush.duration,1.15*.95);
+ const deathA=deathVariantFor('a1'),deathB=deathVariantFor('b7');assert.equal(deathVariantFor('a1'),deathA,'death variant deterministic');assert.ok(deathA>=-25&&deathA<=25);assert.notEqual(deathA,deathB,'death variants differ per actor');
+ assert.equal(idlePhaseFor(0),0);assert.ok(Math.abs(idlePhaseFor(3.2))<1e-9,'idle phase wraps at 3.2 s');assert.ok(idlePhaseFor(1.6)>1);
+ assert.equal(landingImpulseFor(4.2,4.2),0);assert.ok(landingImpulseFor(6,.5)>0,'abrupt stop triggers crouch impulse');
 survivorRig.dispose();});
 
 import {WEAPON_IDS,WEAPONS} from '../src/shared/weapons';

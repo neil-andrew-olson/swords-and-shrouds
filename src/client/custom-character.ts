@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {weaponStats} from '../shared/weapons';
 import {meshBounds,grounder} from './grounding';
-import {equipmentModel} from './equipment';
+import {equipmentModel,weaponCombatProfile,type CombatSwingStyle} from './equipment';
 import {clone} from 'three/addons/utils/SkeletonUtils.js';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {NEST} from '../shared/world';
@@ -329,7 +329,7 @@ function repairCharacterMaterials(root:THREE.Object3D,clothHue:readonly [number,
    // the body mean stays inside the 65–95 gate; cloth keeps its deep faction cloth colour below.
    // v5: the atlas carries the faction palette now, so no client faction multiply. Body-scan limbs get a
    // slight warm/desaturating tone so they sit with the crafted steel/leather instead of pale blue stone.
-   if(!cloth)material.color.multiply(armour?new THREE.Color(.88,.93,1.0):new THREE.Color(.8,.74,.66));
+   if(!cloth)material.color.multiply(armour?new THREE.Color(.88,.93,1.0):new THREE.Color(.9,.88,.86));
    else material.color.multiply(new THREE.Color(1.0,.98,.94));
    // Cycle-14: character cloth is always opaque (no ghost capes/panels) and tinted away from the
    // pale atlas purple toward a deeper per-class faction tone; double-sided stays only for cloth.
@@ -370,6 +370,54 @@ transformed.z+=cos(ssPhase*0.85)*ssSway*0.65;`);
    material.needsUpdate=true;
   }
  });
+}
+// ---------------------------------------------------------------------------------------------
+// Cycle-16 animation-depth helpers (pure, deterministic, tested): run playback vs ground speed,
+// weapon-class attack timing, per-actor death variation, idle phase and landing/step impulse.
+export type AttackKind=CombatSwingStyle;
+export type AttackTiming={kind:AttackKind;clip:string;windupMs:number;duration:number};
+export const ANIM_STRIDE={light:4.2,heavy:3.6};
+export function runTimeScaleFor(speed:number,heavy=false):number{
+ const stride=heavy?ANIM_STRIDE.heavy:ANIM_STRIDE.light;
+ return Math.max(.6,Math.min(1.35,speed/Math.max(.001,stride)));
+}
+/** 0 = feet exactly match ground travel; >0 = residual slide when the clamp cannot follow speed. */
+export function slideFactorFor(speed:number,timeScale:number,heavy=false):number{
+ const target=(heavy?ANIM_STRIDE.heavy:ANIM_STRIDE.light)*timeScale;
+ if(target<=0)return 0;
+ return Math.min(1,Math.abs(speed-target)/target);
+}
+export function attackTimingFor(kind:AttackKind,cooldown:number):AttackTiming{
+ const cd=Math.max(.2,cooldown);
+ if(kind==='thrust')return {kind,clip:'attack_1',windupMs:Math.round(cd*.26*1000),duration:cd*.78};
+ if(kind==='cleave')return {kind,clip:'attack_2',windupMs:Math.round(cd*.38*1000),duration:cd*.9};
+ if(kind==='crush')return {kind,clip:'attack_2',windupMs:Math.round(cd*.42*1000),duration:cd*.95};
+ return {kind,clip:'attack_2',windupMs:Math.round(cd*.34*1000),duration:cd*.88};
+}
+/** Deterministic per-actor corpse yaw offset in degrees, ±25°, stable across sessions. */
+export function deathVariantFor(actorId:string):number{
+ let h=2166136261>>>0;
+ for(let i=0;i<actorId.length;i++){h^=actorId.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}
+ return (h%51)-25;
+}
+export function idlePhaseFor(seconds:number):number{return (Math.max(0,seconds)*Math.PI*2/3.2)%(Math.PI*2);}
+/** Tiny crouch impulse from abrupt deceleration (0 = none, 1 = full), no gameplay effect. */
+export function landingImpulseFor(prevSpeed:number,speed:number):number{
+ const drop=Math.max(0,prevSpeed-speed);
+ return drop>2.2?Math.min(1,(drop-2.2)/4):0;
+}
+export type AnimState={actorId:string;state:string;speed:number;runTimeScale:number;slideFactor:number;attackKind:AttackKind;windupMs:number;idlePhase:number;deathVariant:number;reducedMotion:boolean};
+const animRigs=new Map<string,{animState:()=>AnimState}>();
+function installAnimHooks(){
+ if(typeof window==='undefined')return;
+ const hooks=window as unknown as Record<string,unknown>;
+ if(hooks.__ssAnimState)return;
+ hooks.__ssAnimState=(actorId?:string)=>{
+  if(actorId){const rig=animRigs.get(actorId);return rig?rig.animState():null;}
+  return [...animRigs.values()].length?[...animRigs.values()][animRigs.size-1].animState():null;
+ };
+ hooks.__ssAnimActors=()=>[...animRigs.values()].map(rig=>rig.animState());
+ hooks.__ssDeathVariants=()=>Object.fromEntries([...animRigs.keys()].map(id=>[id,deathVariantFor(id)]));
 }
 // ---------------------------------------------------------------------------------------------
 // Cycle-8 combat hit feedback v2 (client-only). Weapon-scaled emissive flash + short stagger, driven
@@ -497,7 +545,7 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
  const isEquipmentMesh=(object:THREE.Object3D)=>{let parent:THREE.Object3D|null=object;while(parent){if(parent.name&&parent.name.startsWith('equipment-'))return true;parent=parent.parent;}return false;};
  const captureHitMaterials=()=>{if(hitMaterials)return hitMaterials;const list:THREE.MeshStandardMaterial[]=[];model.traverse(o=>{if(!(o instanceof THREE.Mesh)||isEquipmentMesh(o))return;for(const material of Array.isArray(o.material)?o.material:[o.material])if(material instanceof THREE.MeshStandardMaterial&&!list.includes(material))list.push(material);});hitMaterials=list;return list;};
  const restoreHitMaterials=()=>{if(!hitMaterials)return;for(const material of hitMaterials){const original=material.userData.ssHitEmissive as number|undefined;if(original===undefined)continue;material.emissive.setHex(original);material.emissiveIntensity=(material.userData.ssHitEmissiveIntensity as number|undefined)??1;delete material.userData.ssHitEmissive;delete material.userData.ssHitEmissiveIntensity;}};
- let hitFlashRemaining=0,hitFlashDuration=0,hitFlashWeight=0,hitFlashColorHex=0,hitStaggerRemaining=0,hitStaggerDuration=0,hitStaggerMagnitude=0,hitClock=0,hitCount=0,hitReduced=false;
+ let hitFlashRemaining=0,hitFlashDuration=0,hitFlashWeight=0,hitFlashColorHex=0,hitStaggerRemaining=0,hitStaggerDuration=0,hitStaggerMagnitude=0,hitClock=0,hitCount=0,hitReduced=false,landingCrouch=0;
  const hit=(options:HitFeedbackOptions={})=>{
   const weight=Math.max(.5,Math.min(2,options.weight??1));
   const reduced=options.reduced??combatHitReduced;hitReduced=reduced;
@@ -511,7 +559,7 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
   }
   hitFlashRemaining=duration;hitFlashDuration=duration;hitFlashWeight=weight;
   hitStaggerDuration=Math.max(60,Math.min(240,120+weight*45));
-  hitStaggerRemaining=hitStaggerDuration;hitStaggerMagnitude=options.stagger??(.055+weight*.045);
+  hitStaggerRemaining=hitStaggerDuration;hitStaggerMagnitude=options.stagger??(.055+weight*.045);landingCrouch=Math.max(landingCrouch,.55);
   lastHitFeedback={hits:combatHitCount,flashActive:true,flashRemainingMs:hitFlashRemaining,flashDurationMs:hitFlashDuration,flashWeight:weight,staggerActive:true,staggerRemainingMs:hitStaggerRemaining,staggerMagnitude:hitStaggerMagnitude,reduced:false,lastFlashColor:hitFlashColorHex,actorId:a.id};
  };
  const hitState=():HitFeedbackState=>({hits:hitCount,flashActive:hitFlashRemaining>0,flashRemainingMs:Math.max(0,hitFlashRemaining),flashDurationMs:hitFlashDuration,flashWeight:hitFlashWeight,staggerActive:hitStaggerRemaining>0,staggerRemainingMs:Math.max(0,hitStaggerRemaining),staggerMagnitude:hitStaggerMagnitude,reduced:hitReduced,lastFlashColor:hitFlashColorHex,actorId:a.id});
@@ -520,13 +568,33 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
   const c=clip.clone();
   const action=mixer.clipAction(c);if(/attack|slash|death|impact/.test(c.name)){action.setLoop(THREE.LoopOnce,1);action.clampWhenFinished=true;}actions.set(c.name,action);
  }
- let state='',serial=a.attackSerial??0,attackTime=0;
- const rig:HitFeedbackRig&{model:THREE.Group;fragments:THREE.Mesh[];update:(actor:Actor,moving:boolean,dt:number)=>void;dispose:()=>void}={model:pivot,fragments:[] as THREE.Mesh[],hit,hitState,update:(actor:Actor,moving:boolean,dt:number)=>{
-  if((actor.attackSerial??0)!==serial){serial=actor.attackSerial??0;attackTime=weaponStats(actor.weapon).cooldown*.85;}
+ let state='',serial=a.attackSerial??0,attackTime=0,attackClip='attack_1',attackDuration=.8,attackWindupMs=260;
+ let lastX=a.x,lastZ=a.z,prevSpeed=0,idleClock=0,deathApplied=false;
+ const deathVariant=deathVariantFor(a.id);
+ const spine=getBone('mixamorigSpine2')??getBone('mixamorigSpine')??getBone('Spine');
+ const anim:AnimState={actorId:a.id,state:'idle',speed:0,runTimeScale:1,slideFactor:0,attackKind:weaponCombatProfile(a.weapon).style,windupMs:0,idlePhase:0,deathVariant,reducedMotion:false};
+ const rig:HitFeedbackRig&{model:THREE.Group;fragments:THREE.Mesh[];animState:()=>AnimState;update:(actor:Actor,moving:boolean,dt:number)=>void;dispose:()=>void}={model:pivot,fragments:[] as THREE.Mesh[],hit,hitState,animState:()=>({...anim}),update:(actor:Actor,moving:boolean,dt:number)=>{
+  const heavy=actor.armor==='heavy',reduced=combatHitReduced;
+  const speed=dt>0?Math.min(8,Math.hypot(actor.x-lastX,actor.z-lastZ)/dt):0;
+  const timing=attackTimingFor(weaponCombatProfile(actor.weapon).style,weaponStats(actor.weapon).cooldown);
+  if((actor.attackSerial??0)!==serial){serial=actor.attackSerial??0;attackClip=timing.clip;attackDuration=timing.duration;attackWindupMs=timing.windupMs;attackTime=timing.duration;}
   attackTime=Math.max(0,attackTime-dt);
-  const next=actor.hp<=0?'death_forward':attackTime>0?(serial%2?'attack_1':'attack_2'):actor.block?'block_idle':moving?'run':'idle';
-  if(next!==state){actions.get(state)?.fadeOut(.12);const action=actions.get(next)??actions.get(next.startsWith('attack')?'slash_1':'idle');action?.reset().fadeIn(.12).play();if(action&&next.startsWith('attack'))action.setDuration(weaponStats(actor.weapon).cooldown*.85);state=next;}
-  const run=actions.get('run');if(run)run.timeScale=actor.armor==='heavy'?.8:1;mixer.update(dt);
+  const next=actor.hp<=0?'death_forward':attackTime>0?attackClip:actor.block?'block_idle':moving?'run':'idle';
+  if(next!==state){actions.get(state)?.fadeOut(.12);const action=actions.get(next)??actions.get(next.startsWith('attack')?'slash_1':'idle');action?.reset().fadeIn(.12).play();if(action&&next.startsWith('attack')){action.setDuration(attackDuration);action.timeScale=1;}state=next;}
+  const run=actions.get('run');const runTimeScale=runTimeScaleFor(speed,heavy);if(run)run.timeScale=runTimeScale;
+  const slideFactor=moving?slideFactorFor(speed,runTimeScale,heavy):0;
+  if(next==='idle'){idleClock+=dt;}else idleClock=0;
+  const idlePhase=idlePhaseFor(idleClock);
+  mixer.update(dt);
+  // Idle life: subtle breathing/weight sway on the spine (procedural, reduced-motion safe).
+  if(next==='idle'&&!reduced&&spine){spine.rotation.z+=Math.sin(idlePhase)*.012;spine.rotation.x+=Math.sin(idlePhase*.62)*.006;}
+  // Deterministic per-actor death yaw so crowds do not fall identically.
+  if(actor.hp<=0&&!deathApplied){deathApplied=true;pivot.rotation.y=Math.PI+deathVariant*Math.PI/180;}
+  else if(actor.hp>0&&deathApplied){deathApplied=false;pivot.rotation.y=Math.PI;}
+  // Attack anticipation lean / follow-through on the pivot (grounded after the lean is applied).
+  let lean=0;
+  if(attackTime>0&&!reduced){const p=Math.max(0,Math.min(1,1-attackTime/attackDuration));const wind=Math.min(.9,attackWindupMs/(Math.max(.001,attackDuration)*1000));lean=p<wind?-.055*(p/Math.max(.001,wind)):.06*((p-wind)/Math.max(.001,1-wind));}
+  pivot.rotation.x=lean;
   // Imported armatures rotate their local axes. Remove root travel in character space, not guessed bone axes.
   pivot.updateWorldMatrix(true,true);if(hips){pivot.worldToLocal(hips.getWorldPosition(hipPoint));model.position.x-=hipPoint.x-hipOrigin.x;model.position.z-=hipPoint.z-hipOrigin.z;}
   if(proceduralHeadwear){proceduralHeadwear.head.getWorldPosition(headFxWorld);pivot.worldToLocal(headFxWorld);proceduralHeadwear.group.position.set(headFxWorld.x,headFxWorld.y+(proceduralHeadwear.style==='hood'?.10:.09),headFxWorld.z+.005);}
@@ -534,12 +602,20 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
   ground(actor.hp<=0);pivot.updateMatrixWorld(true);
   if(actor.hp>0&&next!=='block_idle')poseSupportHand();
   for(const {bone,grip} of attachments){const sc=bone.getWorldScale(new THREE.Vector3());grip.scale.set(1/Math.max(.00001,sc.x),1/Math.max(.00001,sc.y),1/Math.max(.00001,sc.z));}
+  // Landing/step reaction: tiny crouch impulse from abrupt stop or knockback (no gameplay effect).
+  const impulse=reduced?0:landingImpulseFor(prevSpeed,speed);
+  if(impulse>landingCrouch)landingCrouch=impulse;
+  landingCrouch*=Math.exp(-dt*9);
+  if(landingCrouch>.01&&!reduced)model.position.y-=Math.min(.03,landingCrouch*.03);
+  prevSpeed=speed;lastX=actor.x;lastZ=actor.z;
   // Combat feedback decay; the stagger offsets live on the pivot so grounding/animation are intact.
   hitClock+=dt;
   if(hitFlashRemaining>0){hitFlashRemaining-=dt*1000;if(hitFlashRemaining<=0){hitFlashRemaining=0;restoreHitMaterials();}}
   if(hitStaggerRemaining>0){hitStaggerRemaining-=dt*1000;const k=Math.max(0,hitStaggerRemaining/hitStaggerDuration);pivot.position.x=Math.sin(hitClock*46)*hitStaggerMagnitude*k;pivot.position.z=Math.cos(hitClock*39)*hitStaggerMagnitude*.55*k;pivot.rotation.z=Math.sin(hitClock*52)*hitStaggerMagnitude*.4*k;}
   else if(pivot.position.x!==0||pivot.position.z!==0||pivot.rotation.z!==0){pivot.position.x=0;pivot.position.z=0;pivot.rotation.z=0;}
+  anim.state=next;anim.speed=speed;anim.runTimeScale=runTimeScale;anim.slideFactor=slideFactor;anim.attackKind=timing.kind;anim.windupMs=attackTime>0?attackWindupMs:0;anim.idlePhase=idlePhase;anim.reducedMotion=reduced;
   lastHitFeedback.flashActive=hitFlashRemaining>0;lastHitFeedback.flashRemainingMs=Math.max(0,hitFlashRemaining);lastHitFeedback.staggerActive=hitStaggerRemaining>0;lastHitFeedback.staggerRemainingMs=Math.max(0,hitStaggerRemaining);
- },dispose:()=>{restoreHitMaterials();hitFeedbackRigs.delete(a.id);mixer.stopAllAction();mixer.uncacheRoot(model);for(const geometry of proceduralGeometries)geometry.dispose();model.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material]){clothMaterials.delete(m as THREE.MeshStandardMaterial);m.dispose();}});}};
+ },dispose:()=>{restoreHitMaterials();hitFeedbackRigs.delete(a.id);animRigs.delete(a.id);mixer.stopAllAction();mixer.uncacheRoot(model);for(const geometry of proceduralGeometries)geometry.dispose();model.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material]){clothMaterials.delete(m as THREE.MeshStandardMaterial);m.dispose();}});}};
+ animRigs.set(a.id,rig);installAnimHooks();
  hitFeedbackRigs.set(a.id,rig);installCombatHitHooks();return rig;
 }

@@ -157,7 +157,7 @@ export class WorldView{
   // Cycle-12 campaign-ending mood: golden-dawn victory / crimson-ash defeat, applied on top of the
   // existing regional grade (fog + exposure + saturation/tint, no new post chain).
   private moodMode:'normal'|'victory'|'defeat'='normal';private moodOverride:'normal'|'victory'|'defeat'|null=null;
-  private markerTotal=0;private markerVisibleCount=0;
+  private markerTotal=0;private markerVisibleCount=0;private moveFxSteps=0;private moveFxLandings=0;private lastStepAt=0;private lastLandAt=0;private moveFxUntil=0;
   private windmillGroup:THREE.Object3D|null=null;private windmillInner:THREE.Object3D|null=null;private windmillAngle=0;private windmillSpeed=0;private windmillVisible=false;
   private bashRing:THREE.Mesh|null=null;private bashLife=0;private bashCount=0;private lastBashAt=0;private bashX=0;private bashZ=0;private bashPower=1;private bashLastRef:unknown=null;private lastBashEventId=0;
   private moodMix=0;private moodSat=1;private moodExposure=0;private moodFogAdd=0;private readonly moodFogTint=new THREE.Color(0xffffff);private readonly moodTint=new THREE.Color(0xffffff);
@@ -722,7 +722,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    return {calls:info.render.calls,triangles:info.render.triangles,software:this.softwareRenderer,weather:{region:this.weatherRegion,phase:this.weatherStates[this.weatherRegion].name,intensity:+this.weatherStates[this.weatherRegion].intensity.toFixed(3)},contentFocus:this.qaView?{name:this.qaView.name,x:this.qaView.x,z:this.qaView.z}:null,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssObjectives?:()=>unknown;__ssBossVisual?:()=>unknown;__ssMood?:()=>unknown;__ssWindmill?:()=>unknown;__ssMarkers?:()=>unknown;__ssBashFx?:()=>unknown;__ssTriggerBashFx?:(x?:number,z?:number,power?:number)=>unknown;__ssBashFxTrigger?:(x?:number,z?:number,power?:number)=>unknown;__ssSetMood?:(mode?:'normal'|'victory'|'defeat'|null)=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssObjectives?:()=>unknown;__ssBossVisual?:()=>unknown;__ssMood?:()=>unknown;__ssWindmill?:()=>unknown;__ssMarkers?:()=>unknown;__ssMoveFx?:()=>unknown;__ssTriggerMoveFx?:(kind?:'step'|'land')=>unknown;__ssBashFx?:()=>unknown;__ssTriggerBashFx?:(x?:number,z?:number,power?:number)=>unknown;__ssBashFxTrigger?:(x?:number,z?:number,power?:number)=>unknown;__ssSetMood?:(mode?:'normal'|'victory'|'defeat'|null)=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
    win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
@@ -743,6 +743,8 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    win.__ssBossVisual=()=>view.bossVisual();
    win.__ssWindmill=()=>view.windmillInfo();
    win.__ssMarkers=()=>view.markersInfo();
+   win.__ssMoveFx=()=>view.moveFxInfo();
+   win.__ssTriggerMoveFx=(kind?:'step'|'land')=>view.triggerMoveFx(kind);
    win.__ssBashFx=()=>view.bashFxInfo();
    win.__ssTriggerBashFx=(x?:number,z?:number,power?:number)=>view.playBashFx(typeof x==='number'?x:0,typeof z==='number'?z:0,typeof power==='number'?power:1);
    win.__ssBashFxTrigger=(x?:number,z?:number,power?:number)=>view.playBashFx(typeof x==='number'?x:0,typeof z==='number'?z:0,typeof power==='number'?power:1);
@@ -1026,6 +1028,19 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.windmillSpeed=reduced?0:0.34*Math.max(.45,gust);
    this.windmillAngle=(this.windmillAngle+this.windmillSpeed*dt)%(Math.PI*2);
    if(this.windmillInner)this.windmillInner.rotation.z=this.windmillAngle;
+  }
+  /** QA helper: paint a step or landing puff at the player/camera for deterministic captures. */
+  triggerMoveFx(kind?:'step'|'land'){
+   const g=this.lastGame,me=g?.actors.find(a=>a.id===this.lastMeId)??g?.actors.find(a=>a.kind==='player');
+   const x=me?.x??this.camera.position.x,z=me?.z??this.camera.position.z,time=(this.lastGame?.time??0);
+   if(kind==='land'){this.moveFxLandings++;this.lastLandAt=time;this.moveFxUntil=time+.3;this.tmpV2.set(x,.045,z);this.fx.dust(this.tmpV2,.8);}
+   else{this.moveFxSteps++;this.lastStepAt=time;this.moveFxUntil=time+.25;this.tmpV2.set(x,.035,z);this.fx.dust(this.tmpV2,.42);}
+   return this.moveFxInfo();
+  }
+  /** window.__ssMoveFx(): QA-readable movement dust/landing state. */
+  moveFxInfo(){
+   const active=!!this.lastGame&&(this.lastGame.time??0)<this.moveFxUntil;
+   return {lastStepAt:+this.lastStepAt.toFixed(2),steps:this.moveFxSteps,lastLandAt:+this.lastLandAt.toFixed(2),landings:this.moveFxLandings,active,reducedMotion:this.reducedActive(),draws:0,stride:1.85,minDistance:26};
   }
   /** window.__ssMarkers(): QA-readable overhead actor marker state. */
   markersInfo(){
@@ -1554,7 +1569,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    }
    if(this.postfx)this.postfx.render();else this.renderer.render(this.scene,this.camera);return;}
    const alive=new Set(g.actors.map(a=>a.id));for(const [id,mesh] of this.actors)if(!alive.has(id)){this.animated.get(id)?.dispose();this.animated.delete(id);this.previousHp.delete(id);this.scene.remove(mesh);mesh.traverse(o=>{if(o instanceof THREE.Mesh&&!o.userData.sharedAsset)o.geometry.dispose();});this.actors.delete(id);}
-   this.markerTotal=0;this.markerVisibleCount=0;for(const a of g.actors){if(me&&a.id!==this.previewActorId&&dist(a,me)>55){const far=this.actors.get(a.id);if(far)far.visible=false;this.previousHp.set(a.id,a.hp);continue;}const mesh=this.actors.get(a.id)||this.knight(a);let rig=this.animated.get(a.id);if(rig&&(mesh.userData.weapon!==(a.weapon??'sword')||mesh.userData.appearance!==characterAsset(a))){mesh.remove(rig.model);rig.dispose();this.animated.delete(a.id);rig=undefined;}if(!rig){rig=this.characterAssets.create(a);if(rig){for(const child of mesh.children)if(!['hp','tell','marker'].includes(child.name))child.visible=false;rig.model.traverse(o=>o.userData.sharedAsset=true);boostActorMaterials(rig.model);rig.model.userData.actorRig=true;mesh.add(rig.model);this.animated.set(a.id,rig);mesh.userData.weapon=a.weapon??'sword';mesh.userData.appearance=characterAsset(a);}}
+   const moveReduced=this.reducedActive();this.markerTotal=0;this.markerVisibleCount=0;for(const a of g.actors){if(me&&a.id!==this.previewActorId&&dist(a,me)>55){const far=this.actors.get(a.id);if(far)far.visible=false;this.previousHp.set(a.id,a.hp);continue;}const mesh=this.actors.get(a.id)||this.knight(a);let rig=this.animated.get(a.id);if(rig&&(mesh.userData.weapon!==(a.weapon??'sword')||mesh.userData.appearance!==characterAsset(a))){mesh.remove(rig.model);rig.dispose();this.animated.delete(a.id);rig=undefined;}if(!rig){rig=this.characterAssets.create(a);if(rig){for(const child of mesh.children)if(!['hp','tell','marker'].includes(child.name))child.visible=false;rig.model.traverse(o=>o.userData.sharedAsset=true);boostActorMaterials(rig.model);rig.model.userData.actorRig=true;mesh.add(rig.model);this.animated.set(a.id,rig);mesh.userData.weapon=a.weapon??'sword';mesh.userData.appearance=characterAsset(a);}}
     const oldX=mesh.position.x,oldZ=mesh.position.z;
     if(a.id===me?.id){if(Math.hypot(oldX-a.x,oldZ-a.z)>10)mesh.position.set(a.x,0,a.z);else mesh.position.lerp(this.tmpV.set(a.x,0,a.z),1-Math.exp(-dt*16));}
     else{
@@ -1567,7 +1582,13 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     }
     mesh.rotation.y=-a.yaw;mesh.visible=a.id===this.previewActorId||(!(a.id===me?.id&&first)&&(!me||dist(a,me)<46));mesh.rotation.z=a.hp<=0&&!rig?Math.PI/2:0;
     mesh.getObjectByName('tell')!.visible=a.windup>0&&a.hp>0;mesh.getObjectByName('tell')!.scale.setScalar(1+a.windup);const moving=Math.abs(oldX-a.x)+Math.abs(oldZ-a.z)>.03;
-    if(moving&&!me||moving&&dist(a,me!)<26){const speed=Math.hypot(oldX-a.x,oldZ-a.z)/Math.max(0.0001,dt);if(speed>4.2){const next=(mesh.userData.dustAt??0) as number;if(time>=next){mesh.userData.dustAt=time+0.18+Math.random()*0.14;this.fx.dust(this.tmpV2.set(a.x,0.05,a.z),Math.min(1,(speed-4)/5));}}}
+    {const anyMove=Math.hypot(mesh.position.x-oldX,mesh.position.z-oldZ),spd=anyMove/Math.max(0.0001,dt),near=!!me&&dist(a,me)<26;
+     const ud=mesh.userData as {strideAcc?:number;prevSpeed?:number;lastLand?:number};const prev=ud.prevSpeed??0;ud.prevSpeed=spd;if(ud.strideAcc===undefined)ud.strideAcc=0;
+     if(!moveReduced&&near&&anyMove>.01&&anyMove<2.5){ud.strideAcc+=anyMove;if(ud.strideAcc>=1.85){ud.strideAcc=0;this.moveFxSteps++;this.lastStepAt=time;this.moveFxUntil=time+.25;this.tmpV2.set(a.x+(this.moveFxSteps%2?.14:-.14),.035,a.z+.05);this.fx.dust(this.tmpV2,.42);}}
+     else if(spd<1.2)ud.strideAcc=0;
+     const landed=!moveReduced&&near&&a.id===me?.id&&(((prev>4.2&&spd<1.2&&anyMove<.35)||(anyMove>.28&&anyMove<1.2&&spd<16)))&&time-(ud.lastLand??0)>.6;
+     if(landed){ud.lastLand=time;this.moveFxLandings++;this.lastLandAt=time;this.moveFxUntil=time+.3;this.tmpV2.set(a.x,.045,a.z);this.fx.dust(this.tmpV2,.8);}}
+
     rig?.update(a,moving,dt*this.visualScale);if(rig)for(const fragment of rig.fragments.splice(0)){this.scene.add(fragment);this.debris.push({mesh:fragment,life:4,velocity:new THREE.Vector3(a.id.length%2?2:-2,3,1.2)});}mesh.position.y=0;const previous=this.previousHp.get(a.id);if(previous!==undefined&&a.hp<previous){this.spawnDamageLabel(String(Math.ceil(previous-a.hp)),a.kind==='player'?'#ff8d78':'#ffe1a0',a.x,2.6,a.z,1.5,.6,.8);
      const evil=a.kind==='zombie'||a.kind==='corrupted';
      this.tmpV.set(a.x,1.35,a.z);
