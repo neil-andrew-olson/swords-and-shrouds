@@ -158,6 +158,11 @@ export class WorldView{
   // existing regional grade (fog + exposure + saturation/tint, no new post chain).
   private moodMode:'normal'|'victory'|'defeat'='normal';private moodOverride:'normal'|'victory'|'defeat'|null=null;
   private markerTotal=0;private markerVisibleCount=0;private moveFxSteps=0;private moveFxLandings=0;private lastStepAt=0;private lastLandAt=0;private moveFxUntil=0;
+  private casterTelegraph:THREE.InstancedMesh|null=null;private casterBoltsMesh:THREE.InstancedMesh|null=null;private readonly casterDummy=new THREE.Object3D();private readonly casterScratch=new THREE.Color();
+  private readonly casterTints=new Map<string,Map<THREE.Material,{color:number;emissive:number;ei:number}>>();
+  private readonly boltSlots=Array.from({length:16},()=>({id:'',active:false,handled:false,seen:0,x:0,z:0,trail:0}));
+  private casterPreview={kind:'' as ''|'telegraph'|'bolt'|'impact',x:0,z:0,fromX:0,fromZ:0,start:0,end:0,handled:false};private lastFrameTime=0;
+  private casterFrame=0;private casterImpacts=0;private casterLaunches=0;private casterLastLaunchAt=0;private casterTelegraphVisible=false;private casterBoltCount=0;
   private windmillGroup:THREE.Object3D|null=null;private windmillInner:THREE.Object3D|null=null;private windmillAngle=0;private windmillSpeed=0;private windmillVisible=false;
   private bashRing:THREE.Mesh|null=null;private bashLife=0;private bashCount=0;private lastBashAt=0;private bashX=0;private bashZ=0;private bashPower=1;private bashLastRef:unknown=null;private lastBashEventId=0;
   private moodMix=0;private moodSat=1;private moodExposure=0;private moodFogAdd=0;private readonly moodFogTint=new THREE.Color(0xffffff);private readonly moodTint=new THREE.Color(0xffffff);
@@ -236,7 +241,7 @@ try{const gl=this.renderer.getContext();const ext=gl.getExtension('WEBGL_debug_r
   // Fixed pool of torch lights; sources are re-assigned to the nearest flames every frame.
   for(let i=0;i<MAX_TORCH_LIGHTS;i++){const light=new THREE.PointLight(0xff9d42,0,12,1.8);light.castShadow=false;this.scene.add(light);this.lightPool.push(light);}
   this.fx=new CombatEffects(this.scene);this.scene.add(this.legacyTowerGroup);this.legacyTowerGroup.visible=false;this.initFlameInstances();this.initDamageLabels();
-   this.initWeather();this.initObjectiveMarkers();this.initBossAura();this.initBashFx();this.initWindmillSails();try{performance.mark('ss:sceneConstructStart');}catch{}
+   this.initWeather();this.initObjectiveMarkers();this.initBossAura();this.initBashFx();this.initWindmillSails();this.initCasterFx();try{performance.mark('ss:sceneConstructStart');}catch{}
   for(const region of REGIONS){const ground=box(this.scene,5,-.3,region.offset-80,175,.6,250,region.color,true);ground.castShadow=false;const m=(ground.material as THREE.MeshStandardMaterial).clone();m.map=m.map!.clone();m.map.repeat.set(38,55);ground.material=m;tagSurface(ground,'ground');}
   const route=[START,...REGIONS.flatMap(r=>[{x:0,z:r.offset+12},{x:0,z:r.offset+24},{x:42,z:r.offset-45},{x:42,z:r.offset-55},{x:42,z:r.offset-43},{x:-24,z:r.offset-113},{x:-24,z:r.offset-123},{x:-24,z:r.offset-112},{x:0,z:r.offset-200}]),NEST];
   {
@@ -630,6 +635,9 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    }else if(name==='content-abbey'){
     // Cycle-9 ruined abbey (ruins-builder pose/coords): cam (40,-40,h3.2) -> (62,-46,2.6).
     pose=look(40,3.2,-40,62,2.6,-46);
+   }else if(name==='content-caster'){
+    // Cycle-17: the two nest-guard Shroud Casters flanking the plague-nest approach.
+    pose=look(NEST.x,3.2,NEST.z+34,NEST.x,2.0,NEST.z+13);
    }else if(name==='content-windmill'){
     // Cycle-14 windmill landmark: cam (54,4,h3.4) -> target (70,20,5.2).
     pose=look(58,3.4,24,64,5.2,36);
@@ -722,7 +730,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    return {calls:info.render.calls,triangles:info.render.triangles,software:this.softwareRenderer,weather:{region:this.weatherRegion,phase:this.weatherStates[this.weatherRegion].name,intensity:+this.weatherStates[this.weatherRegion].intensity.toFixed(3)},contentFocus:this.qaView?{name:this.qaView.name,x:this.qaView.x,z:this.qaView.z}:null,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssObjectives?:()=>unknown;__ssBossVisual?:()=>unknown;__ssMood?:()=>unknown;__ssWindmill?:()=>unknown;__ssMarkers?:()=>unknown;__ssMoveFx?:()=>unknown;__ssTriggerMoveFx?:(kind?:'step'|'land')=>unknown;__ssBashFx?:()=>unknown;__ssTriggerBashFx?:(x?:number,z?:number,power?:number)=>unknown;__ssBashFxTrigger?:(x?:number,z?:number,power?:number)=>unknown;__ssSetMood?:(mode?:'normal'|'victory'|'defeat'|null)=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssObjectives?:()=>unknown;__ssBossVisual?:()=>unknown;__ssMood?:()=>unknown;__ssWindmill?:()=>unknown;__ssMarkers?:()=>unknown;__ssMoveFx?:()=>unknown;__ssCasters?:()=>unknown;__ssProjectiles?:()=>unknown;__ssCasterFx?:()=>unknown;__ssTriggerCasterFx?:(kind?:'telegraph'|'bolt'|'impact')=>unknown;__ssTriggerMoveFx?:(kind?:'step'|'land')=>unknown;__ssBashFx?:()=>unknown;__ssTriggerBashFx?:(x?:number,z?:number,power?:number)=>unknown;__ssBashFxTrigger?:(x?:number,z?:number,power?:number)=>unknown;__ssSetMood?:(mode?:'normal'|'victory'|'defeat'|null)=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
    win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
@@ -744,6 +752,10 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    win.__ssWindmill=()=>view.windmillInfo();
    win.__ssMarkers=()=>view.markersInfo();
    win.__ssMoveFx=()=>view.moveFxInfo();
+   win.__ssCasters=()=>view.castersInfo();
+   win.__ssProjectiles=()=>view.projectilesInfo();
+   win.__ssCasterFx=()=>view.casterFxInfo();
+   win.__ssTriggerCasterFx=(kind?:'telegraph'|'bolt'|'impact')=>view.triggerCasterFx(kind??'telegraph');
    win.__ssTriggerMoveFx=(kind?:'step'|'land')=>view.triggerMoveFx(kind);
    win.__ssBashFx=()=>view.bashFxInfo();
    win.__ssTriggerBashFx=(x?:number,z?:number,power?:number)=>view.playBashFx(typeof x==='number'?x:0,typeof z==='number'?z:0,typeof power==='number'?power:1);
@@ -1029,6 +1041,115 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.windmillAngle=(this.windmillAngle+this.windmillSpeed*dt)%(Math.PI*2);
    if(this.windmillInner)this.windmillInner.rotation.z=this.windmillAngle;
   }
+  /** Pooled caster telegraph/aura rings + shadow-bolt orbs (max 2 draws while active). */
+  private initCasterFx(){
+   try{
+    const ringGeo=new THREE.RingGeometry(1.0,1.45,36);ringGeo.rotateX(-Math.PI/2);
+    const ringMat=new THREE.MeshBasicMaterial({color:0x9a6bff,transparent:true,opacity:.5,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide});
+    const tm=new THREE.InstancedMesh(ringGeo,ringMat,10);tm.count=0;tm.frustumCulled=false;tm.renderOrder=2;this.scene.add(tm);this.casterTelegraph=tm;
+    const boltMat=new THREE.MeshBasicMaterial({color:0xb06bff,transparent:true,opacity:.95,depthWrite:false,blending:THREE.AdditiveBlending});
+    const bm=new THREE.InstancedMesh(new THREE.SphereGeometry(.18,8,6),boltMat,16);bm.count=0;bm.frustumCulled=false;bm.renderOrder=3;this.scene.add(bm);this.casterBoltsMesh=bm;
+   }catch{}
+  }
+  private tintCaster(a:Actor){
+   if(this.casterTints.has(a.id))return;
+   const rig=this.animated.get(a.id);if(!rig)return;
+   const store=new Map<THREE.Material,{color:number;emissive:number;ei:number}>();
+   rig.model.traverse(o=>{if(!(o instanceof THREE.Mesh))return;for(const material of Array.isArray(o.material)?o.material:[o.material]){const m=material as THREE.MeshStandardMaterial;if(!m.isMeshStandardMaterial||store.has(m))continue;store.set(m,{color:m.color.getHex(),emissive:m.emissive?m.emissive.getHex():0,ei:m.emissiveIntensity??1});m.color.lerp(this.casterScratch.setHex(0x5a3a8f),.32);if(m.emissive){m.emissive.lerp(this.casterScratch.setHex(0x3a1650),.55);m.emissiveIntensity=Math.max(m.emissiveIntensity??1,.6);}}});
+   this.casterTints.set(a.id,store);
+  }
+  /** Per-frame caster presentation: ground telegraph/aura, violet tint, shadow-bolt orbs, impacts. */
+  private updateCasterFx(g:Game,me:Actor|undefined,time:number,dt:number){
+   this.casterFrame++;
+   const tm=this.casterTelegraph,bm=this.casterBoltsMesh;if(!tm||!bm)return;
+   const fx=this.qaView?this.qaView.x:(me?.x??this.camera.position.x),fz=this.qaView?this.qaView.z:(me?.z??this.camera.position.z);
+   const reduced=this.reducedActive();
+   let ringN=0;
+   for(const a of g.actors){
+    if(!a.caster||a.hp<=0)continue;
+    if(this.casterTints.has(a.id))continue;this.tintCaster(a);
+    if(Math.hypot(a.x-fx,a.z-fz)>80)continue;
+    if(ringN>=10)break;
+    const charge=a.casterCharge??0,charging=charge>0;
+    const pulse=reduced?1:1+Math.sin(time*5.5+(a.x+a.z)*.35)*.1;
+    const grow=charging?1.1+(1-Math.max(0,Math.min(1,charge)))*.85:1;
+    this.casterDummy.position.set(a.x,.06,a.z);this.casterDummy.rotation.set(0,0,0);this.casterDummy.scale.setScalar(grow*pulse);
+    this.casterDummy.updateMatrix();tm.setMatrixAt(ringN,this.casterDummy.matrix);
+    tm.setColorAt(ringN,this.casterScratch.setHex(charging?0xff7de0:0x6e52a8));
+    ringN++;
+   }
+   // restore tint for dead/absent casters
+   if(this.casterTints.size){
+    for(const [id,store] of this.casterTints){
+     const a=g.actors.find(x=>x.id===id);if(a&&a.caster&&a.hp>0)continue;
+     for(const [m,orig] of store){(m as THREE.MeshStandardMaterial).color.setHex(orig.color);if((m as THREE.MeshStandardMaterial).emissive){(m as THREE.MeshStandardMaterial).emissive.setHex(orig.emissive);(m as THREE.MeshStandardMaterial).emissiveIntensity=orig.ei;}}
+     this.casterTints.delete(id);
+    }
+   }
+   // Deterministic QA preview (no server needed): telegraph/bolt/impact at the QA focus.
+   const pv=this.casterPreview;
+   if(pv.kind&&time<pv.end&&ringN<10&&(pv.kind==='telegraph'||pv.kind==='bolt')){
+    if(pv.kind==='telegraph'||time<pv.start+0.35){this.casterDummy.position.set(pv.kind==='bolt'?pv.fromX:pv.x,.06,pv.kind==='bolt'?pv.fromZ:pv.z);this.casterDummy.rotation.set(0,0,0);const t=pv.kind==='telegraph'?(time-pv.start)/Math.max(.01,pv.end-pv.start):0;this.casterDummy.scale.setScalar(1.2+t*.6);this.casterDummy.updateMatrix();tm.setMatrixAt(ringN,this.casterDummy.matrix);tm.setColorAt(ringN,this.casterScratch.setHex(0xff7de0));ringN++;}
+   }
+   tm.count=ringN;tm.visible=ringN>0;this.casterTelegraphVisible=ringN>0;
+   tm.instanceMatrix.needsUpdate=true;if(tm.instanceColor)tm.instanceColor.needsUpdate=true;
+   // shadow bolts: pooled orbs + trail + impact burst/scorch
+   let boltN=0;
+   for(const p of g.projectiles){
+    if(p.kind!=='shadow-bolt')continue;
+    let slot=this.boltSlots.find(q=>q.id===p.id);
+    if(!slot){slot=this.boltSlots.find(q=>q.seen!==this.casterFrame)??this.boltSlots[0];slot.id=p.id;slot.handled=false;slot.trail=0;this.casterLaunches++;this.casterLastLaunchAt=time;}
+    slot.active=true;slot.x=p.x;slot.z=p.z;slot.seen=this.casterFrame;
+    if(p.hit&&!slot.handled){
+     slot.handled=true;slot.active=false;this.casterImpacts++;
+     this.tmpV.set(p.x,1.1,p.z);this.fx.sparks(this.tmpV,'undead',[1.1,.35,1.5]);
+     this.tmpV.set(p.x,.2,p.z);this.fx.smoke(this.tmpV);
+     if(p.hit!=='wall')this.fx.scorch(this.tmpV.set(p.x,.05,p.z));
+     if(p.hit==='actor')this.fx.blood(this.tmpV.set(p.x,1.0,p.z),true,.7);
+    }
+    if(slot.active&&!reduced&&Math.hypot(p.x-fx,p.z-fz)<80){
+     slot.trail+=dt;if(slot.trail>.04){slot.trail=0;this.fx.flake(this.tmpV.set(p.x,1.12,p.z),.7,.28,1.1,.34);}
+    }
+    if(slot.active&&boltN<16){
+     this.casterDummy.position.set(p.x,1.15,p.z);this.casterDummy.rotation.set(0,time*3,0);this.casterDummy.scale.setScalar(1);
+     this.casterDummy.updateMatrix();bm.setMatrixAt(boltN,this.casterDummy.matrix);bm.setColorAt(boltN,this.casterScratch.setHex(0xc48bff));boltN++;
+    }
+   }
+   if(pv.kind==='bolt'&&time<pv.end+0.35){
+    const t=Math.min(1,Math.max(0,(time-pv.start)/Math.max(.01,pv.end-pv.start)));
+    if(t>=1&&!pv.handled){pv.handled=true;this.casterImpacts++;this.tmpV.set(pv.x,1.1,pv.z);this.fx.sparks(this.tmpV,'undead',[1.1,.35,1.5]);this.tmpV.set(pv.x,.2,pv.z);this.fx.smoke(this.tmpV);this.fx.scorch(this.tmpV.set(pv.x,.05,pv.z));}
+    else if(t<1){const px=pv.fromX+(pv.x-pv.fromX)*t,pz=pv.fromZ+(pv.z-pv.fromZ)*t;if(boltN<16){this.casterDummy.position.set(px,1.15,pz);this.casterDummy.rotation.set(0,time*3,0);this.casterDummy.scale.setScalar(1);this.casterDummy.updateMatrix();bm.setMatrixAt(boltN,this.casterDummy.matrix);bm.setColorAt(boltN,this.casterScratch.setHex(0xc48bff));boltN++;}}
+   }
+   if(pv.kind==='impact'&&!pv.handled&&time>=pv.start){pv.handled=true;this.casterImpacts++;this.tmpV.set(pv.x,1.1,pv.z);this.fx.sparks(this.tmpV,'undead',[1.1,.35,1.5]);this.tmpV.set(pv.x,.2,pv.z);this.fx.smoke(this.tmpV);this.fx.scorch(this.tmpV.set(pv.x,.05,pv.z));}
+   for(const slot of this.boltSlots){if(slot.active&&slot.seen!==this.casterFrame){slot.active=false;}}
+   bm.count=boltN;bm.visible=boltN>0;this.casterBoltCount=boltN;
+   bm.instanceMatrix.needsUpdate=true;if(bm.instanceColor)bm.instanceColor.needsUpdate=true;
+  }
+  /** window.__ssTriggerCasterFx(kind): deterministic QA preview of telegraph/bolt/impact. */
+  triggerCasterFx(kind:'telegraph'|'bolt'|'impact'){
+   const x=this.qaView?this.qaView.x:(this.lastGame?.actors.find(a=>a.id===this.lastMeId)?.x??this.camera.position.x);
+   const z=this.qaView?this.qaView.z:(this.lastGame?.actors.find(a=>a.id===this.lastMeId)?.z??this.camera.position.z);
+   const t=this.lastFrameTime;const pv=this.casterPreview;
+   pv.kind=kind;pv.x=x;pv.z=z;pv.fromX=x-8;pv.fromZ=z-8;pv.start=t;pv.handled=false;
+   pv.end=kind==='telegraph'?t+1:kind==='bolt'?t+.8:t+.2;
+   if(kind==='impact'){this.casterImpacts++;this.tmpV.set(x,1.1,z);this.fx.sparks(this.tmpV,'undead',[1.1,.35,1.5]);this.tmpV.set(x,.2,z);this.fx.smoke(this.tmpV);this.fx.scorch(this.tmpV.set(x,.05,z));pv.handled=true;}
+   return this.casterFxInfo();
+  }
+  /** window.__ssCasters(): ranged-caster roster/state. */
+  castersInfo(){
+   const g=this.lastGame,me=g?.actors.find(a=>a.id===this.lastMeId)??g?.actors.find(a=>a.kind==='player');
+   let count=0,charging=0,furthest=0;const ids:string[]=[];
+   if(g)for(const a of g.actors){if(!a.caster)continue;count++;if((a.casterCharge??0)>0)charging++;ids.push(a.id);const d=me?dist(a,me):0;if(d>furthest)furthest=d;}
+   return {count,charging,ids,furthestDistance:+furthest.toFixed(1),casterBolts:g?.stats.casterBolts??0,casters:g?.stats.casters??0};
+  }
+  /** window.__ssProjectiles(): active shadow-bolt state. */
+  projectilesInfo(){
+   const g=this.lastGame;const ids:string[]=[],speeds:number[]=[],positions:{x:number;z:number}[]=[];let active=0;
+   if(g)for(const p of g.projectiles){if(p.kind!=='shadow-bolt')continue;if(p.hit)continue;active++;ids.push(p.id);speeds.push(p.speed);positions.push({x:+p.x.toFixed(2),z:+p.z.toFixed(2)});}
+   return {active:active>0,count:active,ids,speeds,positions};
+  }
+  /** window.__ssCasterFx(): caster presentation state. */
+  casterFxInfo(){const pv=this.casterPreview,preview=pv.kind&&this.lastFrameTime<pv.end,tele=this.casterTelegraphVisible||(pv.kind==='telegraph'&&!!preview),bolts=this.casterBoltCount+(pv.kind==='bolt'&&preview?1:0);return {telegraphVisible:tele,impacts:this.casterImpacts,launches:this.casterLaunches,lastLaunchAt:+this.casterLastLaunchAt.toFixed(2),bolts,reducedMotion:this.reducedActive(),preview:!!preview,draws:(tele?1:0)+(bolts>0?1:0)};}
   /** QA helper: paint a step or landing puff at the player/camera for deterministic captures. */
   triggerMoveFx(kind?:'step'|'land'){
    const g=this.lastGame,me=g?.actors.find(a=>a.id===this.lastMeId)??g?.actors.find(a=>a.kind==='player');
@@ -1520,7 +1641,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    const hp=box(root,0,2.1,0,.9,.065,.06,evil?0xd78067:0xb8c18b);hp.name='hp';root.position.set(a.x,0,a.z);this.scene.add(root);this.actors.set(a.id,root);return root;
   }
   draw(g:Game|undefined,me:Actor|undefined,yaw:number,pitch:number,first:boolean,dt:number,time:number){
-   this.lastGame=g;this.lastMeId=me?.id??this.lastMeId;
+   this.lastGame=g;this.lastMeId=me?.id??this.lastMeId;this.lastFrameTime=time;
    // Batch-3 perf: rolling frame pacing + adaptive tier downgrade on sustained low fps.
    this.frameTimes[this.frameIdx]=Math.max(0,Math.min(2000,dt*1000));this.frameIdx=(this.frameIdx+1)%60;if(this.frameCount<60)this.frameCount++;
    if(dt>0.028)this.slowQualityAccum+=dt;else this.slowQualityAccum=Math.max(0,this.slowQualityAccum-dt*0.5);
@@ -1664,6 +1785,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.applyCombatCamera(dt);
    if(this.qaBody&&this.qaBodyActor){this.camera.getWorldQuaternion(this.rainQuat);this.tmpV2.set(0,0,-1).applyQuaternion(this.rainQuat);this.tmpV2.y=0;const flen=Math.hypot(this.tmpV2.x,this.tmpV2.z)||1;this.tmpV2.x/=flen;this.tmpV2.z/=flen;this.qaBody.position.set(this.camera.position.x+this.tmpV2.x*this.qaBodyDistance,0,this.camera.position.z+this.tmpV2.z*this.qaBodyDistance);this.qaBody.visible=true;this.qaBody.rotation.y=Math.atan2(this.camera.position.x-this.qaBody.position.x,this.camera.position.z-this.qaBody.position.z);this.qaBody.updateMatrixWorld(true);this.qaBodyRig?.update(this.qaBodyActor,false,dt*this.visualScale);}
    if(g&&!this.firstGameFrameMarked){this.firstGameFrameMarked=true;try{performance.mark('ss:firstGameFrame');}catch{}}
+   if(g)this.updateCasterFx(g,me as Actor|undefined,time,dt);
    this.updateWindmill(dt,me as Actor|undefined,time);if(g)this.updateBashFx(dt);this.detectBashEvents(g,me as Actor|undefined);this.updateMood(g,dt);this.updateBossPresentation(g,time);
    if(g)this.updateObjectiveMarkers(g,me);
    if(this.postfx)this.postfx.render();else this.renderer.render(this.scene,this.camera);

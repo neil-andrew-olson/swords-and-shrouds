@@ -1,4 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue,compassBearing,deriveObjectiveLine,deriveJournalSummary,bossBarState,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,difficultyId,difficultyChoice,isDifficultyId,deriveRunRecap,formatRunTime,bashChordReady,formatBashHint,bossSiegeAudioMode,torchBedProximity,TORCH_BED_RADIUS,type JournalInput} from '../src/client/controller';import {LORE_ENTRIES,unlockedLoreIds,newlyUnlockedLore,loreEntryViews,formatLoreToast,type LoreState} from '../src/shared/lore';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue,compassBearing,deriveObjectiveLine,deriveJournalSummary,bossBarState,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,difficultyId,difficultyChoice,isDifficultyId,deriveRunRecap,formatRunTime,bashChordReady,formatBashHint,bossSiegeAudioMode,torchBedProximity,TORCH_BED_RADIUS,casterCueForEvent,type JournalInput} from '../src/client/controller';import {LORE_ENTRIES,unlockedLoreIds,newlyUnlockedLore,loreEntryViews,formatLoreToast,type LoreState} from '../src/shared/lore';
 test('combat feedback ignores joins, replayed snapshots and reconnect gaps',()=>{const g=createGame();addPlayer(g,'p','P');assert.deepEqual(combatCues(undefined,g,'p'),[]);assert.deepEqual(combatCues(g,g,'p'),[]);const next=structuredClone(g);next.time=2;next.actors.find(a=>a.id==='p')!.hp=1;assert.deepEqual(combatCues(g,next,'p'),[]);});
 test('combat feedback follows confirmed swings and health loss with range and impact limits',()=>{const g=createGame();g.actors=[];const p=addPlayer(g,'p','P');for(let i=0;i<5;i++)spawn(g,'zombie',p.x+1,p.z);spawn(g,'zombie',70,-400);const next=structuredClone(g);next.time=.1;const n=next.actors.find(a=>a.id==='p')!;n.attackSerial=1;n.hp-=10;n.weapon='hammer';for(const a of next.actors)if(a.kind==='zombie')a.hp-=5;const cues=combatCues(g,next,'p');assert.equal(cues.filter(c=>c.kind==='impact').length,3);assert.equal(cues.filter(c=>c.kind==='swing').length,1);assert.equal(cues.find(c=>c.kind==='swing')!.weapon,'hammer');assert.ok(cues.some(c=>c.kind==='hurt'));assert.ok(cues.some(c=>c.kind==='equip'));assert.ok(cues.filter(c=>c.kind==='impact').every(c=>c.material==='flesh'));assert.ok(cues.every(c=>c.volume>0&&c.volume<=1));assert.deepEqual(combatCues(next,{...next,time:.2},'p'),[]);
 const armed=structuredClone(next),replay=structuredClone(armed);replay.time=.3;assert.deepEqual(combatCues(armed,replay,'p'),[]);
@@ -192,4 +192,18 @@ assert.equal(TORCH_BED_RADIUS,10);
 assert.equal(torchBedProximity(0),1);assert.equal(torchBedProximity(5),.5);assert.ok(Math.abs(torchBedProximity(9.9)-.01)<1e-9);
 assert.equal(torchBedProximity(10),0);assert.equal(torchBedProximity(11),0);assert.equal(torchBedProximity(null),0);
 assert.equal(torchBedProximity(undefined),0);assert.equal(torchBedProximity(Number.NaN),0);
-assert.equal(torchBedProximity(-5),1);assert.equal(torchBedProximity(4,8),.5);});
+assert.equal(torchBedProximity(-5),1);assert.equal(torchBedProximity(4,8),.5);
+// Cycle-17: Shroud Caster caption cues + tolerant server-event classifier.
+assert.equal(captionText('caster-charge'),'A Shroud Caster gathers shadow.');
+assert.equal(captionText('caster-launch'),'Shadow bolt!');
+assert.equal(casterCueForEvent('A Shroud Caster gathers shadow!'),'charge');
+assert.equal(casterCueForEvent('Shroud Caster begins charging'),'charge');
+assert.equal(casterCueForEvent('Shadow bolt!'),'launch');
+assert.equal(casterCueForEvent('Shadow bolt fizzles against the stone.'),'impact');
+assert.equal(casterCueForEvent('The shadow bolt scatters on the ground.'),'impact');
+assert.equal(casterCueForEvent('Shadow bolt strikes QA Knight!'),'impact');
+assert.equal(casterCueForEvent('A Shroud Caster casts a shadow bolt'),'launch');
+assert.equal(casterCueForEvent('Shadow bolt hits the knight'),'impact');
+assert.equal(casterCueForEvent('Caster bolt impacts the wall'),'impact');
+assert.equal(casterCueForEvent('The siege of the keep has begun.'),null);
+assert.equal(casterCueForEvent('Shield bash!'),null);});

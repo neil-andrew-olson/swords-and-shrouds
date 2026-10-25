@@ -10,7 +10,7 @@ test('independent sockets: rooms, sync, capacity, reconnect, leadership, isolati
 const bad=await client(url);clients.push(bad);bad.send({type:'join',code:'XXXXXX'});assert.match((await bad.next('error')).text,/not found/);
  for(let i=0;i<2;i++){const c=await client(url);clients.push(c);c.send({type:'join',code:aw.code});await c.next('welcome');}bad.send({type:'join',code:aw.code});assert.match((await bad.next('error')).text,/full/);
  a.ws.close();await wait(80);const resumed=await client(url);clients.push(resumed);resumed.send({type:'resume',code:aw.code,token:aw.token});assert.equal((await resumed.next('welcome')).id,aw.id);assert.equal(s.rooms.get(aw.code)!.seats.length,4);
- const room=s.rooms.get(aw.code)!;assert.equal(room.host,bw.id);room.game.status='defeat';resumed.send({type:'restart'});assert.match((await resumed.next('error')).text,/leader/);b.send({type:'restart'});await wait(80);assert.equal(room.game.status,'playing');assert.equal(room.game.actors.filter(a=>a.kind==='player').length,4);assert.equal(room.game.difficulty,'warden','restart preserves the room difficulty');
+ const room=s.rooms.get(aw.code)!;assert.equal(room.host,bw.id);room.game.status='defeat';resumed.send({type:'restart'});assert.match((await resumed.next('error')).text,/leader/);b.send({type:'restart'});await wait(80);assert.equal(room.game.status,'playing');assert.equal(room.game.actors.filter(a=>a.kind==='player').length,4);assert.equal(room.game.difficulty,'warden','restart preserves the room difficulty');assert.equal(room.game.stats.casters,2,'restart resets/repopulates caster counter');assert.equal(room.game.stats.casterBolts,0,'restart resets bolt counter');
  // Every room must receive snapshots, including even-index rooms.
  other.messages.length=0;await wait(230);assert.ok(other.messages.some(m=>m.type==='state'));
  // Cycle-10 co-op siege sync: both clients see the same boss siege + boss actor.
@@ -32,6 +32,17 @@ const bad=await client(url);clients.push(bad);bad.send({type:'join',code:'XXXXXX
  assert.equal(s3a.siege.index,3);assert.equal(s3a.siege.boss,false);
  const scrA=s3a.actors.find((a:any)=>a.screamer),scrB=s3b.actors.find((a:any)=>a.screamer);
  assert.ok(scrA&&scrB,'screamer actor present in both co-op snapshots');assert.equal(scrA.id,scrB.id);assert.equal(scrA.name,'Shroud Screamer');assert.equal(scrA.kind,'corrupted');assert.equal(scrA.appearance,'skeleton-armoured');assert.equal(scrA.hp,scrB.hp);assert.equal(s3a.stats.screamers,1);assert.equal(s3b.stats.screamers,1);
+ // Cycle-17 Shroud Caster co-op sync: index-3 siege includes a caster in both snapshots; a forced charge
+ // launches the same projectile id/state to every client.
+ const castA=s3a.actors.find((a:any)=>a.caster),castB=s3b.actors.find((a:any)=>a.caster);
+ assert.ok(castA&&castB,'caster actor present in both co-op snapshots');assert.equal(castA.id,castB.id);assert.equal(castA.name,'Shroud Caster');assert.equal(castA.kind,'corrupted');assert.equal(castA.maxHp,castB.maxHp);assert.equal(s3a.stats.casters,s3b.stats.casters);
+ const roomCaster=roomGame.actors.find((a:any)=>a.caster);const coPlayer=roomGame.actors.find((a:any)=>a.kind==='player'&&a.connected);
+ if(roomCaster&&coPlayer){roomCaster.x=coPlayer.x;roomCaster.z=coPlayer.z-12;roomCaster.casterTarget=coPlayer.id;roomCaster.casterCharge=.3;roomCaster.casterCd=0;}
+ await wait(450);
+ const pA=latest(resumed).game.projectiles??[],pB=latest(b).game.projectiles??[];
+ assert.equal(pA.length,pB.length,'co-op projectile count synced');if(pA.length){assert.equal(pA[0].id,pB[0].id);assert.equal(pA[0].caster,castA.id);assert.ok(pA[0].speed>0);}
+ assert.equal(latest(resumed).game.stats.casterBolts,latest(b).game.stats.casterBolts);
+
  const otherState=other.messages.filter((m:any)=>m.type==='state').at(-1);
  assert.equal(otherState.game.difficulty,'knight','default/invalid-difficulty room snapshot is explicit knight');
  }finally{clients.forEach(c=>c.ws.terminate());await s.close();}

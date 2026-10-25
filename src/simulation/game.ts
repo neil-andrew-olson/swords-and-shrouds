@@ -17,10 +17,12 @@ export function createGame(difficulty:Difficulty=DEFAULT_DIFFICULTY):Game{
  // Weapon-rack drops are WEAPON_IDS-driven: the starter hammer plus one rack per castle. Filtering
  // out the two starter weapons keeps every rackable weapon covered exactly once as WEAPON_IDS grows.
  const rackPool:WeaponId[]=WEAPON_IDS.filter(id=>id!=='sword'&&id!=='hammer');
- const g:Game={time:0,difficulty,armory:['sword'],weaponDrops:[{id:'starter-hammer',weapon:'hammer',x:-3,z:30,taken:false},...CASTLES.map((c,i)=>({id:'rack-'+c.id,weapon:rackPool[i%rackPool.length],x:c.x-5,z:c.z+4,taken:false}))],regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0,bossesSeen:0,bossesFelled:0,screamers:0,screams:0,bashes:0},events:[],nextId:0};
+ const g:Game={time:0,difficulty,armory:['sword'],weaponDrops:[{id:'starter-hammer',weapon:'hammer',x:-3,z:30,taken:false},...CASTLES.map((c,i)=>({id:'rack-'+c.id,weapon:rackPool[i%rackPool.length],x:c.x-5,z:c.z+4,taken:false}))],regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],projectiles:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0,bossesSeen:0,bossesFelled:0,screamers:0,screams:0,bashes:0,casters:0,casterBolts:0},events:[],nextId:0};
  g.castles.forEach((c,i)=>{for(let n=0;n<4+(i%3)*2+Math.floor(i/3);n++)spawn(g,n===5?'corrupted':'zombie',c.x-5+(n%3)*4,c.z-5+Math.floor(n/3)*4,{castle:c.id});});
  g.camps.forEach(c=>{for(let n=0;n<3;n++)spawn(g,'zombie',c.x+n*2-2,c.z-4);});
  for(let n=0;n<5;n++)spawn(g,n===4?'corrupted':'zombie',NEST.x-6+n*3,NEST.z+5,n===4?{name:'Plague Champion',hp:200,maxHp:200,weapon:'zweihander'}:{});
+ // Cycle-17 Shroud Casters guard the plague nest (deterministic: two, flanking the nest approach).
+ spawnCaster(g,NEST.x-9,NEST.z+13,{appearance:'fallen'});spawnCaster(g,NEST.x+9,NEST.z+13,{appearance:'skeleton-armoured'});
  [...CAMPS,...CASTLES,{x:3,z:24},{x:15,z:-25},{x:28,z:-53},{x:16,z:-91},{x:-11,z:-119},{x:-10,z:-164}].forEach((p,i)=>g.caches.push({id:`cache${i}`,x:p.x+4,z:p.z+4,taken:false}));
  spawn(g,'soldier',-2,25,{mode:'follow'});spawn(g,'soldier',2,25,{mode:'follow'});
  event(g,'Reclaim the Fallen Keep. Rescue the survivors. End the plague.');return g;
@@ -33,6 +35,46 @@ export function setInput(g:Game,id:string,v:unknown):boolean{
 }
 export function moveEnemy(g:Game,a:Actor,target:{x:number;z:number},amount:number){const before={x:a.x,z:a.z};move(a,target,amount);for(const c of g.castles){if(!c.friendly)continue;const plane=c.barrier>0?c.z+13:c.gate>0?c.z+10:null;if(plane!==null&&before.z>=plane+.45&&a.z<plane+.45&&Math.abs(a.x-c.x)<3.5){a.x=before.x;a.z=before.z;}}}
 const hostile=(a:Actor)=>a.kind==='zombie'||a.kind==='corrupted';
+/** Cycle-17 Shroud Caster: ranged corrupted. Deterministic stats/telegraph/bolt numbers. */
+export const CASTER={hp:88,damage:16,speed:8.5,rangeMin:10,rangeMax:20,telegraph:1.0,cooldown:3,maxRange:26,radius:.6,lead:1.15};
+function spawnCaster(g:Game,x:number,z:number,extra:Partial<Actor>={}):Actor{
+ const a=spawn(g,'corrupted',x,z,{name:'Shroud Caster',hp:CASTER.hp,maxHp:CASTER.hp,armor:'light',caster:true,casterCd:1.2,appearance:'skeleton-armoured',...extra});
+ g.stats.casters++;return a;
+}
+function launchShadowBolt(g:Game,c:Actor,target:Actor){
+ const flight=Math.max(.15,dist(c,target)/CASTER.speed);
+ const ax=target.x+Math.max(-6,Math.min(6,target.vx??0))*flight*CASTER.lead;
+ const az=target.z+Math.max(-6,Math.min(6,target.vz??0))*flight*CASTER.lead;
+ const dx=ax-c.x,dz=az-c.z,len=Math.hypot(dx,dz)||1;
+ g.projectiles.push({id:'b'+(++g.nextId),caster:c.id,kind:'shadow-bolt',x:c.x,z:c.z,px:c.x,pz:c.z,dx:dx/len,dz:dz/len,tx:ax,tz:az,speed:CASTER.speed,damage:CASTER.damage,firedAt:g.time});
+ g.stats.casterBolts++;c.casterCharge=0;c.casterCd=CASTER.cooldown;c.casterAim={x:ax,z:az};
+ event(g,'Shadow bolt!',{x:c.x,z:c.z});c.yaw=Math.atan2(dx,-dz);
+}
+function updateProjectiles(g:Game,dt:number){
+ const living=[];
+ for(const p of g.projectiles){
+  if(p.hit){if(g.time-(p.hitAt??0)>0.2)continue;living.push(p);continue;}
+  const nx=p.x+p.dx*CASTER.speed*dt,nz=p.z+p.dz*CASTER.speed*dt,prev={x:p.x,z:p.z};
+  let kind:'actor'|'wall'|'ground'|null=null,hitActor:Actor|undefined;
+  if(!lineClear(prev,{x:nx,z:nz}))kind='wall';
+  else{
+   const probes=[{x:(p.x+nx)/2,z:(p.z+nz)/2},{x:nx,z:nz}];
+   for(const a of g.actors){if(a.hp<=0||hostile(a))continue;if(probes.some(q=>dist(q,a)<CASTER.radius+.5)){kind='actor';hitActor=a;break;}}
+   if(!kind&&dist({x:nx,z:nz},{x:p.tx,z:p.tz})<.7)kind='ground';
+  }
+  p.px=p.x;p.pz=p.z;
+  if(kind){p.x=nx;p.z=nz;p.hit=kind;p.hitAt=g.time;p.hitId=hitActor?.id;
+   if(hitActor){const caster=g.actors.find(a=>a.id===p.caster&&a.hp>0);hurt(g,hitActor,p.damage,caster);event(g,'Shadow bolt strikes '+hitActor.name+'!',{x:nx,z:nz});}
+   else if(kind==='wall')event(g,'Shadow bolt fizzles against the stone.',{x:nx,z:nz});
+   else event(g,'The shadow bolt scatters on the ground.',{x:nx,z:nz});
+   living.push(p);continue;
+  }
+  p.x=nx;p.z=nz;
+  if(g.time-p.firedAt>3.2){p.hit='ground';p.hitAt=g.time;event(g,'The shadow bolt scatters on the ground.',{x:nx,z:nz});}
+  living.push(p);
+ }
+ g.projectiles=living;
+}
 export function noise(g:Game,p:{x:number;z:number},radius:number){g.noises.push({x:p.x,z:p.z,radius,until:g.time+4});g.noises=g.noises.slice(-24);}
 export function sever(g:Game,a:Actor,part:'leftArm'|'rightArm'|'head'){
  if(a.kind!=='zombie'||a.severed?.includes(part))return;a.severed=[...(a.severed??[]),part];if(part==='head'&&a.hp>0)hurt(g,a,a.hp);
@@ -143,11 +185,12 @@ export function forceSiege(g:Game,index=g.stats.sieges+1):boolean{
 }
 export function tick(g:Game,dt=.05){
  if(g.status!=='playing')return;g.time+=dt;g.noises=g.noises.filter(n=>n.until>g.time);
+ for(const a of g.actors){a.vx=dt>0?Math.max(-6,Math.min(6,(a.x-(a.px??a.x))/dt)):0;a.vz=dt>0?Math.max(-6,Math.min(6,(a.z-(a.pz??a.z))/dt)):0;a.px=a.x;a.pz=a.z;}
  for(const a of [...g.actors]){
   if(a.hp>0&&!hostile(a)&&g.castles.some(c=>c.friendly&&c.level>0&&dist(a,c)<9))a.hp=Math.min(a.maxHp,a.hp+dt*2);
   a.abilityCd=Math.max(0,(a.abilityCd??0)-dt);
   if(a.hp>0&&a.kind==='player')a.stamina=Math.max(0,Math.min(100,(a.stamina??100)+dt*(a.block?-22:a.cd>0?0:a.armor==='heavy'?10:18)));
-  a.cd=Math.max(0,a.cd-dt);a.swing=Math.max(0,a.swing-dt);a.bashCd=Math.max(0,(a.bashCd??0)-dt);
+  a.cd=Math.max(0,a.cd-dt);a.swing=Math.max(0,a.swing-dt);a.bashCd=Math.max(0,(a.bashCd??0)-dt);a.casterCd=Math.max(0,(a.casterCd??0)-dt);
   if(a.hp<=0){if(a.deadUntil>g.time)continue;
    if(a.kind==='player'){if(a.downed){a.downed=false;const boss=spawn(g,'corrupted',a.x,a.z,{name:`${a.name}, the Fallen`,hp:220,maxHp:220});noise(g,boss,35);a.deadUntil=g.time+8;event(g,`${a.name} has risen as a corrupted knight. Their spirit returns in 8 seconds.`);continue;}const c=g.castles.find(c=>c.friendly);if(!c&&g.everCaptured)continue;a.hp=a.maxHp;a.stamina=100;a.x=c?.x??START.x;a.z=c?c.z+3:START.z;a.input=idle();a.block=false;}
    else{g.actors=g.actors.filter(x=>x!==a);if(a.kind==='soldier')spawn(g,'corrupted',a.x,a.z);continue;}}
@@ -189,7 +232,19 @@ export function tick(g:Game,dt=.05){
     }
    }
   }else{
-   if(a.screamer&&!a.screamerAlerted&&nearest&&dist(a,nearest)<30){a.screamerAlerted=true;noise(g,a,32);g.stats.screams++;event(g,'A Shroud Screamer shrieks — the dead answer its call!');}
+   if(a.caster&&a.hp>0){
+    if((a.casterCharge??0)>0){
+     a.casterCharge=Math.max(0,(a.casterCharge??0)-dt);const aim=a.casterTarget?g.actors.find(e=>e.id===a.casterTarget&&e.hp>0):undefined;
+     if(!aim){a.casterCharge=0;a.casterCd=.5;}
+     else{a.yaw=Math.atan2(aim.x-a.x,-(aim.z-a.z));if(a.casterCharge<=0)launchShadowBolt(g,a,aim);}
+     continue;
+    }
+    const visible=enemies.filter(e=>e.hp>0&&dist(a,e)>=CASTER.rangeMin&&dist(a,e)<=CASTER.rangeMax&&lineClear(a,e)).sort((x,y)=>dist(a,x)-dist(a,y))[0];
+    if(visible&&(a.casterCd??0)<=0){a.casterTarget=visible.id;a.casterCharge=CASTER.telegraph;a.casterAim={x:visible.x,z:visible.z};a.yaw=Math.atan2(visible.x-a.x,-(visible.z-a.z));event(g,'A Shroud Caster gathers shadow!',{x:a.x,z:a.z});continue;}
+    const close=nearest&&dist(a,nearest)<6;
+    if(!close){if(nearest){const d=dist(a,nearest);if(d>CASTER.rangeMax||!lineClear(a,nearest)||d<CASTER.rangeMin){const dest=d<CASTER.rangeMin?{x:a.x-Math.sin(Math.atan2(nearest.x-a.x,-(nearest.z-a.z)))*1.5,z:a.z+Math.cos(Math.atan2(nearest.x-a.x,-(nearest.z-a.z)))*1.5}:nearest;moveEnemy(g,a,waypoint(a,dest),dt*2.4);}}continue;}
+   }
+      if(a.screamer&&!a.screamerAlerted&&nearest&&dist(a,nearest)<30){a.screamerAlerted=true;noise(g,a,32);g.stats.screams++;event(g,'A Shroud Screamer shrieks — the dead answer its call!');}
    const fort=g.castles.find(c=>c.id===a.castle);
    const target=nearest&&dist(a,nearest)<(a.kind==='corrupted'?20:13)&&lineClear(a,nearest)?nearest:undefined;const heard=g.noises.filter(n=>dist(a,n)<n.radius).sort((x,y)=>dist(a,x)-dist(a,y))[0];if(heard)a.investigate={x:heard.x,z:heard.z,until:g.time+6};
    const defense=g.castles.find(c=>c.friendly&&(c.barrier>0||c.gate>0)&&a.z>=c.z+(c.barrier>0?12:9)&&dist(a,c)<30&&(a.castle===c.id||(nearest&&Math.abs(nearest.x-c.x)<9&&Math.abs(nearest.z-c.z)<9)||(a.investigate&&Math.abs(a.investigate.x-c.x)<9&&Math.abs(a.investigate.z-c.z)<9)));
@@ -200,6 +255,7 @@ export function tick(g:Game,dt=.05){
    else if(fort?.friendly){const gate={x:fort.x,z:fort.z+11};if(fort.gate>0||fort.barrier>0){if(dist(a,gate)>2.5)moveEnemy(g,a,waypoint(a,gate),dt*2.6);else if(a.cd===0){if(fort.barrier>0)fort.barrier=Math.max(0,fort.barrier-12);else fort.gate=Math.max(0,fort.gate-12);noise(g,gate,30);a.cd=1;a.swing=.2;}}else moveEnemy(g,a,waypoint(a,fort),dt*2.6);}
   }
  }
+ updateProjectiles(g,dt);
  separateCompanions(g,dt);
  interactions(g,dt);
  for(const c of g.castles.filter(c=>c.friendly)){
@@ -215,7 +271,7 @@ export function tick(g:Game,dt=.05){
  if(g.everCaptured&&!g.castles.some(c=>c.friendly)){g.status='defeat';event(g,'The last stronghold has fallen.');return;}
  if(!g.siege&&g.everCaptured&&g.time>=g.nextSiege)openSiege(g);
  if(g.siege){const c=g.castles.find(c=>c.id===g.siege!.castle)!;
-  if(!g.siege.active&&g.time>=g.siege.starts){g.siege.active=true;const extra=Math.max(0,g.actors.filter(a=>a.kind==='player'&&a.connected).length-1)*2;const boss=!!g.siege.boss;const count=Math.max(4,Math.min(14,6+g.stats.sieges*2+extra+(boss?1:0)+difficultyPreset(g.difficulty).waveBonus));const normals=count-(boss?1:0);for(let n=0;n<normals;n++)spawn(g,n===normals-1?'corrupted':'zombie',c.x+(n%3-1)*2,c.z+19+Math.floor(n/3)*2,{castle:c.id});if(boss){const bossHp=Math.max(240,Math.min(280,g.siege.bossHp||240));const bossActor=spawn(g,'corrupted',c.x,c.z+19+Math.floor(normals/3)*2,{castle:c.id,name:g.siege.bossName||'Shroud Warden',hp:bossHp,maxHp:bossHp,armor:'heavy',boss:true});g.siege.bossId=bossActor.id;g.siege.bossHp=bossActor.maxHp;g.stats.bossesSeen++;}if((g.siege.index??1)>=3){const screamerHp=72+Math.min(18,((g.siege.index??3)-3)*3);spawn(g,'corrupted',c.x+4,c.z+21+((g.siege.index??3)%3)*2,{castle:c.id,name:'Shroud Screamer',hp:screamerHp,maxHp:screamerHp,armor:'light',screamer:true,appearance:(g.siege.index??3)%2===0?'fallen':'skeleton-armoured'});g.stats.screamers++;}g.siege.waveSize=count;event(g,boss?`${g.siege.bossName} leads the siege of ${c.name}!`:`The siege of ${c.name} has begun.`);}
+  if(!g.siege.active&&g.time>=g.siege.starts){g.siege.active=true;const extra=Math.max(0,g.actors.filter(a=>a.kind==='player'&&a.connected).length-1)*2;const boss=!!g.siege.boss;const count=Math.max(4,Math.min(14,6+g.stats.sieges*2+extra+(boss?1:0)+difficultyPreset(g.difficulty).waveBonus));const normals=count-(boss?1:0);for(let n=0;n<normals;n++)spawn(g,n===normals-1?'corrupted':'zombie',c.x+(n%3-1)*2,c.z+19+Math.floor(n/3)*2,{castle:c.id});if(boss){const bossHp=Math.max(240,Math.min(280,g.siege.bossHp||240));const bossActor=spawn(g,'corrupted',c.x,c.z+19+Math.floor(normals/3)*2,{castle:c.id,name:g.siege.bossName||'Shroud Warden',hp:bossHp,maxHp:bossHp,armor:'heavy',boss:true});g.siege.bossId=bossActor.id;g.siege.bossHp=bossActor.maxHp;g.stats.bossesSeen++;}if((g.siege.index??1)>=3){const screamerHp=72+Math.min(18,((g.siege.index??3)-3)*3);spawn(g,'corrupted',c.x+4,c.z+21+((g.siege.index??3)%3)*2,{castle:c.id,name:'Shroud Screamer',hp:screamerHp,maxHp:screamerHp,armor:'light',screamer:true,appearance:(g.siege.index??3)%2===0?'fallen':'skeleton-armoured'});g.stats.screamers++;}if((g.siege.index??1)>=2){spawnCaster(g,c.x-4,c.z+23+((g.siege.index??2)%3)*2,{castle:c.id,appearance:(g.siege.index??2)%2===0?'fallen':'skeleton-armoured'});}g.siege.waveSize=count;event(g,boss?`${g.siege.bossName} leads the siege of ${c.name}!`:`The siege of ${c.name} has begun.`);}
   if(g.siege.active&&(!c.friendly||!g.actors.some(a=>hostile(a)&&a.hp>0&&a.castle===c.id))){if(c.friendly){g.stats.sieges++;g.resources.wood+=16;g.resources.iron+=6;event(g,`Siege repelled at ${c.name}.`);}g.siege=null;const players=g.actors.filter(a=>a.kind==='player'&&a.connected);const pressure=players.length?players.reduce((v,a)=>v+1-a.hp/a.maxHp,0)/players.length:0;g.nextSiege=g.time+120+Math.round(pressure*60);}
  }
 }

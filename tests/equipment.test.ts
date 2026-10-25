@@ -21,9 +21,9 @@ for(let i=0;i<90;i++){survivorActor.block=i>20&&i<30;if(i===35)survivorActor.att
  const bounds=meshBounds(survivorRig.model);assert.ok(Number.isFinite(bounds.min.y)&&bounds.min.y>-.12&&bounds.min.y<.2,'survivor player ground '+i+' '+bounds.min.y);
  for(const part of ['sword','shield']){const item=survivorRig.model.getObjectByName('equipment-'+part);assert.ok(item,'survivor '+part+' present frame '+i);const size=new THREE.Box3().setFromObject(item!,true).getSize(new THREE.Vector3());assert.ok(size.length()<1.6,'survivor '+part+' size frame '+i);}}
 // Cycle-16 animation-depth pure helpers (run playback/slide, class attack timing, death variation, idle phase, landing).
- const matchedScale=runTimeScaleFor(4.2,false);assert.ok(Math.abs(matchedScale-1)<1e-9);assert.ok(Math.abs(slideFactorFor(4.2,matchedScale,false))<1e-9,'steady run has no foot slide');
- assert.ok(runTimeScaleFor(.2,false)>=.6&&runTimeScaleFor(12,false)<=1.35,'run timescale clamps');
- assert.ok(slideFactorFor(8,runTimeScaleFor(8,false),false)>0,'fast run leaves residual slide at the clamp');
+ const matchedScale=runTimeScaleFor(5.925,false);assert.ok(Math.abs(matchedScale-1)<1e-9);assert.ok(Math.abs(slideFactorFor(5.925,matchedScale,false))<1e-9,'steady run has no foot slide');
+ assert.ok(runTimeScaleFor(.2,false)>=.6&&runTimeScaleFor(12,false)<=1.6,'run timescale clamps');
+ assert.ok(slideFactorFor(8,runTimeScaleFor(8,false),false)<=.06,'in-game full-speed slide <= .06');assert.ok(Math.abs(runTimeScaleFor(8,false)-8/5.925)<1e-9);assert.ok(Math.abs(runTimeScaleFor(8,true)-8/5.08)<1e-9);assert.ok(slideFactorFor(12,runTimeScaleFor(12,false),false)>0,'residual slide only beyond clamp');
  const thrust=attackTimingFor('thrust',.65),cleave=attackTimingFor('cleave',1.1),crush=attackTimingFor('crush',1.15);
  assert.equal(thrust.clip,'attack_1');assert.equal(cleave.clip,'attack_2');assert.equal(crush.clip,'attack_2');
  assert.ok(thrust.windupMs<cleave.windupMs&&cleave.windupMs<crush.windupMs,'windup grows by weapon class');

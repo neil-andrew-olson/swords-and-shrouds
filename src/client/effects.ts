@@ -322,6 +322,22 @@ class GroundDecals {
     else { this.col[c3] = 0.24; this.col[c3 + 1] = 0.024; this.col[c3 + 2] = 0.028; }
   }
 
+  /** Brief shadow-bolt scorch on the existing decal mesh (no extra draw). */
+  emitScorch(x: number, z: number) {
+    const i = this.next;
+    this.next = (this.next + 1) % this.capacity;
+    this.x[i] = x + (Math.random() - 0.5) * 0.4;
+    this.z[i] = z + (Math.random() - 0.5) * 0.4;
+    this.yaw[i] = Math.random() * Math.PI * 2;
+    this.maxLife[i] = 4 + Math.random() * 2.5;
+    this.life[i] = this.maxLife[i];
+    this.size[i] = 0.75 + Math.random() * 0.6;
+    const c3 = i * 3;
+    this.col[c3] = 0.2;
+    this.col[c3 + 1] = 0.035;
+    this.col[c3 + 2] = 0.3;
+  }
+
   update(dt: number) {
     let anyAlive = false;
     for (let i = 0; i < this.capacity; i++) if (this.life[i] > 0) { anyAlive = true; break; }
@@ -476,6 +492,11 @@ export class CombatEffects {
   }
 
   /** Ground dust kicked up by running actors or siege impacts. */
+  /** Shadow-bolt ground scorch (reuses pooled decals, one existing draw). */
+  scorch(position: THREE.Vector3) {
+    this.decals.emitScorch(position.x, position.z);
+  }
+
   dust(position: THREE.Vector3, intensity: number) {
     const {x, y, z} = position;
     const count = Math.max(2, Math.min(9, Math.round((3 + intensity * 6) * this.particleScale)));

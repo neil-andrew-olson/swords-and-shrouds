@@ -3533,6 +3533,38 @@ check('recap: defeat recap shows run stats fields + epilogue', !!(defeatRecap &&
   check('mood: reduced motion is respected', !!(victoryMoodReduced && (victoryMoodReduced.reducedMotion === true || JSON.stringify(victoryMoodReduced) !== JSON.stringify(victoryMood))), JSON.stringify({victoryMood, victoryMoodReduced}));
 }
 
+/** Cycle-17 Shroud Caster probe: roster/projectiles/FX/audio cues/telegraph. */
+async function probeCaster(page, outDir, report, check) {
+  const read = (n) => page.evaluate(`(()=>{try{return typeof window[${JSON.stringify(n)}]==='function'?JSON.parse(JSON.stringify(window[${JSON.stringify(n)}]())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  const readAudio = () => page.evaluate(`(()=>{try{return typeof window.__ssAudioState==='function'?JSON.parse(JSON.stringify(window.__ssAudioState())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  const casters = await read('__ssCasters');
+  const projectiles = await read('__ssProjectiles');
+  const fx0 = await read('__ssCasterFx');
+  const state0 = await page.evaluate(`(()=>{try{const s=window.__qaWs&&window.__qaWs.lastState;return {casters:s&&s.stats&&s.stats.casters,bolts:s&&s.stats&&s.stats.casterBolts,projectiles:(s&&s.projectiles)||[]};}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  // captions on for cue verification
+  await page.evaluate(`(()=>{try{const t=document.getElementById('captionsToggle');if(t&&!t.checked){t.click();}return true;}catch(e){return false;}})()`, {timeoutMs:10000}).catch(()=>null);
+  const shots=[];
+  for (const kind of ['telegraph','bolt','impact']) {
+    await page.evaluate(`(()=>{try{return typeof window.__ssTriggerCasterFx==='function'?window.__ssTriggerCasterFx(${JSON.stringify(kind)}):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+    await sleep(350);
+    shots.push(await screenshot(page, outDir, 'caster-'+kind+'.png').catch(()=>null));
+  }
+  const fxAfter = await read('__ssCasterFx');
+  for (const cue of ['charge','launch','impact']) { await page.evaluate(`(()=>{try{return typeof window.__ssCasterAudio==='function'?window.__ssCasterAudio(${JSON.stringify(cue)}):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null); await sleep(120); }
+  const audioAfter = await readAudio();
+  await page.evaluate(`(()=>{try{window.__ssSetReducedMotion&&window.__ssSetReducedMotion(true);return true;}catch(e){return false;}})()`, {timeoutMs:10000}).catch(()=>null);
+  await page.evaluate(`(()=>{try{return typeof window.__ssTriggerCasterFx==='function'?window.__ssTriggerCasterFx('telegraph'):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  await sleep(300);
+  const fxReduced = await read('__ssCasterFx');
+  await page.evaluate(`(()=>{try{window.__ssSetReducedMotion&&window.__ssSetReducedMotion(null);return true;}catch(e){return false;}})()`, {timeoutMs:10000}).catch(()=>null);
+  report.caster = {casters, projectiles, fx0, fxAfter, fxReduced, audioAfter, state0, shots};
+  const cues = audioAfter && audioAfter.cues || {};
+  check('caster: roster hook reports Shroud Casters (nest + siege spawn)', !!(casters && Number(casters.count) >= 2), JSON.stringify(casters));
+  check('caster: projectile roster + server counters exposed', !!(projectiles && Number(projectiles.count) >= 0) && !!(state0 && Number(state0.casters) >= 2), JSON.stringify({projectiles, state0}));
+  check('caster: telegraph/bolt/impact FX hook + QA trigger captured', !!(fxAfter && (Number(fxAfter.launches) >= 0)) && shots.every(Boolean), JSON.stringify({fxAfter, shots}));
+  check('caster: charge/launch/impact audio cue fields exposed', ['casterChargeAt','casterLaunchAt','casterImpactAt'].every(k => k in cues) || typeof cues.casterChargeCount === 'number', JSON.stringify(cues));
+  check('caster: reduced motion keeps telegraph static', !!(fxReduced && fxReduced.reducedMotion === true), JSON.stringify(fxReduced));
+}
 /** Cycle-16 animation-depth + movement-VFX probe. */
 async function probeAnimation(page, outDir, report, check) {
   const readAnim = (id) => page.evaluate(`(()=>{try{return typeof window.__ssAnimState==='function'?JSON.parse(JSON.stringify(window.__ssAnimState(${id?JSON.stringify(id):'undefined'}))):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
@@ -3594,7 +3626,7 @@ async function probeAnimation(page, outDir, report, check) {
   const stepDelta = runMove && runMove2 ? Number(runMove2.steps||0) - Number(runMove.steps||0) : 0;
   const landDelta = afterStopMove ? Number(afterStopMove.landings||0) - Number(runMove2 && runMove2.landings||0) : 0;
   check('anim: idlePhase advances while idle', idleAdvance > 0.05 || idleAdvance < -0.05 || Number(idle2 && idle2.idlePhase) !== Number(idle1 && idle1.idlePhase), JSON.stringify({idle1, idle2, idleAdvance}));
-  check('anim: run playback rate follows speed (clamp) and slide within sprint bound', !!((runAnim2||runAnim) && (runAnim2||runAnim).state === 'run' && Number((runAnim2||runAnim).speed) > 0.2 && Number((runAnim2||runAnim).runTimeScale) >= 0.6 && Number((runAnim2||runAnim).runTimeScale) <= 1.35 && Math.abs(Number((runAnim2||runAnim).runTimeScale) - Math.max(0.6, Math.min(1.35, Number((runAnim2||runAnim).speed)/4.2))) < 0.03 && Math.abs(Number((runAnim2||runAnim).slideFactor)) < 0.45), JSON.stringify({runAnim, runAnim2}));
+  check('anim: full-run foot-slide fixed (slideFactor <= .06, timescale .6-1.6)', !!((runAnim2||runAnim) && (runAnim2||runAnim).state === 'run' && Number((runAnim2||runAnim).speed) > 0.2 && Number((runAnim2||runAnim).runTimeScale) >= 0.6 && Number((runAnim2||runAnim).runTimeScale) <= 1.6 && Math.abs(Number((runAnim2||runAnim).slideFactor)) <= 0.06), JSON.stringify({runAnim, runAnim2}));
   if (attack) check('anim: attack state/windup reported for the equipped weapon class', /attack_\d/.test(String(attack.state)) && Number(attack.windupMs) > 0 && /thrust|cleave|crush|sweep/.test(String(attack.attackKind)), JSON.stringify(attack)); else { report.notes.push('anim: synthetic attack input not observed in this headless run; owner in-game proof: sword attack_1/thrust/169 ms, hammer attack_2/crush/483 ms'); check('anim: attack timing per weapon class (owner in-game evidence; input not observed headlessly)', true, JSON.stringify({attack:null,owner:{sword:'attack_1/thrust/169',hammer:'attack_2/crush/483'}})); }
   check('anim: deathVariant deterministic per actor and varies across actors', !!(deaths && deaths2 && JSON.stringify(deaths) === JSON.stringify(deaths2) && deathValues.length > 2 && new Set(deathValues.map(v => Number(v))).size > 1), JSON.stringify({deaths, actors: actors && actors.length}));
   check('movefx: footsteps increment during a run', !!(runMove && runMove2 && stepDelta > 0), JSON.stringify({runMove, runMove2, stepDelta}));
@@ -5177,6 +5209,7 @@ async function run() {
       await probeDifficulty(page, report, check);
       await probeWayfinding(page, opts.outDir, report, check);
       await probeAnimation(page, opts.outDir, report, check);
+      await probeCaster(page, opts.outDir, report, check);
 
     }    await sleep(opts.perf ? opts.perfSettle : 2500);
     // Cycle-1 character readability capture (close-ups + body luminance before/after).

@@ -2452,3 +2452,18 @@ Live runs: deployed 34/34 (qa/live-batch19-deployed), feature/probes/views 101/1
 - DEFERRED: audio landmark ear check, physical-device/real-GPU/perceptual, hardware rumble.
 
 Cycle-16 live deployment verified green for body-tone close-ups, animation metrics (foot-slide at sprint bound noted for cycle-17 recalibration), movement VFX, and regressions. task-124 complete. Cycle-17 notes: foot-slide stride/clamp recalibration (speed 8 -> clamp ~2.2 or stride calibration) + enemy family #2 (ranged Shroud Caster with projectile AI/telegraph/FX/audio).
+
+
+---
+
+## Iteration cycle 2026-10T (AAA loop, cycle 17) - foot-slide fix, Shroud Caster, regressions
+
+### Authoritative capture + regression - final build index-EHFLh_ew.js (976,975 B): PASS (one death-induced character-run timing check)
+
+Fresh bundled-Node-24 build reproduced index-EHFLh_ew.js exactly; freshness gate passed (scene.ts 17:39:44 < artifact 17:44:58). Authoritative: fresh smoke 27/27 (night 56.93), characters 108/109, perf 153/153, mobile 26/26, co-op 22/22, live baseline 34/34. 0 page/console/log errors, 0 404s, 11 cards. Characters' one fail was the controller-hints check sampled after the QA player died (plus a post-death CDP screenshot timeout); all new cycle-17 gates passed.
+
+1) FOOT-SLIDE RECALIBRATION - PASS. __ssAnimState(player) at full run: state run, speed 8, runTimeScale 1.3502109705, slideFactor 1.11e-16 (<=.06); helper table 2->.600/.437, 4.2->.709/0, 6->1.013/0, 8->1.350/0, 10->1.600/.054, heavy 8->1.575/0 (owner in-game ingame-caster-run.png); run capture anim-run.png.
+2) SHROUD CASTER - PASS on spawn/roster/FX/cues; REAL forced-siege telegraph->bolt->hit stills DEFERRED. __ssCasters() count 3 (2 nest guards a96/a97 + siege caster a113 owner forced index2; QA baseline 2 nest), casterBolts 0->3 owner; __ssProjectiles() id b117/speed 8.5 owner; stats.casters/casterBolts counters. QA trigger path __ssTriggerCasterFx('telegraph'|'bolt'|'impact') captured caster-telegraph/bolt/impact.png; __ssCasterFx() telegraphVisible/draws/reduced static (telegraphVisible true, reducedMotion true); audio cues casterChargeAt/LaunchAt/ImpactAt + counts 1/1/1 via __ssCasterAudio; captions wired; wall/ground impact strings contract. Real headless forced index2 caster stayed out of LOS >30 s (no charge) - recorded as deferred, not claimed.
+3) BASE REGRESSION - PASS. Perf spawn TP 158 calls / 1,622,187 tris (<290/<2.15M; high sample 188/1,646,952), payload 18,372,514 B = 17.52 MiB; windmill angle .8777->1.3205/reduced 0, torches/torch bed .018/0, markers 3/5 bob-false, look torso 88.83/limb 70.94, animation foot-slide/death/idle, move FX steps/landing/draws 0, journal/lore/recap/mood/difficulty/wayfinding, 11 weapons/bash, mobile 26/26, co-op 22/22, live baseline 34/34.
+
+Cycle-17 verdict: PASS on foot-slide fix and caster spawn/roster/FX/audio cues/regressions; deferred: real forced-siege telegraph->bolt->hit capture (LOS issue; owner sim/trigger evidence), audio landmark ear check, physical-device/real-GPU/perceptual, hardware rumble. After deploy: final live pass + task-129 complete.

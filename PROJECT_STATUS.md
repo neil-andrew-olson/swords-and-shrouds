@@ -25,55 +25,57 @@ re-check source mtimes vs the artifact mtime before handing a hash, and rebuild 
 `node_modules/.vite` cleared (cycle-11/13/14 lessons: post-freeze edits and races produced superseded
 artifacts — only gate a hash a clean rebuild reproduces).
 
-## Cycle 16 (2026-10S) — body tone, animation depth, movement VFX (DEPLOYED)
+## Cycle 17 (2026-10T) — foot-slide fix + Shroud Caster (DEPLOYED after live pass)
 
-Final bundle **`index-BWKLWhO3.js`** (964,279 B). Contract `docs/BATCH-2026-10S-SPEC.md`, results
-`docs/BATCH-2026-10S-RESULTS.md`. Roadmap milestone A complete except one gap (sprint foot-slide).
+Final bundle **`index-EHFLh_ew.js`** (976,975 B). Contract `docs/BATCH-2026-10T-SPEC.md`, results
+`docs/BATCH-2026-10T-RESULTS.md`. Roadmap A closed (foot-slide), milestone B started.
 
-### Body-scan base-atlas tone pass
-Base body colour atlas only: desat .74 / warm 1.10 / blue .85 / value .86 / floor .03; armour atlas
-byte-identical to v5.1. Torso means 82.4–90.6, limbs now darker than torso (−11…−30 arms, −18…−23
-legs), limb sat .29–.39; strict-mask 7/7 ≥801 (1246/982/1265/805/839/801/850); files ≤753 KB;
-builder `scripts/bake/tone-body-atlas.mjs`; validator 87/87.
+### Foot-slide recalibration
+`ANIM_STRIDE` light 5.925 / heavy 5.08, clamp 0.6–1.6: helper table 4.2→.709/0, 6→1.013/0,
+**8→1.350/slide 0** (real full speed), 10→1.600/.054; in-game `__ssAnimState()` slideFactor 1.11e-16;
+movement speed unchanged.
 
-### Animation-depth pass (client)
-`runTimeScaleFor` = clamp(speed/stride, .6–1.35) with slideFactor residual exposed (2→.600/.206,
-4.2→1.0/0, 6→1.35/.058, **8→1.35/.411** — sprint-bound gap to fix in cycle 17: real run speed is 8,
-so raise clamp to ~2.2/calibrate stride). Weapon-class attack timing tied to server cooldowns
-(thrust→attack_1: sword windup 169 ms/.507 s; cleave/crush→attack_2: hammer 483/1.0925) with
-anticipation lean/follow-through; idle breathing sway 3.2 s (reduced-motion suppressed); deterministic
-±25° death variation per actor; landing crouch impulse >2.2 m/s decel; hooks `__ssAnimState`,
-`__ssAnimActors`, `__ssDeathVariants`; pure helpers tested inside existing blocks.
-
-### Movement VFX
-Stride-based footstep dust (1.85 m stride, pooled, 26 m cull) + landing poofs (local player, bounded
-against NPC network snaps), skipped under reduced motion, **0 extra draws**; `__ssMoveFx()` +
-`__ssTriggerMoveFx`.
+### Shroud Caster (first ranged enemy, server-authoritative)
+Kind corrupted `caster:true`, HP 88, 2 nest guards + 1 per siege index ≥2; LOS 10–20 m, 1.0 s
+telegraph (`casterCharge` + `A Shroud Caster gathers shadow!`), speed-8.5 shadow bolt (16 dmg, 3 s
+cooldown, lead prediction), `game.projectiles[]` with wall/actor/ground hits, co-op synced,
+`stats.casters/casterBolts`; events gather/launch/strike/fizzle/scatter. Client: pooled InstancedMesh
+telegraph ring (violet aura idle, pulsing charge, static under reduced motion, 1 draw), pooled bolt orb
++ additive trail (1 draw active), impact sparks/smoke + scorch; `__ssCasters/__ssProjectiles/
+__ssCasterFx/__ssTriggerCasterFx`. Audio: charge/launch/impact synth cues + cue counts in
+`__ssAudioState().cues`, captions "A Shroud Caster gathers shadow." / "Shadow bolt!",
+`__ssCasterAudio`. Sim: index2 32.6 s/7 bolts, index5 37.1 s/8, index9 73.5 s/15, castle held.
 
 ### Verification
-- 58/58 tests; tsc 0; deterministic `index-BWKLWhO3.js` + freshness; validator 87/87.
-- QA: fresh 27/27, characters **147/149** (2 harness-only death-timing samples; owner state
-  evidence green), perf **149/150** (1 synthetic attack-input race; same run observed
-  attack_1/thrust/169 ms), mobile 26/26, co-op 22/22, live baseline 34/34; body torso 88.8, limbs
-  ≤ torso+3, strict-mask 7/7 ≥801; spawn **167 calls / 1,619,105 tris**; night 55.96.
+- 58/58 tests; tsc 0; deterministic `index-EHFLh_ew.js` + freshness; validator 87/87.
+- QA: fresh 27/27, characters **108/109** (one death-induced harness sample; new gates green),
+  perf **153/153** (spawn **158 calls / 1,622,187 tris**; high 188/1,646,952), mobile 26/26,
+  co-op 22/22, live baseline 34/34; foot-slide pass; caster roster/FX/cues/captions pass; payload
+  **17.52 MiB**; night 56.93.
+- **Deferred (honest):** real forced-siege caster telegraph→bolt→hit stills (headless caster stayed
+  out of LOS >30 s) — covered by tests/sim + deterministic FX trigger; also audio ear check,
+  physical-device/real-GPU/perceptual, hardware rumble remain human/device debts.
 
-### Cycle-17 (next) — roadmap A close-out → B
-1. **Foot-slide recalibration** (clamp ~2.2 / stride calibration at real speed 8).
-2. **Enemy family #2 (roadmap B): ranged corrupted with projectile AI + hound-style harasser**, with
-   distinct telegraphs, spawn integration, co-op/tests and QA evidence.
-3. Audio landmark ear check (human); physical-device/real-GPU/perceptual; hardware rumble.
-4. Then second boss with phases/arena.
+### Cycle-18 (next) — roadmap B (spec already written: `docs/BATCH-2026-10U-SPEC.md`)
+1. **Shroud Stalker** — fast flanking harasser (existing rig): circles 6–10 m, telegraphed lunge
+   (~0.45 s), ~18 dmg, 2/siege index ≥3 + moor wilds, counters, co-op sync; FX/windup/trail,
+   lunge cue + caption.
+2. **Two-phase Shroud Warden** — enrage at ≤50 % HP (cadence up, aura intensifies, summons 2 adds
+   once, event), HUD phase FRENZIED, co-op synced.
+3. Cycle 19: fully distinct second boss (phases/arena).
+4. Human/device debts: audio ear check, real-GPU/perceptual/mobile hardware, hardware rumble.
 
 ## Previous cycles
 
-- **2026-10R cycle 15**: character armour atlas v5.1 (coherent steel/leather/cloth/trim, structured
-  variety) + look-pass v5; Warden/Screamer capture debt closed (`docs/BATCH-2026-10R-RESULTS.md`).
-- **2026-10Q cycle 14**: windmill + animated sails, torch-lit roads/torch ambience; character look
-  hotfix (great-helm, steel tint, opaque capes, no green companion, distance-gated markers); AAA
-  roadmap (`docs/BATCH-2026-10Q-RESULTS.md`).
-- **2026-10P cycle 13**: camp props, siege audio layers/stings, shield bash, freshness process
+- **2026-10S cycle 16**: body-scan atlas tone, animation depth, movement VFX
+  (`docs/BATCH-2026-10S-RESULTS.md`).
+- **2026-10R cycle 15**: armour atlas v5.1 + look-pass v5; Warden/Screamer capture debt closed
+  (`docs/BATCH-2026-10R-RESULTS.md`).
+- **2026-10Q cycle 14**: windmill/sails, torch-lit roads/ambience; character look hotfix; AAA roadmap
+  (`docs/BATCH-2026-10Q-RESULTS.md`).
+- **2026-10P cycle 13**: camp props, siege audio layers/stings, shield bash
   (`docs/BATCH-2026-10P-RESULTS.md`).
-- **2026-10O cycle 12**: chronicle lore (16), run recap+epilogue, Screamer, victory/defeat mood
+- **2026-10O cycle 12**: chronicle lore, recap+epilogue, Screamer, victory/defeat mood
   (`docs/BATCH-2026-10O-RESULTS.md`).
 - **2026-10N cycle 11**: difficulty modes, boss HP bar + aura/scale/tint, balance sims
   (`docs/BATCH-2026-10N-RESULTS.md`).
@@ -83,8 +85,8 @@ against NPC network snaps), skipped under reduced motion, **0 extra draws**; `__
   (`docs/BATCH-2026-10L-RESULTS.md`).
 - **2026-10K cycle 8**: mobile/touch HUD, device-aware quality, enemy preview, hit feedback
   (`docs/BATCH-2026-10K-RESULTS.md`).
-- **2026-10J cycle 7**: enemy variants, strict-mask palette 7/7, content captures, plague dressing,
-  a11y captions (`docs/BATCH-2026-10J-RESULTS.md`).
+- **2026-10J cycle 7**: enemy variants, strict-mask palette 7/7, content captures, plague dressing
+  (`docs/BATCH-2026-10J-RESULTS.md`).
 - **2026-10I cycle 6**: Wandering Survivor, rumble/hints, reduced-motion fix, cloth wind
   (`docs/BATCH-2026-10I-RESULTS.md`).
 - **2026-10H cycle 5**: armour v3 + survivor identity, snowstorms, combat feel, surface audio

@@ -376,10 +376,12 @@ transformed.z+=cos(ssPhase*0.85)*ssSway*0.65;`);
 // weapon-class attack timing, per-actor death variation, idle phase and landing/step impulse.
 export type AttackKind=CombatSwingStyle;
 export type AttackTiming={kind:AttackKind;clip:string;windupMs:number;duration:number};
-export const ANIM_STRIDE={light:4.2,heavy:3.6};
+// Cycle-17 recalibration from the in-game full-run measurement (~8 m/s): stride light 5.925 / heavy 5.08
+// with the ceiling at 1.6 keeps the real sprint inside the clamp (residual slide ≤.06).
+export const ANIM_STRIDE={light:5.925,heavy:5.08};
 export function runTimeScaleFor(speed:number,heavy=false):number{
  const stride=heavy?ANIM_STRIDE.heavy:ANIM_STRIDE.light;
- return Math.max(.6,Math.min(1.35,speed/Math.max(.001,stride)));
+ return Math.max(.6,Math.min(1.6,speed/Math.max(.001,stride)));
 }
 /** 0 = feet exactly match ground travel; >0 = residual slide when the clamp cannot follow speed. */
 export function slideFactorFor(speed:number,timeScale:number,heavy=false):number{

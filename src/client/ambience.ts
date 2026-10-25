@@ -156,6 +156,13 @@ export class Ambience{
  private screamerCount=0;
  private stingMode:'victory'|'defeat'|null=null;
  private stingAt:number|null=null;
+ // Cycle-17 Shroud Caster cues (recorded even when muted; synth respects Sound/duck).
+ private lastCasterChargeAt:number|null=null;
+ private lastCasterLaunchAt:number|null=null;
+ private lastCasterImpactAt:number|null=null;
+ private casterChargeCount=0;
+ private casterLaunchCount=0;
+ private casterImpactCount=0;
  private captureRelief=0;
  private prevCaptures=0;
  private capturesSeen=false;
@@ -262,7 +269,7 @@ export class Ambience{
    masterGain:level(this.master),
    focus:this.focusOverride?{x:this.focusOverride.x,z:this.focusOverride.z}:null,
    siege:{boss:this.bossMode==='boss',active:this.bossMode!=='idle',mode:this.bossMode,level:Math.round(this.bossLevel*1000)/1000,gain:level(this.bossGain)},
-   cues:{screamerAt:this.lastScreamerAt===null?null:Math.round(this.lastScreamerAt*1000)/1000,screamerCount:this.screamerCount,sting:this.stingMode,stingAt:this.stingAt===null?null:Math.round(this.stingAt*1000)/1000}
+   cues:{screamerAt:this.lastScreamerAt===null?null:Math.round(this.lastScreamerAt*1000)/1000,screamerCount:this.screamerCount,sting:this.stingMode,stingAt:this.stingAt===null?null:Math.round(this.stingAt*1000)/1000,casterChargeAt:this.lastCasterChargeAt===null?null:Math.round(this.lastCasterChargeAt*1000)/1000,casterLaunchAt:this.lastCasterLaunchAt===null?null:Math.round(this.lastCasterLaunchAt*1000)/1000,casterImpactAt:this.lastCasterImpactAt===null?null:Math.round(this.lastCasterImpactAt*1000)/1000,casterChargeCount:this.casterChargeCount,casterLaunchCount:this.casterLaunchCount,casterImpactCount:this.casterImpactCount}
   };
  }
  private ensureBossSiege(){
@@ -287,6 +294,41 @@ export class Ambience{
  /** Short victory/defeat sting on the recap moment (respects Sound/duck; diagnostics recorded). */
  endingSting(mode:'victory'|'defeat'){this.stingMode=mode;this.stingAt=this.context?.currentTime??0;const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
   try{const notes=mode==='victory'?[392,523.25,659.25,783.99]:[220,196,164.81,110];const t=c.currentTime;notes.forEach((freq,index)=>{const osc=c.createOscillator(),gain=c.createGain();osc.type=mode==='victory'?'triangle':'sine';osc.frequency.value=freq;const at=t+index*.17;gain.gain.setValueAtTime(.0001,at);gain.gain.exponentialRampToValueAtTime(.05*(1-.55*this.duckLevel),at+.03);gain.gain.exponentialRampToValueAtTime(.0001,at+.5);osc.connect(gain);gain.connect(master);osc.start(at);osc.stop(at+.55);osc.onended=()=>{try{osc.disconnect();gain.disconnect();}catch{}};});}catch{}
+ }
+ /** Shroud Caster windup: ~1 s rising whisper/whine matching the telegraph (recorded even muted). */
+ casterCharge(){
+  const now=this.context?.currentTime??performance.now()/1000;if(this.lastCasterChargeAt!==null&&now-this.lastCasterChargeAt<.35)return;
+  this.lastCasterChargeAt=now;this.casterChargeCount++;
+  const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const t=c.currentTime,osc=c.createOscillator(),gain=c.createGain(),filter=c.createBiquadFilter();
+   osc.type='sine';osc.frequency.setValueAtTime(160,t);osc.frequency.exponentialRampToValueAtTime(460,t+1);
+   filter.type='bandpass';filter.frequency.setValueAtTime(420,t);filter.frequency.exponentialRampToValueAtTime(1800,t+1);filter.Q.value=1.8;
+   const peak=.032*(1-.5*this.duckLevel);gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(peak,t+.12);gain.gain.setValueAtTime(peak,t+.85);gain.gain.exponentialRampToValueAtTime(.0001,t+1.05);
+   osc.connect(filter);filter.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+1.06);
+   if(this.noise){const whisper=c.createBufferSource();whisper.buffer=this.noise;whisper.loop=true;const wf=c.createBiquadFilter();wf.type='bandpass';wf.frequency.setValueAtTime(700,t);wf.frequency.exponentialRampToValueAtTime(2600,t+1);wf.Q.value=1.2;whisper.connect(wf);wf.connect(gain);whisper.start(t);whisper.stop(t+1.06);}
+   osc.onended=()=>{try{osc.disconnect();gain.disconnect();filter.disconnect();}catch{}};}catch{}
+ }
+ /** Shroud Caster launch: short shadow whoosh + low thump (recorded even when muted). */
+ casterLaunch(){
+  const now=this.context?.currentTime??performance.now()/1000;if(this.lastCasterLaunchAt!==null&&now-this.lastCasterLaunchAt<.15)return;
+  this.lastCasterLaunchAt=now;this.casterLaunchCount++;
+  const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const t=c.currentTime,gain=c.createGain(),noise=c.createBufferSource();
+   const launchBuffer=this.noise??this.crackle;if(!launchBuffer)return;noise.buffer=launchBuffer;
+   noise.loop=true;const filter=c.createBiquadFilter();filter.type='bandpass';filter.frequency.setValueAtTime(1800,t);filter.frequency.exponentialRampToValueAtTime(380,t+.32);filter.Q.value=1.4;
+   gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.055*(1-.5*this.duckLevel),t+.02);gain.gain.exponentialRampToValueAtTime(.0001,t+.34);
+   noise.connect(filter);filter.connect(gain);gain.connect(master);noise.start(t);noise.stop(t+.36);
+   const thump=c.createOscillator(),tg=c.createGain();thump.type='sine';thump.frequency.setValueAtTime(120,t);thump.frequency.exponentialRampToValueAtTime(60,t+.22);tg.gain.setValueAtTime(.0001,t);tg.gain.exponentialRampToValueAtTime(.045,t+.02);tg.gain.exponentialRampToValueAtTime(.0001,t+.26);thump.connect(tg);tg.connect(master);thump.start(t);thump.stop(t+.28);
+   noise.onended=()=>{try{noise.disconnect();filter.disconnect();gain.disconnect();}catch{}};}catch{}
+ }
+ /** Shadow-bolt impact: low thud + noise burst (recorded even when muted). */
+ casterImpact(){
+  const now=this.context?.currentTime??performance.now()/1000;if(this.lastCasterImpactAt!==null&&now-this.lastCasterImpactAt<.12)return;
+  this.lastCasterImpactAt=now;this.casterImpactCount++;
+  const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const t=c.currentTime,osc=c.createOscillator(),gain=c.createGain();osc.type='sine';osc.frequency.setValueAtTime(110,t);osc.frequency.exponentialRampToValueAtTime(42,t+.3);gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.07*(1-.5*this.duckLevel),t+.015);gain.gain.exponentialRampToValueAtTime(.0001,t+.34);osc.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+.36);
+   if(this.noise){const burst=c.createBufferSource();burst.buffer=this.noise;const bf=c.createBiquadFilter();bf.type='lowpass';bf.frequency.value=900;const bg=c.createGain();bg.gain.setValueAtTime(.0001,t);bg.gain.exponentialRampToValueAtTime(.035*(1-.5*this.duckLevel),t+.01);bg.gain.exponentialRampToValueAtTime(.0001,t+.2);burst.connect(bf);bf.connect(bg);bg.connect(master);burst.start(t);burst.stop(t+.22);}
+   osc.onended=()=>{try{osc.disconnect();gain.disconnect();}catch{}};}catch{}
  }
  private noiseBuffer(c:AudioContext,seconds:number,pink:boolean):AudioBuffer{
   const length=Math.ceil(c.sampleRate*seconds),buffer=c.createBuffer(1,length,c.sampleRate),data=buffer.getChannelData(0);

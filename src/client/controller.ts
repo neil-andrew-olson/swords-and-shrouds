@@ -42,11 +42,11 @@ export function touchSensitivityValue(value:unknown){const n=Number(value);retur
  * Accessibility captions (CC): pure text formatter + rate limiter. main.ts owns the HUD element,
  * persistence and gating; these helpers keep the behaviour unit-testable.
  * ------------------------------------------------------------------------------------------- */
-export type CaptionCue='thunder'|'undead'|'siege-start'|'siege-end'|'low-health'|'castle-captured';
+export type CaptionCue='thunder'|'undead'|'siege-start'|'siege-end'|'low-health'|'castle-captured'|'caster-charge'|'caster-launch';
 export const CAPTION_RATE_LIMIT_MS=2200;
 export const CAPTION_MAX_CHARS=96;
 /** Higher-priority cues may replace a different lower-priority cue after half the rate window. */
-export const CAPTION_PRIORITY:Record<CaptionCue,number>={undead:1,thunder:3,'siege-end':3,'siege-start':4,'low-health':4,'castle-captured':5};
+export const CAPTION_PRIORITY:Record<CaptionCue,number>={undead:1,thunder:3,'siege-end':3,'caster-charge':3,'siege-start':4,'caster-launch':4,'low-health':4,'castle-captured':5};
 export function captionText(cue:CaptionCue,detail?:string):string{
  const base:Record<CaptionCue,string>={
   thunder:'Lightning. Thunder rolls in the distance.',
@@ -54,7 +54,9 @@ export function captionText(cue:CaptionCue,detail?:string):string{
   'siege-start':'Siege warning. A castle is under attack.',
   'siege-end':'The siege is over.',
   'low-health':'Low health. Find cover or heal.',
-  'castle-captured':'Castle captured.'
+  'castle-captured':'Castle captured.',
+  'caster-charge':'A Shroud Caster gathers shadow.',
+  'caster-launch':'Shadow bolt!'
  };
  const text=detail&&(cue==='siege-start'||cue==='castle-captured')?`${base[cue]} ${detail}`:base[cue];
  return text.slice(0,CAPTION_MAX_CHARS);
@@ -280,4 +282,14 @@ export const TORCH_BED_RADIUS=10;
 export function torchBedProximity(distance:number|null|undefined,radius:number=TORCH_BED_RADIUS):number{
  if(distance===null||distance===undefined||!Number.isFinite(distance)||radius<=0)return 0;
  return Math.max(0,Math.min(1,1-distance/radius));
+}
+/* Cycle-17 Shroud Caster cue mapping: tolerant event-text → cue classifier used by main.ts (pure). */
+export type CasterCue='charge'|'launch'|'impact';
+export function casterCueForEvent(text:string):CasterCue|null{
+ const value=String(text??'').toLowerCase();
+ if(!/caster|shadow|bolt/.test(value))return null;
+ if(/bolt|shadow/.test(value)&&/(hit|impact|strik|burst|wall|ground|explod|dissipat|fizzl|stone|scatter)/.test(value))return 'impact';
+ if(/shadow bolt/.test(value)||/(caster|bolt).*(launch|fire|release|cast)/.test(value))return 'launch';
+ if(/caster/.test(value)&&/(gather|charg|wind|summon|telegraph|shadow)/.test(value))return 'charge';
+ return null;
 }
