@@ -2467,3 +2467,15 @@ Fresh bundled-Node-24 build reproduced index-EHFLh_ew.js exactly; freshness gate
 3) BASE REGRESSION - PASS. Perf spawn TP 158 calls / 1,622,187 tris (<290/<2.15M; high sample 188/1,646,952), payload 18,372,514 B = 17.52 MiB; windmill angle .8777->1.3205/reduced 0, torches/torch bed .018/0, markers 3/5 bob-false, look torso 88.83/limb 70.94, animation foot-slide/death/idle, move FX steps/landing/draws 0, journal/lore/recap/mood/difficulty/wayfinding, 11 weapons/bash, mobile 26/26, co-op 22/22, live baseline 34/34.
 
 Cycle-17 verdict: PASS on foot-slide fix and caster spawn/roster/FX/audio cues/regressions; deferred: real forced-siege telegraph->bolt->hit capture (LOS issue; owner sim/trigger evidence), audio landmark ear check, physical-device/real-GPU/perceptual, hardware rumble. After deploy: final live pass + task-129 complete.
+
+
+### Final live deployment verification - cycle-17 (game 8b987b3f, hosting 81e5b4c2)
+
+Live runs: deployed 34/34 (qa/live-batch20-deployed), feature/probes/views 106/107 (qa/live-feature-c17), live mobile 26/26 (qa/live-mobile-c17). Live serves index-C1QcwRuc.js (977,150 B) = hosting build of authoritative index-EHFLh_ew.js (976,975 B; +175 B); /health OK; 11 cards; payload 18,343,889 B = 17.49 MiB across 96 assets; atlas templar 765,320 / hero 766,460; 0 page/console errors, 0 404s/failed requests (external Cloudflare beacon only); night TP 55.07.
+- FOOT-SLIDE live: __ssAnimState() run speed 8, runTimeScale 1.3502109705, slideFactor 1.11e-16 (<=.06) PASS; anim-run.png.
+- CASTER live: __ssCasters() count 2 nest (a96/a97); __ssProjectiles() 0 active baseline; __ssTriggerCasterFx('telegraph'|'bolt'|'impact') captured caster-telegraph/bolt/impact.png; __ssCasterFx() telegraphVisible/reduced static/draws; __ssCasterAudio charge/launch/impact cues casterChargeAt=152.541/LaunchAt=.661/ImpactAt=.792, counts 1/1/1; captions wired; real forced-siege telegraph->bolt->hit stills remain deferred (headless LOS >30 s; owner sim/trigger evidence).
+- REGRESSION live: windmill .8963->1.4028 (+.5065), reduced 0; torch bed .018/0; markers 3/5 bob-false; look torso 87.16/limb 71.07; animation idle/foot-slide/attack/death/move FX (steps 37->43, landing +1, draws 0); journal/lore/recap/mood/difficulty/wayfinding; 11 cards; mobile 26/26 (journal 352x747/776x300, bash safe, 3-pointer, 128 calls/1.31 M tris).
+- HARNESS CAVEAT: live feature's one fail was controller-hints sampled while the QA player was corrupted/dead ("QA Knight has risen as a corrupted knight"); a post-death CDP screenshot timeout followed; all preceding/new gates passed. Same death-timing caveat as characters 108/109.
+- DEFERRED/DOCUMENTED: real forced-siege caster telegraph->bolt->hit stills (headless LOS; owner sim/QA trigger evidence), audio landmark ear check, physical-device/real-GPU/perceptual, hardware rumble.
+
+Cycle-17 live deployment verified green for sprint foot-slide fix, Shroud Caster spawn/roster/FX/audio cues/captions and regressions. task-129 complete. Cycle-18 notes: Shroud Stalker harasser + two-phase Warden enrage, with SS_QA force-enrage recipe.
