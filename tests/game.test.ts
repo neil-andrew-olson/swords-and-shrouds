@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createGame,addPlayer,setInput,tick,command,spawn,idle,snapshot,forceSiege,qaEnsureFriendlyCastle} from '../src/simulation/game';
+import {DIFFICULTIES,DIFFICULTY_IDS,isDifficulty} from '../src/shared/difficulty';
 import {move,waypoint,dist} from '../src/shared/world';
 import {readPad,deadzone} from '../src/client/controller';
 import type {Game,Actor} from '../src/shared/types';
@@ -20,6 +21,20 @@ test('siege warns, spawns, breaches and loses a castle, then permits reclamation
  for(const [sieges,expectedBoss,expectedHp] of bossCases){const bg=bossGame(sieges);tick(bg);assert.equal(bg.siege?.boss,expectedBoss,'boss flag at siege index '+(sieges+1));assert.equal(bg.siege?.bossName,expectedBoss?'Shroud Warden':'');if(expectedBoss)assert.equal(bg.siege?.bossHp,expectedHp);advance(bg,30.1);if(expectedBoss){const boss=bg.actors.find(a=>a.boss);assert.ok(boss,'boss spawned for siege index '+(sieges+1));assert.equal(boss!.kind,'corrupted');assert.equal(boss!.name,'Shroud Warden');assert.equal(boss!.maxHp,expectedHp);assert.equal(bg.siege?.bossId,boss!.id);assert.ok((bg.siege?.waveSize??0)>=6&&(bg.siege?.waveSize??0)<=14,'wave size '+bg.siege?.waveSize);}else assert.ok(!bg.actors.some(a=>a.boss),'no boss on normal siege');}
  // Wave-size bounds across siege counts and team sizes.
  for(let sieges=0;sieges<12;sieges++)for(const players of [1,3]){const bg=bossGame(sieges,players);tick(bg);advance(bg,30.1);const size=bg.siege?.waveSize??0;assert.ok(size>=6&&size<=14,'wave size '+size+' at siege '+(sieges+1)+' players '+players);}
+ // Cycle-11 difficulty presets: validation, spawn HP, enemy-only damage scaling and siege waves.
+ assert.equal(createGame().difficulty,'knight');assert.equal(createGame('squire').difficulty,'squire');assert.equal(createGame('warden').difficulty,'warden');
+ assert.equal(isDifficulty('squire'),true);assert.equal(isDifficulty('warden'),true);assert.equal(isDifficulty('nightmare'),false);assert.equal(isDifficulty(3),false);
+ assert.deepEqual({damage:DIFFICULTIES.squire.enemyDamage,hp:DIFFICULTIES.squire.enemyHp,wave:DIFFICULTIES.squire.waveBonus},{damage:.75,hp:.85,wave:-2});
+ assert.deepEqual({damage:DIFFICULTIES.knight.enemyDamage,hp:DIFFICULTIES.knight.enemyHp,wave:DIFFICULTIES.knight.waveBonus},{damage:1,hp:1,wave:0});
+ assert.deepEqual({damage:DIFFICULTIES.warden.enemyDamage,hp:DIFFICULTIES.warden.enemyHp,wave:DIFFICULTIES.warden.waveBonus},{damage:1.3,hp:1.15,wave:2});
+ const zombieHp=(mode:'squire'|'knight'|'warden')=>{const dg=createGame(mode);dg.actors=[];return spawn(dg,'zombie',0,0).maxHp;};
+ assert.deepEqual([zombieHp('squire'),zombieHp('knight'),zombieHp('warden')],[44,52,60]);
+ // Player damage/stamina untouched: the sword still deals exactly 34 in every mode.
+ for(const mode of DIFFICULTY_IDS){const pg=createGame(mode);pg.actors=[];const pp=addPlayer(pg,'p','P');pp.x=0;pp.z=20;const zz=spawn(pg,'zombie',0,18);setInput(pg,pp.id,{...idle(),seq:(pp.lastSeq??0)+1,attack:true});tick(pg);assert.equal(zz.hp,zz.maxHp-34,'player damage untouched in '+mode);}
+ // Enemy attacks scale: a zombie's 13-damage hit becomes 9.75/13/16.9.
+ for(const [mode,damage] of [['squire',9.75],['knight',13],['warden',16.9]] as const){const eg=createGame(mode);eg.actors=[];const ep=addPlayer(eg,'p','P');ep.x=0;ep.z=20;spawn(eg,'zombie',0,19,{windup:.01,cd:1});tick(eg);assert.ok(Math.abs(ep.hp-(120-damage))<1e-6,'enemy damage '+mode+' '+ep.hp);}
+ // Boss HP + siege waves per mode at index 2 (two players): knight 240/11, squire 204/9, warden 276/13.
+ for(const [mode,bossHp,wave] of [['squire',204,9],['knight',240,11],['warden',276,13]] as const){const bg=createGame(mode);bg.actors=[];addPlayer(bg,'p0','P0');addPlayer(bg,'p1','P1');bg.castles[0].friendly=true;bg.everCaptured=true;bg.stats.sieges=1;assert.equal(forceSiege(bg,2),true);tick(bg);const boss=bg.actors.find(a=>a.boss);assert.ok(boss,mode+' boss spawned');assert.equal(boss!.maxHp,bossHp,mode+' boss hp');assert.equal(bg.siege?.bossHp,bossHp);assert.equal(bg.siege?.waveSize,wave,mode+' wave');}
  // QA force hook: reuses the normal creation path, sets the counter consistently, and refuses while active.
  const fq=bossGame(0);assert.equal(forceSiege(fq,2),true);assert.equal(fq.siege?.index,2);assert.equal(fq.siege?.boss,true);assert.equal(fq.siege?.bossName,'Shroud Warden');assert.equal(fq.stats.sieges,1,'forced index keeps the counter semantics');assert.equal(forceSiege(fq,4),false,'cannot force while a siege is already active');
  // QA-only castle grant (used by the SS_QA-gated server path): exactly one friendly castle, no capture rewards.

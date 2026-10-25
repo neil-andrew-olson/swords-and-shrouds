@@ -1,4 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue,compassBearing,deriveObjectiveLine,deriveJournalSummary,type JournalInput} from '../src/client/controller';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue,compassBearing,deriveObjectiveLine,deriveJournalSummary,bossBarState,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,difficultyId,difficultyChoice,isDifficultyId,type JournalInput} from '../src/client/controller';
 test('combat feedback ignores joins, replayed snapshots and reconnect gaps',()=>{const g=createGame();addPlayer(g,'p','P');assert.deepEqual(combatCues(undefined,g,'p'),[]);assert.deepEqual(combatCues(g,g,'p'),[]);const next=structuredClone(g);next.time=2;next.actors.find(a=>a.id==='p')!.hp=1;assert.deepEqual(combatCues(g,next,'p'),[]);});
 test('combat feedback follows confirmed swings and health loss with range and impact limits',()=>{const g=createGame();g.actors=[];const p=addPlayer(g,'p','P');for(let i=0;i<5;i++)spawn(g,'zombie',p.x+1,p.z);spawn(g,'zombie',70,-400);const next=structuredClone(g);next.time=.1;const n=next.actors.find(a=>a.id==='p')!;n.attackSerial=1;n.hp-=10;n.weapon='hammer';for(const a of next.actors)if(a.kind==='zombie')a.hp-=5;const cues=combatCues(g,next,'p');assert.equal(cues.filter(c=>c.kind==='impact').length,3);assert.equal(cues.filter(c=>c.kind==='swing').length,1);assert.equal(cues.find(c=>c.kind==='swing')!.weapon,'hammer');assert.ok(cues.some(c=>c.kind==='hurt'));assert.ok(cues.some(c=>c.kind==='equip'));assert.ok(cues.filter(c=>c.kind==='impact').every(c=>c.material==='flesh'));assert.ok(cues.every(c=>c.volume>0&&c.volume<=1));assert.deepEqual(combatCues(next,{...next,time:.2},'p'),[]);
 const armed=structuredClone(next),replay=structuredClone(armed);replay.time=.3;assert.deepEqual(combatCues(armed,replay,'p'),[]);
@@ -105,4 +105,33 @@ assert.deepEqual(journal.castles,{held:1,total:3});assert.deepEqual(journal.surv
 assert.deepEqual(journal.regions.map(r=>[r.id,r.held,r.castlesHeld,r.castlesTotal]),[['march',false,1,2],['moor',false,0,1]]);
 assert.equal(journal.nest.protected,true);assert.equal(journal.sieges.survived,1);assert.equal(journal.sieges.nextIn,150);assert.equal(journal.weapon?.name,'War spear');assert.equal(journal.weapon?.shield,true);
 const activeJournal=deriveJournalSummary({...journalBase,siege:{castle:'border',starts:95,active:true},time:100});
-assert.equal(activeJournal.sieges.active,true);assert.equal(activeJournal.sieges.nextIn,0);assert.equal(activeJournal.sieges.castleName,'Border Fortress');});
+assert.equal(activeJournal.sieges.active,true);assert.equal(activeJournal.sieges.nextIn,0);assert.equal(activeJournal.sieges.castleName,'Border Fortress');
+// Difficulty modes (cycle-11): ids/labels/descriptions + defensive persistence selection.
+assert.equal(DEFAULT_DIFFICULTY,'knight');
+assert.deepEqual(DIFFICULTY_CHOICES.map(choice=>choice.id),['squire','knight','warden']);
+assert.deepEqual(DIFFICULTY_CHOICES.map(choice=>choice.label),['Squire','Knight','Warden']);
+assert.ok(DIFFICULTY_CHOICES.every(choice=>choice.description.length>20));
+assert.equal(isDifficultyId('squire'),true);assert.equal(isDifficultyId('knight'),true);assert.equal(isDifficultyId('warden'),true);
+assert.equal(isDifficultyId('bogus'),false);assert.equal(isDifficultyId(undefined),false);assert.equal(isDifficultyId(1),false);
+assert.equal(difficultyId('bogus'),'knight');assert.equal(difficultyId(null),'knight');assert.equal(difficultyId(undefined),'knight');
+assert.equal(difficultyId('warden'),'warden');assert.equal(difficultyChoice('squire').label,'Squire');assert.equal(difficultyChoice('nonsense').id,'knight');
+// Boss-siege HP bar derivation: visibility gates + segmented ratio + phase colour thresholds.
+const hiddenNoSiege=bossBarState(null);
+assert.equal(hiddenNoSiege.visible,false);assert.equal(hiddenNoSiege.segmentsFilled,0);assert.equal(hiddenNoSiege.ratio,0);
+const bossSiege={boss:true,active:false,castle:'keep',bossName:'Shroud Warden',bossHp:240,index:2,bossKilled:false};
+assert.equal(bossBarState(bossSiege).visible,false);
+assert.equal(bossBarState({...bossSiege,active:true}).visible,true);
+assert.equal(bossBarState({...bossSiege,active:true,bossKilled:true}).visible,false);
+assert.equal(bossBarState({...bossSiege,active:true}, {hp:0,maxHp:240}).visible,false);
+assert.equal(bossBarState({...bossSiege,active:true,bossHp:0}).visible,false);
+assert.equal(bossBarState({...bossSiege,active:true,boss:false}).visible,false);
+const steady=bossBarState({...bossSiege,active:true},{hp:180,maxHp:240});
+assert.equal(steady.visible,true);assert.equal(steady.name,'Shroud Warden');assert.equal(steady.hp,180);assert.equal(steady.maxHp,240);
+assert.equal(steady.ratio,.75);assert.equal(steady.phase,'steady');assert.equal(steady.segments,10);assert.equal(steady.segmentsFilled,8);assert.equal(steady.siegeIndex,2);assert.equal(steady.castle,'keep');
+assert.equal(bossBarState({...bossSiege,active:true},{hp:120,maxHp:240}).phase,'frenzied');
+assert.equal(bossBarState({...bossSiege,active:true},{hp:48,maxHp:240}).phase,'final');
+assert.equal(bossBarState({...bossSiege,active:true},{hp:1,maxHp:240}).segmentsFilled,1);
+assert.equal(bossBarState({...bossSiege,active:true},{hp:280,maxHp:280}).ratio,1);
+const noActor=bossBarState({...bossSiege,active:true,bossHp:240});
+assert.equal(noActor.hp,240);assert.equal(noActor.maxHp,240);assert.equal(noActor.ratio,1);
+});

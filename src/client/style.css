@@ -236,3 +236,41 @@ body.touch-device #perf{display:none}
  .journal-scroll{max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 82px)}
 }
 
+
+/* =============================================================================================
+   Cycle 11 — difficulty picker/badge + boss-siege HP bar (created by main.ts).
+   ============================================================================================= */
+.difficulty-picker{display:flex;flex-direction:column;gap:6px;margin:10px 0 6px}
+.difficulty-label{font-size:9px;letter-spacing:2px;color:var(--gold)}
+.difficulty-options{display:flex;gap:6px}
+.difficulty-choice{flex:1;font:inherit;font-size:11px;letter-spacing:.6px;padding:8px 6px;background:#142126;border:1px solid #69726b;color:#cfc6ab;border-radius:4px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.difficulty-choice:hover{border-color:#9aa69b;color:#e5dcc4}
+.difficulty-choice.selected{border-color:var(--gold);color:#f2ead7;background:#2a2f22}
+.difficulty-choice:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.difficulty-description{margin:0;font-size:11px;line-height:1.4;color:#9ca9a4;min-height:16px}
+.difficulty-note{margin:0;font-size:9px;color:#6f7d78}
+.difficulty-badge{display:inline-block;float:right;font-size:8px;letter-spacing:1.4px;padding:2px 6px;border:1px solid #cba56855;border-radius:3px;color:#e9d6a8;vertical-align:middle}
+.difficulty-badge.diff-squire{color:#9fce9f;border-color:#9fce9f66}
+.difficulty-badge.diff-warden{color:#e08a7a;border-color:#e08a7a66}
+#bossSiegeBar{position:absolute;top:54px;left:50%;transform:translateX(-50%);width:min(520px,86vw);text-align:center;pointer-events:none;z-index:9;filter:drop-shadow(0 6px 18px #0008)}
+#bossSiegeBanner{font-size:9px;letter-spacing:2px;color:#d9a49c;text-transform:uppercase;margin-bottom:2px}
+#bossSiegeName{font-family:'Cormorant Garamond',serif;font-size:16px;font-weight:700;letter-spacing:3px;color:#ff9aa4;text-shadow:0 0 12px #ff003c55,0 2px 4px #000;text-transform:uppercase;margin-bottom:5px}
+#bossSiegeTrack{position:relative;height:10px;border:1px solid #ff8a8655;border-radius:2px;background:#160a0c99;overflow:hidden}
+#bossSiegeFill{height:100%;width:100%;background:linear-gradient(90deg,#8a152d,#e62e55,#ff5778);transition:width .18s ease-out}
+#bossSiegeTrack::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 calc(10% - 1px),#0b050733 calc(10% - 1px) 10%);pointer-events:none}
+#bossSiegeMeta{display:flex;justify-content:space-between;margin-top:3px;font-size:9px;letter-spacing:1.2px;color:#d9a49c}
+#bossSiegeBar.phase-frenzied #bossSiegeFill{background:linear-gradient(90deg,#c25a12,#ff8a3c,#ffb066)}
+#bossSiegeBar.phase-frenzied #bossSiegeName{color:#ffb066}
+#bossSiegeBar.phase-final #bossSiegeFill{background:linear-gradient(90deg,#5e0c18,#c21c3c,#ff2a55)}
+#bossSiegeBar.phase-final #bossSiegeName{color:#ff5a6e;text-shadow:0 0 14px #ff003388,0 2px 4px #000}
+@media(prefers-reduced-motion:reduce){#bossSiegeFill{transition:none}}
+@media(pointer:coarse) and (max-width:520px){
+ #bossSiegeBar{top:calc(52px + env(safe-area-inset-top));width:min(330px,88vw)}
+ #bossSiegeName{font-size:13px}
+ #bossSiegeBanner{font-size:8px}
+ body.boss-siege #objectives,body.boss-siege #resources{display:none}
+}
+@media(pointer:coarse) and (max-height:520px) and (min-width:521px){
+ #bossSiegeBar{top:calc(34px + env(safe-area-inset-top));width:min(360px,44vw)}
+ #bossSiegeName{font-size:13px}
+}

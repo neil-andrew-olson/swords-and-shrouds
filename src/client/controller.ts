@@ -1,3 +1,4 @@
+import {DIFFICULTIES,DIFFICULTY_IDS,DEFAULT_DIFFICULTY as SHARED_DEFAULT_DIFFICULTY,isDifficulty,type Difficulty} from '../shared/difficulty';
 /**
  * Gamepad → action mapping plus the pure settings/accessibility helpers used by main.ts.
  * Kept dependency-free and deterministic so the tests can cover the mapping math directly.
@@ -172,5 +173,35 @@ export function deriveJournalSummary(input:JournalInput):JournalSummary{
   weapon:input.weapon??null
  };
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * Difficulty + boss HP bar: pure UI helpers (main.ts renders; tests cover the state→display math).
+ * ------------------------------------------------------------------------------------------- */
+export type DifficultyId=Difficulty;
+export type DifficultyChoice={id:DifficultyId;label:string;description:string};
+export const DIFFICULTY_CHOICES:readonly DifficultyChoice[]=DIFFICULTY_IDS.map(id=>({id,label:DIFFICULTIES[id].name,description:DIFFICULTIES[id].blurb}));
+export const DEFAULT_DIFFICULTY:DifficultyId=SHARED_DEFAULT_DIFFICULTY;
+export function isDifficultyId(value:unknown):value is DifficultyId{return isDifficulty(value);}
+/** Validate a persisted/host difficulty value, falling back to Knight for unknown input. */
+export function difficultyId(value:unknown):DifficultyId{return isDifficulty(value)?value:SHARED_DEFAULT_DIFFICULTY;}
+export function difficultyChoice(value:unknown):DifficultyChoice{
+ const id=difficultyId(value);
+ return DIFFICULTY_CHOICES.find(choice=>choice.id===id)??{id:DEFAULT_DIFFICULTY,label:DIFFICULTIES[DEFAULT_DIFFICULTY].name,description:DIFFICULTIES[DEFAULT_DIFFICULTY].blurb};
+}
+export type BossPhase='steady'|'frenzied'|'final';
+export type BossBarModel={visible:boolean;name:string;hp:number;maxHp:number;ratio:number;segments:number;segmentsFilled:number;phase:BossPhase;siegeIndex:number|null;castle:string|null};
+export type BossSiege={boss?:boolean;active?:boolean;castle?:string;bossName?:string;bossHp?:number;bossId?:string;index?:number;bossKilled?:boolean}|null|undefined;
+/** Derive the boss-siege HP bar from the snapshot siege + the boss actor. Visible only during an
+ * active boss siege whose boss is alive; hidden when the siege resolves or the boss dies. */
+export function bossBarState(siege:BossSiege,bossActor?:{hp:number;maxHp:number}|undefined):BossBarModel{
+ const maxHp=Math.max(0,Math.round(bossActor?.maxHp??siege?.bossHp??0));
+ const hp=Math.max(0,Math.round(bossActor?.hp??siege?.bossHp??0));
+ const alive=!!siege?.boss&&!!siege?.active&&!siege.bossKilled&&maxHp>0&&hp>0;
+ const ratio=alive?Math.max(0,Math.min(1,hp/maxHp)):0;
+ const phase:BossPhase=ratio>.6?'steady':ratio>.3?'frenzied':'final';
+ const segments=10;
+ return {visible:alive,name:alive?siege?.bossName||'Shroud Warden':siege?.bossName||'',hp,maxHp,ratio,segments,segmentsFilled:alive?Math.max(1,Math.ceil(ratio*segments)):0,phase,siegeIndex:alive?siege?.index??null:null,castle:siege?.castle??null};
+}
+
 
 

@@ -5,7 +5,7 @@ import {Ambience} from './ambience';
 import {WEAPON_IDS,WEAPONS,weaponStats} from '../shared/weapons';
 import {WorldView} from './scene';
 import {weaponCombatProfile} from './equipment';
-import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue,touchStickVector,touchSensitivityValue,deriveObjectiveLine,deriveJournalSummary,type JournalInput,type JournalSummary,type ObjectiveLine,type ObjectivePoint} from './controller';
+import {readPad,deadzoneValue,DEADZONE_PRESETS,type DeadzonePreset,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,type CaptionCue,touchStickVector,touchSensitivityValue,deriveObjectiveLine,deriveJournalSummary,type JournalInput,type JournalSummary,type ObjectiveLine,type ObjectivePoint,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,type DifficultyId,isDifficultyId,difficultyId,difficultyChoice,bossBarState,type BossBarModel} from './controller';
 import {dist,clamp,BOUNDS,REGIONS,CASTLES,CAMPS,NEST} from '../shared/world';
 import type {Game,Actor} from '../shared/types';
 type PerfSnapshot={fps?:number;frameMs?:number;calls?:number;triangles?:number;points?:number;geometries?:number;textures?:number;programs?:number;quality?:string;tier?:string};
@@ -47,7 +47,7 @@ const journal=document.createElement('dialog');
 journal.id='journal';journal.className='journal';journal.setAttribute('aria-label','Campaign journal');
 journal.innerHTML=`<div class="journal-head"><div><span class="eyebrow">CAMPAIGN JOURNAL</span><h2 id="journalTitle">The war for the kingdom</h2></div><button id="closeJournal" type="button">Close · J</button></div>
 <div class="journal-scroll" id="journalScroll">
- <section class="journal-section" id="journalCampaign"><h3>Reclaim the kingdom</h3><p id="journalCastles"></p><div id="journalRegionList" class="journal-regions"></div></section>
+ <section class="journal-section" id="journalCampaign"><h3>Reclaim the kingdom</h3><p id="journalCastles"></p><p id="journalDifficulty"></p><div id="journalRegionList" class="journal-regions"></div></section>
  <section class="journal-section" id="journalSurvivors"><h3>Survivors</h3><p id="journalSurvivorsLine"></p><p id="journalCampsLine"></p></section>
  <section class="journal-section" id="journalNest"><h3>The plague nest</h3><p id="journalNestLine"></p></section>
  <section class="journal-section" id="journalSieges"><h3>Sieges</h3><p id="journalSiegesLine"></p></section>
@@ -71,6 +71,37 @@ if(hudTop){const guideButton=document.getElementById('guideBtn');if(guideButton)
 const journalGuideButton=document.createElement('button');
 journalGuideButton.type='button';journalGuideButton.id='openJournalFromGuide';journalGuideButton.textContent='Open campaign journal · J';
 $('closeGuide').after(journalGuideButton);
+
+// ---- Difficulty picker (landing: solo/host choice; joiners inherit the host's mode) ----
+let selectedDifficulty:DifficultyId=difficultyId(localStorage.getItem('ss-difficulty'));
+const difficultyPicker=document.createElement('div');
+difficultyPicker.id='difficultyPicker';difficultyPicker.className='difficulty-picker';
+difficultyPicker.innerHTML='<span class="difficulty-label">DIFFICULTY</span><div class="difficulty-options" role="group" aria-label="Campaign difficulty"></div><p id="difficultyDescription" class="difficulty-description"></p><p class="difficulty-note">Solo choice, or the host\u2019s choice for co-op — joiners inherit it.</p>';
+$('name').after(difficultyPicker);
+const difficultyButtons:HTMLButtonElement[]=[];
+for(const choice of DIFFICULTY_CHOICES){
+ const button=document.createElement('button');
+ button.type='button';button.className='difficulty-choice';button.dataset.difficulty=choice.id;
+ button.textContent=choice.label;button.setAttribute('aria-pressed','false');
+ button.onclick=()=>setDifficulty(choice.id);
+ difficultyPicker.querySelector('.difficulty-options')!.append(button);
+ difficultyButtons.push(button);
+}
+function setDifficulty(next:DifficultyId,persist=true){
+ selectedDifficulty=difficultyId(next);
+ if(persist)localStorage.setItem('ss-difficulty',selectedDifficulty);
+ for(const button of difficultyButtons){const active=button.dataset.difficulty===selectedDifficulty;button.classList.toggle('selected',active);button.setAttribute('aria-pressed',String(active));}
+ const description=$('difficultyDescription');if(description)description.textContent=difficultyChoice(selectedDifficulty).description;
+}
+setDifficulty(selectedDifficulty,false);
+
+// ---- Boss-siege HP bar (segmented, phase-coloured; hidden unless an active boss siege is alive) ----
+const bossSiegeBar=document.createElement('div');
+bossSiegeBar.id='bossSiegeBar';bossSiegeBar.hidden=true;
+bossSiegeBar.setAttribute('aria-live','polite');
+bossSiegeBar.innerHTML='<div id="bossSiegeBanner">BOSS SIEGE · <span id="bossSiegeCastle"></span></div><div id="bossSiegeName">SHROUD WARDEN</div><div id="bossSiegeTrack"><div id="bossSiegeFill"></div></div><div id="bossSiegeMeta"><span id="bossSiegeHp"></span><span id="bossSiegePhase">STEADY</span></div>';
+$('hud').append(bossSiegeBar);
+const bossSiegeElements={bar:bossSiegeBar,castle:$('bossSiegeCastle'),name:$('bossSiegeName'),fill:$('bossSiegeFill'),hp:$('bossSiegeHp'),phase:$('bossSiegePhase')};
 const me=()=>game?.actors.find(a=>a.id===id);
 const send=(value:unknown)=>{if(ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify(value));};
 let sound:AudioContext|undefined;function tone(freq=180){if(audioPaused||!$<HTMLInputElement>('sound').checked)return;try{sound??=new AudioContext();void sound.resume();const o=sound.createOscillator(),gain=sound.createGain();o.type='triangle';o.frequency.setValueAtTime(freq,sound.currentTime);o.frequency.exponentialRampToValueAtTime(freq*.5,sound.currentTime+.13);gain.gain.setValueAtTime(.04,sound.currentTime);gain.gain.exponentialRampToValueAtTime(.001,sound.currentTime+.15);o.connect(gain);gain.connect(sound.destination);o.start();o.stop(sound.currentTime+.16);}catch{}}
@@ -272,6 +303,9 @@ objectiveLineEl.innerHTML='<span id="objectiveArrow" aria-hidden="true"></span><
 const objectivesPanel=$('objectives');
 const objectivesEyebrow=objectivesPanel?.querySelector('.eyebrow');
 if(objectivesEyebrow)objectivesEyebrow.after(objectiveLineEl);else objectivesPanel?.prepend(objectiveLineEl);
+const difficultyBadge=document.createElement('span');
+difficultyBadge.id='difficultyBadge';difficultyBadge.className='difficulty-badge';difficultyBadge.hidden=true;
+objectivesEyebrow?.append(difficultyBadge);
 let lastObjective:ObjectiveLine|null=null;
 let lastJournalSummary:JournalSummary|null=null;
 let previewJournalStage:'early'|'mid'|'late'|null=null;
@@ -297,6 +331,29 @@ function updateObjectiveHud(player:Actor){
  const arrow=objective.target?objectiveArrowFor(player,objective.target):'';
  if(arrowEl && arrowEl.textContent!==arrow)arrowEl.textContent=arrow;
 }
+function currentDifficulty():DifficultyId{return difficultyId(game?.difficulty??selectedDifficulty);}
+function difficultyIsHostChoice(){return !!game&&!!host&&host!==id;}
+function updateDifficultyUi(){
+ if(!game){difficultyBadge.hidden=true;return;}
+ const difficulty=currentDifficulty(),choice=difficultyChoice(difficulty);
+ difficultyBadge.hidden=false;
+ difficultyBadge.className='difficulty-badge diff-'+difficulty;
+ difficultyBadge.textContent=`${choice.label.toUpperCase()}${difficultyIsHostChoice()?' · HOST':''}`;
+ difficultyBadge.title=`Difficulty: ${choice.label} — ${choice.description}${difficultyIsHostChoice()?' (host\u2019s choice, read-only)':''}`;
+}
+function updateBossSiegeBar(model:BossBarModel){
+ if(model.visible===bossSiegeBar.hidden)bossSiegeBar.hidden=!model.visible;
+ document.body.classList.toggle('boss-siege',model.visible);
+ if(!model.visible)return;
+ bossSiegeElements.name.textContent=model.name.toUpperCase();
+ bossSiegeElements.castle.textContent=model.castle?model.castle.replace(/-/g,' '):'';
+ bossSiegeElements.fill.style.width=`${(model.ratio*100).toFixed(1)}%`;
+ bossSiegeElements.hp.textContent=`${model.hp} / ${model.maxHp}`;
+ bossSiegeElements.phase.textContent=model.phase.toUpperCase();
+ bossSiegeBar.classList.toggle('phase-steady',model.phase==='steady');
+ bossSiegeBar.classList.toggle('phase-frenzied',model.phase==='frenzied');
+ bossSiegeBar.classList.toggle('phase-final',model.phase==='final');
+}
 function journalControlsLegend(){
  if(padWasConnected)return ['Move — Left stick','Look — Right stick','Attack — RT','Block — LT','Sweep — B','Heal — X','Interact — A','Journal — Start / Menu','Guide — View'];
  if(touchDevice)return ['Move — Left stick','Look — Drag the right side','Attack / Block / Interact — Touch buttons','Sweep / Heal — Bottom buttons','Journal — Journal button'];
@@ -320,7 +377,9 @@ function previewJournalDemo():JournalSummary{
  return previewSummary(deriveJournalSummary(demo));
 }
 function updateJournal(){
- const castleEl=$('journalCastles'),survivorEl=$('journalSurvivorsLine'),campsEl=$('journalCampsLine'),nestEl=$('journalNestLine'),siegeEl=$('journalSiegesLine'),weaponEl=$('journalWeaponLine'),regionEl=$('journalRegionList'),controlsEl=$('journalControlsLine');
+ const castleEl=$('journalCastles'),survivorEl=$('journalSurvivorsLine'),campsEl=$('journalCampsLine'),nestEl=$('journalNestLine'),siegeEl=$('journalSiegesLine'),weaponEl=$('journalWeaponLine'),regionEl=$('journalRegionList'),controlsEl=$('journalControlsLine'),difficultyEl=$('journalDifficulty');
+ const difficulty=difficultyChoice(currentDifficulty());
+ difficultyEl.textContent=`Difficulty: ${difficulty.label} — ${difficulty.description}${difficultyIsHostChoice()?' (host\u2019s choice, read-only for joiners)':''}`;
  let summary:JournalSummary|null=null;
  if(game&&me())summary=previewSummary(deriveJournalSummary(journalInput(me()!)));
  else if(previewJournalStage)summary=previewJournalDemo();
@@ -369,7 +428,7 @@ for(const location of ['landing','armory']){
 }
 
 // ---- Read-only QA hooks: character selector state + controller/pad state (no gameplay effect) ----
-const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown;__ssAudioState?:()=>unknown;__ssAudioFocus?:(x?:number|null,z?:number|null)=>unknown;__ssObjectives?:()=>unknown;__ssJournal?:()=>unknown;__ssJournalPreview?:(stage?:string|null)=>unknown;__ssObjectivePreview?:(text?:string|null)=>unknown;__ssForceSiege?:(index?:number|null)=>unknown};
+const qaHooks=window as unknown as {__ssCharacterSelect?:()=>unknown;__ssPad?:()=>unknown;__ssControllerSettings?:()=>unknown;__ssCaptions?:()=>unknown;__ssCaptionDemo?:(cue?:string)=>unknown;__ssAudioState?:()=>unknown;__ssAudioFocus?:(x?:number|null,z?:number|null)=>unknown;__ssObjectives?:()=>unknown;__ssJournal?:()=>unknown;__ssJournalPreview?:(stage?:string|null)=>unknown;__ssObjectivePreview?:(text?:string|null)=>unknown;__ssForceSiege?:(index?:number|null)=>unknown;__ssDifficulty?:()=>unknown;__ssBossBar?:()=>unknown};
 qaHooks.__ssCharacterSelect=()=>({
  appearanceField:'appearance',
  landingSelectId:characterSelectors[0]?.id??null,
@@ -484,6 +543,18 @@ qaHooks.__ssForceSiege=(index?:number|null)=>{
   return ws?.readyState===WebSocket.OPEN;
  }catch{return false;}
 };
+/** Read-only difficulty state for QA: picker/localStorage + authoritative room difficulty. */
+qaHooks.__ssDifficulty=()=>{
+ const difficulty=currentDifficulty(),choice=difficultyChoice(difficulty);
+ return {id:difficulty,label:choice.label,description:choice.description,source:difficultyIsHostChoice()?'host':'solo',readonly:difficultyIsHostChoice(),authoritative:game?.difficulty??null,landingSelection:selectedDifficulty,persisted:localStorage.getItem('ss-difficulty'),pickerIds:difficultyButtons.map(button=>button.dataset.difficulty),selectedPickerId:difficultyButtons.find(button=>button.classList.contains('selected'))?.dataset.difficulty??null,badgeText:difficultyBadge.hidden?null:difficultyBadge.textContent,journalText:$('journalDifficulty')?.textContent??null};
+};
+/** Read-only boss-siege HP bar model + the exact DOM handles QA can gate on. */
+qaHooks.__ssBossBar=()=>{
+ const siege=game?.siege??null;
+ const bossActor=siege?.bossId?game?.actors.find(a=>a.id===siege.bossId):game?.actors.find(a=>(a as unknown as {boss?:boolean}).boss);
+ const model=bossBarState(siege?{boss:siege.boss,active:siege.active,castle:siege.castle,bossName:siege.bossName,bossHp:siege.bossHp,bossId:siege.bossId,index:siege.index,bossKilled:siege.bossKilled}:null,bossActor?{hp:bossActor.hp,maxHp:bossActor.maxHp}:undefined);
+ return {...model,elementId:'bossSiegeBar',nameId:'bossSiegeName',fillId:'bossSiegeFill',hpId:'bossSiegeHp',phaseId:'bossSiegePhase',bannerId:'bossSiegeBanner',hidden:bossSiegeBar.hidden,phaseClass:model.visible?`phase-${model.phase}`:null,fillWidth:$('bossSiegeFill').style.width||null};
+};
 
 // ---- Progressive world loading: show real asset counts, gate joining on the core set only ----
 const defaultConnectionText=$('connection').textContent;
@@ -526,7 +597,7 @@ async function connect(mode:'create'|'join'|'resume'){
 
  if(ws&&ws.readyState<2)return;stopped=false;$('connection').textContent=mode==='resume'?'Reconnecting…':'Connecting to the kingdom…';$<HTMLButtonElement>('create').disabled=$<HTMLButtonElement>('join').disabled=true;
  const protocol=location.protocol==='https:'?'wss:':'ws:';const routeCode=mode==='create'?Array.from(crypto.getRandomValues(new Uint8Array(3)),n=>n.toString(16).padStart(2,'0')).join('').toUpperCase():mode==='resume'?code:$<HTMLInputElement>('code').value.trim().toUpperCase();ws=new WebSocket(`${protocol}//${location.host}${import.meta.env.BASE_URL}ws?room=${encodeURIComponent(routeCode)}`);
- ws.onopen=()=>{const name=$<HTMLInputElement>('name').value.trim()||'Knight';localStorage.setItem('ss-name',name);send({type:mode,name,code:mode==='resume'?code:$<HTMLInputElement>('code').value.trim().toUpperCase(),...(mode==='resume'?{token}:{})});};
+ ws.onopen=()=>{const name=$<HTMLInputElement>('name').value.trim()||'Knight';localStorage.setItem('ss-name',name);send({type:mode,name,code:mode==='resume'?code:$<HTMLInputElement>('code').value.trim().toUpperCase(),...(mode==='resume'?{token}:{}),...(mode==='create'?{difficulty:selectedDifficulty}:{})});};
  ws.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch{return;}
   if(m.type==='welcome'){cmd('character:'+selectedCharacter);id=m.id;code=m.code;token=m.token;everJoined=true;attempts=0;seq=0;sessionStorage.setItem('ss-session',JSON.stringify({code,token}));$('landing').hidden=true;$('hud').hidden=false;$('roomCode').textContent=code;toast('Campaign started. Clear the Fallen Keep, then hold E / A at its banner.');}
   else if(m.type==='state'){if(!document.hidden){for(const cue of combatCues(game,m.game,id)){combatAudio.play(cue);if(cue.kind==='impact'||cue.kind==='hurt')ambience.duck(1);else if(cue.kind==='swing'||cue.kind==='block')ambience.duck(.55);if(cue.kind==='hurt'){const hudActor=m.game.actors.find((a:Actor)=>a.id===id);const weight=weaponCombatProfile(hudActor?.weapon).weight;rumble(clamp(.16+.24*weight,.2,.55),150);$('hud').classList.remove('hurt-flash');void $('hud').offsetWidth;$('hud').classList.add('hurt-flash');view.shake=Math.max(view.shake,.24);}else if(cue.kind==='block')rumble(.3,90);}for(const event of eventCues(game,m.game)){combatAudio.playEvent(event);if(event==='capture'){rumble(.22,170);const captured=m.game.castles.find((c:{id:string;name:string;friendly:boolean})=>c.friendly&&!game?.castles.find(o=>o.id===c.id)?.friendly);if(captured)showCaption('castle-captured',captured.name);}}
@@ -644,7 +715,11 @@ $('playerName').textContent=p.name;$('hud').classList.toggle('low-health',p.hp>0
  const map=$<HTMLCanvasElement>('minimap'),ctx=map.getContext('2d')!;ctx.clearRect(0,0,map.width,map.height);const pos=(v:{x:number;z:number})=>({x:(v.x-BOUNDS.minX)/(BOUNDS.maxX-BOUNDS.minX)*180,y:(v.z-BOUNDS.minZ)/(BOUNDS.maxZ-BOUNDS.minZ)*230});for(const r of REGIONS){const top=pos({x:0,z:r.offset-205}).y;ctx.fillStyle=r.id==='march'?'#34564055':r.id==='moor'?'#72544055':'#71899a55';ctx.fillRect(0,top,180,230*240/(BOUNDS.maxZ-BOUNDS.minZ));}ctx.strokeStyle='#a19d6e55';ctx.beginPath();for(const c of game!.castles){const v=pos(c);ctx.lineTo(v.x,v.y);}ctx.stroke();for(const c of game!.castles){const v=pos(c);ctx.fillStyle=c.friendly?'#90c4a5':'#cd8c70';ctx.fillRect(v.x-5,v.y-5,10,10);}for(const d of game!.weaponDrops){if(d.taken)continue;const v=pos(d);ctx.fillStyle='#9ddfee';ctx.fillRect(v.x-2,v.y-2,4,4);}for(const c of game!.camps){const v=pos(c);ctx.fillStyle=c.rescued?'#718c78':'#d9b86f';ctx.fillRect(v.x-2,v.y-2,4,4);}const nest=pos(game!.nest);ctx.fillStyle='#c573ad';ctx.fillRect(nest.x-4,nest.y-4,8,8);for(const a of game!.actors.filter(a=>a.kind==='player')){const v=pos(a);ctx.fillStyle=a.id===id?'#fff9d5':'#76bdcf';ctx.beginPath();ctx.arc(v.x,v.y,3,0,Math.PI*2);ctx.fill();if(a.id===id){ctx.strokeStyle='#fff9d5';ctx.beginPath();ctx.moveTo(v.x,v.y);ctx.lineTo(v.x+Math.sin(yaw)*7,v.y-Math.cos(yaw)*7);ctx.stroke();}}
  const boss=game!.actors.find(a=>(a.name?.includes('Champion')||a.name?.includes('Fallen')||a.id==='boss-plague'||a.maxHp>=200)&&a.hp>0&&dist(a,p)<45);
  const bossBar=$('bossBar');
- if(boss){
+ const siegeBossActive=!!game!.siege?.boss&&!!game!.siege?.active&&!game!.siege.bossKilled&&(game!.siege.bossHp??0)>0;
+ const siegeBossActor=game!.siege?.bossId?game!.actors.find(a=>a.id===game!.siege!.bossId):game!.actors.find(a=>(a as unknown as {boss?:boolean}).boss);
+ const bossModel=bossBarState(siegeBossActive&&game!.siege?{boss:game!.siege.boss,active:game!.siege.active,castle:game!.siege.castle,bossName:game!.siege.bossName,bossHp:game!.siege.bossHp,bossId:game!.siege.bossId,index:game!.siege.index,bossKilled:game!.siege.bossKilled}:null,siegeBossActor?{hp:siegeBossActor.hp,maxHp:siegeBossActor.maxHp}:undefined);
+ updateBossSiegeBar(bossModel);
+ if(siegeBossActive){bossBar.style.display='none';}else if(boss){
   bossBar.style.display='block';
   $('bossName').textContent=boss.name.toUpperCase();
   $('bossHealth').style.width=Math.max(0,Math.min(100,(boss.hp/boss.maxHp)*100))+'%';
@@ -656,6 +731,7 @@ $('playerName').textContent=p.name;$('hud').classList.toggle('low-health',p.hp>0
   bossBar.style.display='none';
  }
  updateObjectiveHud(p);
+ updateDifficultyUi();
  if(journal.open)updateJournal();
 }
 function frame(now:number){const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame=now;let pads:Gamepad[]=[];try{pads=Array.from(navigator.getGamepads?.()??[]).filter((p):p is Gamepad=>!!p&&p.connected&&p.mapping==='standard');}catch{}const pad=pads.find(p=>p.index===padIndex)||pads[0];if(pad){padIndex=pad.index;padName=pad.id;}else{padName='';padPrev=[];menuPrev=[];}

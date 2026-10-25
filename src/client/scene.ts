@@ -176,7 +176,7 @@ export class WorldView{
   private groundFrost:{m:THREE.MeshStandardMaterial;base:THREE.Color}[]=[];
   private vignetteEl:HTMLDivElement|null=null;private vignetteLife=0;private vignetteOpacity=0;private vignetteDirX=0;private vignetteDirY=0;
   private reducedMotion=false;private reducedMotionOverride:boolean|null=null;private hitStop=0;private kickPitch=0;private kickRoll=0;private fovPunch=0;private lastHeavyAt=0;private lastHitAt=0;private lastHeavySerial=-1;private visualScale=1;
-  private characterClothWind=true;private hitFeedbackHold=false;private lastHitActorId:string|null=null;private qaWeaponPreview:WeaponId|null=null;private objectiveLayer:HTMLDivElement|null=null;private objectiveMarkers:{el:HTMLDivElement;dot:HTMLSpanElement;text:HTMLSpanElement}[]=[];private lastHitStopMs=0;private lastKickAt=0;private lastKickMag=0;private lastVignetteAt=0;private lastVignetteMag=0;private heavyCount=0;private damageCount=0;
+  private characterClothWind=true;private hitFeedbackHold=false;private lastHitActorId:string|null=null;private qaWeaponPreview:WeaponId|null=null;private objectiveLayer:HTMLDivElement|null=null;private bossAura:THREE.Mesh|null=null;private bossState={active:false,actorId:null as string|null,scale:1,auraVisible:false,tint:'#ffffff',reducedMotion:false};private bossTintedRig:string|null=null;private readonly bossTintOrig=new Map<THREE.Material,{color:number;emissive:number;emissiveIntensity:number}>();private objectiveMarkers:{el:HTMLDivElement;dot:HTMLSpanElement;text:HTMLSpanElement}[]=[];private lastHitStopMs=0;private lastKickAt=0;private lastKickMag=0;private lastVignetteAt=0;private lastVignetteMag=0;private heavyCount=0;private damageCount=0;
   private lastAmbientTint=new THREE.Color(0xffffff);private lastSaturation=1;
   /** Landmark coordinates per region for the QA landmark views (ruins-builder placements). */
   private landmarkCoords:{green:{x:number;z:number};ashen:{x:number;z:number};crown:{x:number;z:number}}={
@@ -229,7 +229,7 @@ try{const gl=this.renderer.getContext();const ext=gl.getExtension('WEBGL_debug_r
   // Fixed pool of torch lights; sources are re-assigned to the nearest flames every frame.
   for(let i=0;i<MAX_TORCH_LIGHTS;i++){const light=new THREE.PointLight(0xff9d42,0,12,1.8);light.castShadow=false;this.scene.add(light);this.lightPool.push(light);}
   this.fx=new CombatEffects(this.scene);this.scene.add(this.legacyTowerGroup);this.legacyTowerGroup.visible=false;this.initFlameInstances();this.initDamageLabels();
-   this.initWeather();this.initObjectiveMarkers();try{performance.mark('ss:sceneConstructStart');}catch{}
+   this.initWeather();this.initObjectiveMarkers();this.initBossAura();try{performance.mark('ss:sceneConstructStart');}catch{}
   for(const region of REGIONS){const ground=box(this.scene,5,-.3,region.offset-80,175,.6,250,region.color,true);ground.castShadow=false;const m=(ground.material as THREE.MeshStandardMaterial).clone();m.map=m.map!.clone();m.map.repeat.set(38,55);ground.material=m;tagSurface(ground,'ground');}
   const route=[START,...REGIONS.flatMap(r=>[{x:0,z:r.offset+12},{x:0,z:r.offset+24},{x:42,z:r.offset-45},{x:42,z:r.offset-55},{x:42,z:r.offset-43},{x:-24,z:r.offset-113},{x:-24,z:r.offset-123},{x:-24,z:r.offset-112},{x:0,z:r.offset-200}]),NEST];
   {
@@ -710,7 +710,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    return {calls:info.render.calls,triangles:info.render.triangles,software:this.softwareRenderer,weather:{region:this.weatherRegion,phase:this.weatherStates[this.weatherRegion].name,intensity:+this.weatherStates[this.weatherRegion].intensity.toFixed(3)},contentFocus:this.qaView?{name:this.qaView.name,x:this.qaView.x,z:this.qaView.z}:null,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssObjectives?:()=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssObjectives?:()=>unknown;__ssBossVisual?:()=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
    win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
@@ -728,6 +728,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    win.__ssEquipWeapon=(id?:string|null,opts?:{preview?:boolean})=>view.equipWeapon(id===undefined?null:id,opts);
    win.__ssWeaponReadiness=()=>view.weaponReadiness();
    win.__ssObjectives=()=>view.objectivesInfo();
+   win.__ssBossVisual=()=>view.bossVisual();
    win.__ssCharacterFx=()=>({quality:view.quality,clothWind:view.characterClothWind});
    win.__ssEnemyVariants=()=>view.enemyVariants();
    win.__ssClearWeather=()=>view.clearWeather();
@@ -924,6 +925,60 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.qaBody=group;this.qaBodyRig=rig;this.qaBodyActor=actor;this.qaBodyDistance=Math.max(2,Math.min(30,distance));
    return {ok:true,appearance,distance:this.qaBodyDistance,ready:true,actorId:actor.id};
   }
+  /** Single additive ground aura ring used for boss presentation (one draw at most). */
+  private initBossAura(){
+   try{
+    const geo=new THREE.RingGeometry(1.5,2.3,48);geo.rotateX(-Math.PI/2);
+    const mat=new THREE.MeshBasicMaterial({color:0xb43a4a,transparent:true,opacity:.42,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide});
+    const mesh=new THREE.Mesh(geo,mat);mesh.visible=false;mesh.frustumCulled=false;mesh.renderOrder=1;this.scene.add(mesh);this.bossAura=mesh;
+   }catch{}
+  }
+  private restoreBossTint(){
+   for(const [mat,orig] of this.bossTintOrig){
+    const m=mat as THREE.MeshStandardMaterial;
+    m.color?.setHex(orig.color);
+    if(m.emissive){m.emissive.setHex(orig.emissive);m.emissiveIntensity=orig.emissiveIntensity;}
+   }
+   this.bossTintOrig.clear();this.bossTintedRig=null;
+  }
+  /** Per-frame boss presentation: 1.15× scale, crimson tint, pulsing ground aura. */
+  private updateBossPresentation(g:Game,time:number){
+   const bossActor=g.actors.find(a=>a.boss===true&&a.hp>0&&(g.siege?.bossId===a.id||g.siege?.boss===true));
+   const siegeBoss=!!(g.siege&&g.siege.boss&&(g.siege.active||!g.siege.bossKilled));
+   const active=!!bossActor&&siegeBoss;
+   const reduced=this.reducedMotionOverride??this.reducedMotion;
+   if(!active){
+    if(this.bossAura)this.bossAura.visible=false;
+    this.restoreBossTint();
+    this.bossState.active=false;this.bossState.actorId=null;this.bossState.scale=1;this.bossState.auraVisible=false;this.bossState.tint='#ffffff';this.bossState.reducedMotion=reduced;
+    return;
+   }
+   const id=bossActor!.id;
+   if(this.bossTintedRig!==id){
+    this.restoreBossTint();this.bossTintedRig=id;
+    const rig=this.animated.get(id)??null;
+    if(rig){
+     rig.model.traverse(o=>{if(o instanceof THREE.Mesh)for(const mat of Array.isArray(o.material)?o.material:[o.material]){
+      const m=mat as THREE.MeshStandardMaterial;if(!m.isMeshStandardMaterial||this.bossTintOrig.has(m))continue;
+      this.bossTintOrig.set(m,{color:m.color.getHex(),emissive:m.emissive?m.emissive.getHex():0,emissiveIntensity:m.emissiveIntensity??1});
+      m.color.lerp(this.tmpColor2.setHex(0x8f2a38),0.42);
+      if(m.emissive){m.emissive.lerp(this.tmpColor2.setHex(0x5a1018),0.6);m.emissiveIntensity=Math.max(m.emissiveIntensity??1,.55);}
+     }});
+    }
+   }
+   if(this.bossAura){
+    this.bossAura.visible=true;
+    const mesh=this.animated.get(id)?.model??null;const px=mesh?mesh.position.x:bossActor!.x,pz=mesh?mesh.position.z:bossActor!.z;
+    this.bossAura.position.set(px,0.07,pz);
+    const pulse=reduced?1:1+Math.sin(time*2.4)*0.12;
+    const op=reduced?.46:.4+Math.sin(time*2.4)*.1;
+    this.bossAura.scale.set(pulse,1,pulse);
+    (this.bossAura.material as THREE.MeshBasicMaterial).opacity=op;
+   }
+   this.bossState.active=true;this.bossState.actorId=id;this.bossState.scale=1.15;this.bossState.auraVisible=!!this.bossAura?.visible;this.bossState.tint='#8f2a38';this.bossState.reducedMotion=reduced;
+  }
+  /** window.__ssBossVisual(): QA-readable boss presentation state. */
+  bossVisual(){const a=this.bossState.actorId?this.lastGame?.actors.find(x=>x.id===this.bossState.actorId):undefined;return {...this.bossState,x:a?.x??null,z:a?.z??null,hp:a?.hp??null,maxHp:a?.maxHp??null,bossHp:this.lastGame?.siege?.bossHp??null,bossName:this.lastGame?.siege?.bossName??null};}
   /** Build the DOM marker pool for objective wayfinding (no extra WebGL draws). */
   private initObjectiveMarkers(){
    if(this.objectiveLayer)return;
@@ -1394,7 +1449,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
       }
      }
       if(a.id===me?.id){this.shake=Math.min(.35,this.shake+.2);this.onPlayerDamaged(g,me);}}
-    mesh.getObjectByName('marker')!.visible=a.hp>0||!!a.downed;this.previousHp.set(a.id,a.hp);const bar=mesh.getObjectByName('hp')!;bar.scale.x=Math.max(.001,a.hp/a.maxHp);bar.visible=a.hp<a.maxHp&&a.hp>0;mesh.scale.setScalar(a.kind==='corrupted'?(a.maxHp>=200?1.4:1.15):1);
+    mesh.getObjectByName('marker')!.visible=a.hp>0||!!a.downed;this.previousHp.set(a.id,a.hp);const bar=mesh.getObjectByName('hp')!;bar.scale.x=Math.max(.001,a.hp/a.maxHp);bar.visible=a.hp<a.maxHp&&a.hp>0;mesh.scale.setScalar(a.boss?1.15:a.kind==='corrupted'?(a.maxHp>=200?1.4:1.15):1);
    }
    for(const effect of this.effects){effect.life-=dt;effect.mesh.position.y+=dt*1.5;effect.mesh.material.opacity=Math.max(0,effect.life/.8);if(effect.life<=0){if(effect.pooled){effect.mesh.visible=false;}else{this.scene.remove(effect.mesh);effect.mesh.material.map?.dispose();effect.mesh.material.dispose();}}}this.effects=this.effects.filter(e=>e.life>0);
    for(const item of this.debris){item.life-=dt;item.velocity.y-=9*dt;item.mesh.position.addScaledVector(item.velocity,dt);item.mesh.rotation.x+=dt*3;if(item.mesh.position.y<.12){item.mesh.position.y=.12;item.velocity.set(0,0,0);}if(item.life<=0){this.scene.remove(item.mesh);item.mesh.geometry.dispose();for(const m of Array.isArray(item.mesh.material)?item.mesh.material:[item.mesh.material])m.dispose();}}this.debris=this.debris.filter(d=>d.life>0);while(this.debris.length>48){const d=this.debris.shift()!;this.scene.remove(d.mesh);d.mesh.geometry.dispose();for(const m of Array.isArray(d.mesh.material)?d.mesh.material:[d.mesh.material])m.dispose();}
@@ -1445,6 +1500,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    this.applyCombatCamera(dt);
    if(this.qaBody&&this.qaBodyActor){this.camera.getWorldQuaternion(this.rainQuat);this.tmpV2.set(0,0,-1).applyQuaternion(this.rainQuat);this.tmpV2.y=0;const flen=Math.hypot(this.tmpV2.x,this.tmpV2.z)||1;this.tmpV2.x/=flen;this.tmpV2.z/=flen;this.qaBody.position.set(this.camera.position.x+this.tmpV2.x*this.qaBodyDistance,0,this.camera.position.z+this.tmpV2.z*this.qaBodyDistance);this.qaBody.visible=true;this.qaBody.rotation.y=Math.atan2(this.camera.position.x-this.qaBody.position.x,this.camera.position.z-this.qaBody.position.z);this.qaBody.updateMatrixWorld(true);this.qaBodyRig?.update(this.qaBodyActor,false,dt*this.visualScale);}
    if(g&&!this.firstGameFrameMarked){this.firstGameFrameMarked=true;try{performance.mark('ss:firstGameFrame');}catch{}}
+   if(g)this.updateBossPresentation(g,time);
    if(g)this.updateObjectiveMarkers(g,me);
    if(this.postfx)this.postfx.render();else this.renderer.render(this.scene,this.camera);
   }

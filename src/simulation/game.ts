@@ -3,18 +3,21 @@ import {ROLES,ROLE_STATS,formation,placeCompanion,separateCompanions,squad} from
 import {CASTLES,CAMPS,REGIONS,NEST,START,COSTS,dist,move,waypoint,clamp,lineClear} from '../shared/world';
 import type {Actor,Game,Input} from '../shared/types';
 import {WEAPON_IDS,WEAPONS,isWeapon,weaponStats,type WeaponId} from '../shared/weapons';
+import {DEFAULT_DIFFICULTY,difficultyPreset,type Difficulty} from '../shared/difficulty';
 export const idle=():Input=>({mx:0,mz:0,yaw:0,attack:false,block:false,interact:false,seq:0});
 export function event(g:Game,text:string){g.events.push({id:++g.nextId,text,time:g.time});g.events=g.events.slice(-8);}
 export function spawn(g:Game,kind:Actor['kind'],x:number,z:number,extra:Partial<Actor>={}):Actor{
  if(kind==='soldier'&&!extra.role)extra={...extra,role:ROLES[g.actors.filter(a=>a.kind==='soldier').length%ROLES.length]};
  const hp=kind==='player'?120:kind==='soldier'?90:kind==='corrupted'?125:52;
- const a:Actor={id:`a${++g.nextId}`,kind,name:kind==='corrupted'?'Corrupted knight':kind==='soldier'?'Oathsworn':kind==='zombie'?'Shrouded':'Knight',x,z,hp,maxHp:hp,yaw:0,cd:0,windup:0,swing:0,block:false,deadUntil:0,stamina:100,armor:'light',abilityCd:0,...extra};g.actors.push(a);return a;
+ const a:Actor={id:`a${++g.nextId}`,kind,name:kind==='corrupted'?'Corrupted knight':kind==='soldier'?'Oathsworn':kind==='zombie'?'Shrouded':'Knight',x,z,hp,maxHp:hp,yaw:0,cd:0,windup:0,swing:0,block:false,deadUntil:0,stamina:100,armor:'light',abilityCd:0,...extra};
+ if(kind==='zombie'||kind==='corrupted'){const hpScale=difficultyPreset(g.difficulty).enemyHp;if(hpScale!==1){a.maxHp=Math.max(1,Math.round(a.maxHp*hpScale));a.hp=Math.min(a.maxHp,Math.round(a.hp*hpScale));}}
+ g.actors.push(a);return a;
 }
-export function createGame():Game{
+export function createGame(difficulty:Difficulty=DEFAULT_DIFFICULTY):Game{
  // Weapon-rack drops are WEAPON_IDS-driven: the starter hammer plus one rack per castle. Filtering
  // out the two starter weapons keeps every rackable weapon covered exactly once as WEAPON_IDS grows.
  const rackPool:WeaponId[]=WEAPON_IDS.filter(id=>id!=='sword'&&id!=='hammer');
- const g:Game={time:0,armory:['sword'],weaponDrops:[{id:'starter-hammer',weapon:'hammer',x:-3,z:30,taken:false},...CASTLES.map((c,i)=>({id:'rack-'+c.id,weapon:rackPool[i%rackPool.length],x:c.x-5,z:c.z+4,taken:false}))],regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0},events:[],nextId:0};
+ const g:Game={time:0,difficulty,armory:['sword'],weaponDrops:[{id:'starter-hammer',weapon:'hammer',x:-3,z:30,taken:false},...CASTLES.map((c,i)=>({id:'rack-'+c.id,weapon:rackPool[i%rackPool.length],x:c.x-5,z:c.z+4,taken:false}))],regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0},events:[],nextId:0};
  g.castles.forEach((c,i)=>{for(let n=0;n<4+(i%3)*2+Math.floor(i/3);n++)spawn(g,n===5?'corrupted':'zombie',c.x-5+(n%3)*4,c.z-5+Math.floor(n/3)*4,{castle:c.id});});
  g.camps.forEach(c=>{for(let n=0;n<3;n++)spawn(g,'zombie',c.x+n*2-2,c.z-4);});
  for(let n=0;n<5;n++)spawn(g,n===4?'corrupted':'zombie',NEST.x-6+n*3,NEST.z+5,n===4?{name:'Plague Champion',hp:200,maxHp:200,weapon:'zweihander'}:{});
@@ -36,6 +39,7 @@ export function sever(g:Game,a:Actor,part:'leftArm'|'rightArm'|'head'){
 }
 function hurt(g:Game,a:Actor,amount:number,attacker?:Actor){
  if(a.hp<=0)return;
+ if(attacker&&hostile(attacker)&&!hostile(a))amount*=difficultyPreset(g.difficulty).enemyDamage;
  if(a.block&&attacker){const towards=Math.atan2(attacker.x-a.x,-(attacker.z-a.z));if(Math.cos(towards-a.yaw)>.2)amount*=attacker&&a.kind==='player'&&!weaponStats(a.weapon).shield?.55:.2;}
  if(a.kind==='player'&&a.armor==='heavy')amount*=.7;
  a.hp=Math.max(0,a.hp-amount);if(a.kind==='zombie'&&attacker?.kind==='player'&&attacker.weapon!=='hammer'){if(a.hp===0)sever(g,a,'head');else if(a.hp<=a.maxHp*.5)sever(g,a,(a.severed??[]).includes('rightArm')?'leftArm':(a.severed??[]).includes('leftArm')?'rightArm':attacker.x<a.x?'leftArm':'rightArm');}
@@ -181,7 +185,7 @@ export function tick(g:Game,dt=.05){
  if(g.everCaptured&&!g.castles.some(c=>c.friendly)){g.status='defeat';event(g,'The last stronghold has fallen.');return;}
  if(!g.siege&&g.everCaptured&&g.time>=g.nextSiege)openSiege(g);
  if(g.siege){const c=g.castles.find(c=>c.id===g.siege!.castle)!;
-  if(!g.siege.active&&g.time>=g.siege.starts){g.siege.active=true;const extra=Math.max(0,g.actors.filter(a=>a.kind==='player'&&a.connected).length-1)*2;const boss=!!g.siege.boss;const count=Math.min(14,6+g.stats.sieges*2+extra+(boss?1:0));const normals=count-(boss?1:0);for(let n=0;n<normals;n++)spawn(g,n===normals-1?'corrupted':'zombie',c.x+(n%3-1)*2,c.z+19+Math.floor(n/3)*2,{castle:c.id});if(boss){const bossHp=Math.max(240,Math.min(280,g.siege.bossHp||240));const bossActor=spawn(g,'corrupted',c.x,c.z+19+Math.floor(normals/3)*2,{castle:c.id,name:g.siege.bossName||'Shroud Warden',hp:bossHp,maxHp:bossHp,armor:'heavy',boss:true});g.siege.bossId=bossActor.id;g.siege.bossHp=bossHp;}g.siege.waveSize=count;event(g,boss?`${g.siege.bossName} leads the siege of ${c.name}!`:`The siege of ${c.name} has begun.`);}
+  if(!g.siege.active&&g.time>=g.siege.starts){g.siege.active=true;const extra=Math.max(0,g.actors.filter(a=>a.kind==='player'&&a.connected).length-1)*2;const boss=!!g.siege.boss;const count=Math.max(4,Math.min(14,6+g.stats.sieges*2+extra+(boss?1:0)+difficultyPreset(g.difficulty).waveBonus));const normals=count-(boss?1:0);for(let n=0;n<normals;n++)spawn(g,n===normals-1?'corrupted':'zombie',c.x+(n%3-1)*2,c.z+19+Math.floor(n/3)*2,{castle:c.id});if(boss){const bossHp=Math.max(240,Math.min(280,g.siege.bossHp||240));const bossActor=spawn(g,'corrupted',c.x,c.z+19+Math.floor(normals/3)*2,{castle:c.id,name:g.siege.bossName||'Shroud Warden',hp:bossHp,maxHp:bossHp,armor:'heavy',boss:true});g.siege.bossId=bossActor.id;g.siege.bossHp=bossActor.maxHp;}g.siege.waveSize=count;event(g,boss?`${g.siege.bossName} leads the siege of ${c.name}!`:`The siege of ${c.name} has begun.`);}
   if(g.siege.active&&(!c.friendly||!g.actors.some(a=>hostile(a)&&a.hp>0&&a.castle===c.id))){if(c.friendly){g.stats.sieges++;g.resources.wood+=16;g.resources.iron+=6;event(g,`Siege repelled at ${c.name}.`);}g.siege=null;const players=g.actors.filter(a=>a.kind==='player'&&a.connected);const pressure=players.length?players.reduce((v,a)=>v+1-a.hp/a.maxHp,0)/players.length:0;g.nextSiege=g.time+120+Math.round(pressure*60);}
  }
 }
