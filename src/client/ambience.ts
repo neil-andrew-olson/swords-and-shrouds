@@ -1,7 +1,8 @@
 import type {Actor, Game} from '../shared/types';
 import {REGIONS,START,NEST,dist} from '../shared/world';
 import {FORGE_FURNACES,STONE_ALTARS} from './ruins';
-import {bossSiegeAudioMode} from './controller';
+import * as ruinsModule from './ruins';
+import {bossSiegeAudioMode,torchBedProximity,TORCH_BED_RADIUS} from './controller';
 const clamp01=(v:number)=>(v<0?0:v>1?1:v);
 /** Region audio profiles derived from shared/world. Region centres use the same offset-80 mapping
  * the HUD uses to pick the player's region, so the audio regions match the visible region zones. */
@@ -36,6 +37,10 @@ const WOOD_RADIUS=7;
 /** Landmark ambience anchors imported from ruins.ts (shipped placements = single source of truth). */
 const ASHEN_ALTAR=STONE_ALTARS[0]??{x:-27.71,z:-226.14};
 const FORGE_SITES=FORGE_FURNACES.length>0?FORGE_FURNACES:[{x:52.14,z:7.3},{x:32,z:-42.3}];
+/** Torch posts for the fire bed: ruins-builder's road dressing positions when exported, else a small
+ * road-aligned fallback so the bed still exists before task-112 lands. */
+const TORCH_FALLBACK:{x:number;z:number}[]=[{x:12,z:8},{x:24,z:4},{x:36,z:-12},{x:40,z:-30},{x:41,z:-48},{x:26,z:-30},{x:10,z:-58},{x:20,z:-70}];
+const TORCH_POSTS=((ruinsModule as unknown as {TORCH_POSTS?:{x:number;z:number}[]}).TORCH_POSTS?.length?((ruinsModule as unknown as {TORCH_POSTS:{x:number;z:number}[]}).TORCH_POSTS):TORCH_FALLBACK);
 const CHAPEL_RADIUS=20;
 const FORGE_RADIUS=16;
 function distanceToRoad(x:number,z:number){
@@ -113,6 +118,13 @@ export class Ambience{
  private forgeNear=0;
  private forgeSources:AudioScheduledSourceNode[]=[];
  private forgeNodes:AudioNode[]=[];
+ // Torch-fire crackle bed (cycle 14): positional, 10 m radius, low gain, lazily built.
+ private torchGain?:GainNode;
+ private torchSources:AudioScheduledSourceNode[]=[];
+ private torchNodes:AudioNode[]=[];
+ private torchBuilt=false;
+ private torchIdle=0;
+ private torchNear=0;
  private hammerTimer=1.6;
  /** QA-only diagnostic focus for landmark beds; null = normal player-proximity behaviour. */
  private focusOverride:{x:number;z:number}|null=null;
@@ -246,7 +258,7 @@ export class Ambience{
    regionBeds:REGIONS.map((region,index)=>({key:region.id,level:Math.round(this.regionTargetLevels[index]*1000)/1000})),
    music:{level:Math.round(this.bedLevel*1000)/1000,duck:Math.round(this.duckLevel*1000)/1000},
    weatherBeds:['rain','snow','ash'].map((kind,index)=>({kind,level:Math.round(this.weatherTargetLevels[index]*1000)/1000})),
-   landmarkBeds:[{key:'chapel',level:Math.round((this.enabled()?this.chapelNear*this.chapelNear*.022:0)*1000)/1000},{key:'forge',level:Math.round((this.enabled()?this.forgeNear*this.forgeNear*.024:0)*1000)/1000}],
+   landmarkBeds:[{key:'chapel',level:Math.round((this.enabled()?this.chapelNear*this.chapelNear*.022:0)*1000)/1000},{key:'forge',level:Math.round((this.enabled()?this.forgeNear*this.forgeNear*.024:0)*1000)/1000},{key:'torches',level:Math.round((this.enabled()?this.torchNear*this.torchNear*.018:0)*1000)/1000}],
    masterGain:level(this.master),
    focus:this.focusOverride?{x:this.focusOverride.x,z:this.focusOverride.z}:null,
    siege:{boss:this.bossMode==='boss',active:this.bossMode!=='idle',mode:this.bossMode,level:Math.round(this.bossLevel*1000)/1000,gain:level(this.bossGain)},
@@ -813,6 +825,35 @@ export class Ambience{
   for(const node of this.forgeNodes){try{node.disconnect();}catch{}}
   this.forgeSources=[];this.forgeNodes=[];this.forgeGain=undefined;this.forgeBuilt=false;this.forgeIdle=0;
  }
+ private stopTorch(){
+  if(!this.torchBuilt)return;
+  for(const source of this.torchSources){try{source.stop();}catch{}try{source.disconnect();}catch{}}
+  for(const node of this.torchNodes){try{node.disconnect();}catch{}}
+  this.torchSources=[];this.torchNodes=[];this.torchGain=undefined;this.torchBuilt=false;this.torchIdle=0;
+ }
+ /** Torch bed: very low crackle/roar anchored to the nearest torch post (10 m radius). */
+ private ensureTorch(){
+  const c=this.context;if(!c||!this.master||this.torchBuilt)return;
+  const now=c.currentTime;
+  const gain=c.createGain();gain.gain.setValueAtTime(.0001,now);gain.connect(this.master);
+  const sources:AudioScheduledSourceNode[]=[];const nodes:AudioNode[]=[];
+  const crackle=this.crackle??this.noise;
+  if(crackle){
+   const source=c.createBufferSource();source.buffer=crackle;source.loop=true;source.playbackRate.value=.85+Math.random()*.25;
+   const high=c.createBiquadFilter();high.type='highpass';high.frequency.value=700;
+   const band=c.createBiquadFilter();band.type='bandpass';band.frequency.value=2400;band.Q.value=.6;
+   const body=c.createGain();body.gain.value=.55;
+   source.connect(high);high.connect(band);band.connect(body);body.connect(gain);source.start();sources.push(source);nodes.push(high,band,body);
+  }
+  const roarBuffer=this.noise??this.crackle;
+  if(roarBuffer){
+   const roar=c.createBufferSource();roar.buffer=roarBuffer;roar.loop=true;
+   const low=c.createBiquadFilter();low.type='lowpass';low.frequency.value=320;
+   const level=c.createGain();level.gain.value=.35;
+   roar.connect(low);low.connect(level);level.connect(gain);roar.start();sources.push(roar);nodes.push(low,level);
+  }
+  this.torchGain=gain;this.torchSources=sources;this.torchNodes=nodes;this.torchBuilt=true;
+ }
  /** Rate-limited metallic hammer clink (occasionally a double tap) while near a forge. */
  private forgeHammer(){
   const c=this.context,out=this.forgeGain;
@@ -953,7 +994,10 @@ export class Ambience{
     let forgeDistance=Infinity;
     for(const site of FORGE_SITES){const d=dist(landmarkFocus,site);if(d<forgeDistance)forgeDistance=d;}
     this.forgeNear=forgeDistance<FORGE_RADIUS?1-forgeDistance/FORGE_RADIUS:0;
-   }else{this.chapelNear=0;this.forgeNear=0;}
+    let torchDistance=Infinity;
+    for(const post of TORCH_POSTS){const d=dist(landmarkFocus,post);if(d<torchDistance)torchDistance=d;}
+    this.torchNear=torchBedProximity(torchDistance,TORCH_BED_RADIUS);
+   }else{this.chapelNear=0;this.forgeNear=0;this.torchNear=0;}
    this.nearbyUndead=undead;
    // Capture easing: the bed eases down for ~24 s after a castle is taken.
    if(game){
@@ -1042,6 +1086,15 @@ export class Ambience{
    }else if(this.forgeBuilt){
     const forge=this.forgeGain;if(forge){if(landmarkFast)forge.gain.setValueAtTime(0,now);else forge.gain.setTargetAtTime(0,now,.4);}
     this.forgeIdle+=.08;if(this.forgeIdle>2.5)this.stopForge();
+   }
+   const torchTarget=enabled?this.torchNear*this.torchNear*.018:0;
+   if(torchTarget>.0006){
+    this.ensureTorch();this.torchIdle=0;
+    const torch=this.torchGain;if(torch){if(landmarkFast)torch.gain.setValueAtTime(torchTarget,now);else torch.gain.setTargetAtTime(torchTarget,now,.25);}
+    if(this.torchGain&&Math.random()<.02)this.torchGain.gain.setTargetAtTime(torchTarget*(.75+Math.random()*.5),now,.05);
+   }else if(this.torchBuilt){
+    const torch=this.torchGain;if(torch){if(landmarkFast)torch.gain.setValueAtTime(0,now);else torch.gain.setTargetAtTime(0,now,.35);}
+    this.torchIdle+=.08;if(this.torchIdle>2.5)this.stopTorch();
    }
    const wind=this.windGain,windFilter=this.windFilter;
    if(wind){

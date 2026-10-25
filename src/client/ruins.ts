@@ -412,6 +412,98 @@ export const CYCLE13_PROPS = {
 } as const;
 
 // ---------------------------------------------------------------------------------------------
+// Cycle-14 torch-lit roads: the installed torch_post asset along the keep -> village -> fortress
+// roads, one distance-culled instanced layer, with flame cones appended to the existing flames
+// layer (no new lights). TORCH_POSTS is exported for audio-polish's crackle bed.
+// ---------------------------------------------------------------------------------------------
+export const TORCH_POST_HEIGHT = 2.5;
+
+/** Road-side torch posts on the Green March road network; yaw faces the nearest road point. */
+export const TORCH_POSTS: readonly PropPlacement[] = [
+  {x: 11, z: 17, yaw: -2.118},
+  {x: 10, z: 20, yaw: -2.118},
+  {x: 25.5, z: -7.3, yaw: -2.118},
+  {x: 16.3, z: -13.2, yaw: 1.024},
+  {x: 31.7, z: -17.5, yaw: -2.118},
+  {x: 22.5, z: -23.6, yaw: 1.024},
+  {x: 44.2, z: -38, yaw: -2.727},
+  {x: 26, z: -50, yaw: 2.327}
+];
+
+/** Flame cones for every torch post (appended to the existing `dressing:flames` layer). */
+export const TORCH_FLAMES: readonly {x: number; z: number; y: number; scale: number}[] = TORCH_POSTS.map((t) => ({
+  x: t.x,
+  z: t.z,
+  y: 2.3,
+  scale: 0.5
+}));
+
+export const CYCLE14_PROPS = {
+  torchPosts: TORCH_POSTS.length,
+  torchFlames: TORCH_FLAMES.length,
+  torchPostTris: 152,
+  newInstancedLayers: 1
+} as const;
+
+// ---------------------------------------------------------------------------------------------
+// Cycle-14 windmill landmark (Green March farmland east of the village landmark). The tower is an
+// instanced, distance-culled dressing layer (1 draw); the sails are a separate asset built by
+// world-scene at the exported hub anchor and rotated around the authored local Z axis (<=1 draw).
+// ---------------------------------------------------------------------------------------------
+export interface WindmillPlacement {
+  asset: 'windmill';
+  x: number;
+  z: number;
+  yaw: number;
+  height: number;
+}
+
+export const WINDMILL: WindmillPlacement = {asset: 'windmill', x: 64, z: 36, yaw: -2.954, height: 10.0};
+
+export interface WindmillSailsAnchor {
+  asset: 'windmill_sails';
+  /** World hub position (blades centre). */
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  /** Authored blade plane is local X/Y, so the sail assembly spins around its local Z axis. */
+  spinAxis: 'x' | 'y' | 'z';
+  /** Blade radius in metres (used by world-scene for animation scale/reference). */
+  radius: number;
+  /** Matches the ruins dressing culling range; world-scene hides the sails beyond this. */
+  visibilityRange: number;
+  scale: number;
+}
+
+const windmillCos = Math.cos(WINDMILL.yaw);
+const windmillSin = Math.sin(WINDMILL.yaw);
+const windmillHubOut = 7.2;
+const windmillHubForward = 3.45;
+
+export const WINDMILL_SAILS: WindmillSailsAnchor = {
+  asset: 'windmill_sails',
+  x: WINDMILL.x + windmillHubForward * windmillSin,
+  y: windmillHubOut,
+  z: WINDMILL.z + windmillHubForward * windmillCos,
+  yaw: WINDMILL.yaw,
+  spinAxis: 'z',
+  radius: 3.585,
+  visibilityRange: 85,
+  scale: 1
+};
+
+export const CYCLE14_LANDMARK = {
+  windmill: WINDMILL,
+  sails: WINDMILL_SAILS,
+  windmillTowerTris: 1000,
+  sailsTris: 668,
+  towerDraws: 1,
+  sailsDraws: 1,
+  cullRange: 85
+} as const;
+
+// ---------------------------------------------------------------------------------------------
 // Cycle-3 regional identity: one landmark per region plus region-specific prop dressing. All of it
 // goes through the same quantization-safe instanced path; every scatter prop is distance-culled
 // through instance-buffer compaction. Coordinates validated against shared/world, scene.ts's
@@ -662,6 +754,12 @@ export const ABBEY_QA_POSES = [contentPose('content-abbey', 40, -40, 3.2, 62, -4
 export const CYCLE13_QA_POSES = [
   contentPose('content-notice-board', 36.9, -21.1, 2.6, 44, -14, 1.4),
   contentPose('content-fence', 24, -52, 2.6, 25, -44, 1.2)
+] as const;
+
+/** QA framing for the cycle-14 torch-lit road + windmill landmark. */
+export const CYCLE14_QA_POSES = [
+  contentPose('content-torches', 14, 0, 2.8, 28, -17, 1.8),
+  contentPose('content-windmill', 58, 24, 3.4, 64, 36, 5.2)
 ] as const;
 
 const RACK_DX = 5.0;
@@ -1324,6 +1422,13 @@ export function addRuins(scene: THREE.Scene): {
       spec.cullRange = DRESSING_RANGE;
       specs.push(spec);
     }
+    // cycle-14: torch-post flames on the road network (same layer, same draw, no new lights).
+    for (const torch of TORCH_FLAMES) {
+      const spec = baseSpec(torch.x, torch.z, 0, torch.scale);
+      spec.y = torch.y;
+      spec.cullRange = DRESSING_RANGE;
+      specs.push(spec);
+    }
     addCullableLayer(createLayer(scene, prepared, specs, 'dressing:flames', true));
   }
 
@@ -1355,7 +1460,11 @@ export function addRuins(scene: THREE.Scene): {
     placeDressingAsset('abbey_ruin', ABBEY_PLACEMENTS, ABBEY_HEIGHT, 'dressing:abbey'),
     // cycle 13: village notice board + camp fence run (2 new instanced layers/draws; torch_post deferred)
     placeDressingAsset('notice_board', NOTICE_BOARDS, NOTICE_BOARD_HEIGHT, 'dressing:notice-boards'),
-    placeDressingAsset('fence_segment', FENCE_SEGMENTS, FENCE_SEGMENT_HEIGHT, 'dressing:fences')
+    placeDressingAsset('fence_segment', FENCE_SEGMENTS, FENCE_SEGMENT_HEIGHT, 'dressing:fences'),
+    // cycle 14: torch-lit roads (1 new instanced layer; flames append to the existing flames layer)
+    placeDressingAsset('torch_post', TORCH_POSTS, TORCH_POST_HEIGHT, 'dressing:torch-posts'),
+    // cycle 14: windmill tower landmark (1 draw; world-scene animates the exported sail anchor)
+    placeDressingAsset('windmill', [{x: WINDMILL.x, z: WINDMILL.z, yaw: WINDMILL.yaw}], WINDMILL.height, 'dressing:windmill')
   ]).catch((error) => console.warn('[ruins] asynchronous placement failed', error));
   buildBanners();
   buildFlames();

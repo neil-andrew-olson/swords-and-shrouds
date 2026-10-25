@@ -275,3 +275,9 @@ export function formatBashHint(input:{shieldCapable:boolean;cooldownRemaining:nu
  if(input.stamina<(input.minStamina??14))return `Shield bash · low stamina (${Math.max(0,Math.round(input.stamina))})`;
  return 'Shield bash · hold Block + Attack';
 }
+/* Cycle-14 torch-fire ambience: small-radius positional bed helper (pure, tested). */
+export const TORCH_BED_RADIUS=10;
+export function torchBedProximity(distance:number|null|undefined,radius:number=TORCH_BED_RADIUS):number{
+ if(distance===null||distance===undefined||!Number.isFinite(distance)||radius<=0)return 0;
+ return Math.max(0,Math.min(1,1-distance/radius));
+}

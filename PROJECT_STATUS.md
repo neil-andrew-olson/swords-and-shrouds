@@ -1,6 +1,6 @@
 # Swords & Shrouds — project checkpoint
 
-Updated: 2026-10-24. Read this file first when continuing in a new chat.
+Updated: 2026-10-25. Read this file first when continuing in a new chat.
 Do not require the previous conversation or import its full transcript.
 Inspect current code and git history before assuming this checkpoint is still current.
 
@@ -15,106 +15,93 @@ co-op + live-URL mode, QA inspects screenshots with read_image, Lead commits/pus
 verifies the live bundle.
 
 **Doc-link note:** the DSH GUI cannot open absolute Windows paths (that is why md links showed
-"File not found"). `PROJECT_STATUS.md` and `docs/*.md` are mirrored into the session workspace at
+"File not found"). `PROJECT_STATUS.md`, `docs/*.md` (incl. `docs/AAA-ROADMAP.md`) and screenshots are
+mirrored into the session workspace at
 `C:\Users\neil\Documents\deepseek-harness\default-workspace\swords-and-shrouds\`; always link
 workspace-relative paths and/or use the `present` tool.
 
 **Process discipline:** teammates kill only their own PIDs (`Stop-Process -Id` / `/PID`), never
 broad `taskkill /IM node.exe`. One dist builder at a time; QA owns authoritative captures. **Always**
-re-check source mtimes against the artifact mtime before handing a hash, and when in doubt clear
-`node_modules/.vite` and rebuild twice (cycle-11 and cycle-13 lesson: a post-freeze one-line edit
-produced two candidate artifacts; QA's independent rebuild caught the mismatch — only gate the hash
-that a clean rebuild reproduces).
+re-check source mtimes vs the artifact mtime before handing a hash, and rebuild twice with
+`node_modules/.vite` cleared (cycle-11/13/14 lessons: post-freeze edits and races produced superseded
+artifacts — only gate a hash a clean rebuild reproduces).
 
-## Latest completed cycle — 2026-10P cycle 13: props, siege audio, shield bash
+## Cycle 14 (2026-10Q) — landmark content + character look hotfix (DEPLOYED)
 
-Contract: `docs/BATCH-2026-10P-SPEC.md`; results: `docs/BATCH-2026-10P-RESULTS.md`; QA evidence in
-`docs/QA-REPORT.md`. Final bundle `index-Dwublozr.js` (950,533 B), deterministic across clean builds
-from the frozen tree (artifact 21:40:16 > newest src main.ts 21:39:22; superseded pre-dedup candidate
-`index-DnADE4CG.js` was rejected).
+Final bundle **`index-DYb3SbYc.js`** (960,484 B). Contract `docs/BATCH-2026-10Q-SPEC.md`, results
+`docs/BATCH-2026-10Q-RESULTS.md`; roadmap `docs/AAA-ROADMAP.md`.
 
-### New world props
+### Character look hotfix (user-flagged)
+- Overhead actor markers (white diamonds): size .13→.085, height 2.45→2.55, distance-gated >6 m, no
+  marker for the local player, friendly .55/hostile .85/downed .9 opacity, bob only in normal motion;
+  `__ssMarkers()` hook.
+- Character look pass v4 in `custom-character.ts`: in-shader albedo grade (saturation 1.3, contrast
+  1.08), rim .10 armour/.14 cloth/.12 body, env 1.5/1.3, roughness floors .68/.72, faction steel tint;
+  **procedural great-helm** (252 tris, dome+faceplate+dark T-slit+neck guard, steel `#5c6470`) for all
+  armoured humans, dark low cowl for ranger/survivor; all cloth forced opaque with deep faction cape
+  colours (no translucent purple panel); companion soldiers forced neutral steel so no green
+  "orb" artifact. `__ssCharacterLook()` hook for QA. Torso mean 88.0 (60–95 gate).
+- Remaining art debt: baked atlases still patchwork/pale at extreme close range → **character atlas
+  rebake v5** is cycle 15 priority.
 
-Procedurally authored in the night palette (warehouse camp/props packs unusable as standalones):
-`notice_board` (192 tris, 2.0 × 2.26 × 0.72 m), `fence_segment` (252 tris, 2.57 × 1.35 × 0.24 m),
-`torch_post` (152 tris, installed; placement deferred to cycle 14 to respect ≤+2 draws). Placed:
-notice board at (44, −14) facing the village walkway; 3-segment fence run along the crossing camp's
-southern edge. Two distance-culled instanced layers (+2 draws/+948 tris only when visible),
-receive-only shadows, no new lights, 85 m culling, defensive missing-asset skip. Validator 85/85;
-real-GLB suite 80/80.
+### New content
+- `windmill` (1,000 tris, 10 m) + `windmill_sails` (668 tris) at Green March (64,36): animated
+  wind-scaled sails (stopped under reduced motion, +1 draw when visible, 85 m culling),
+  `__ssWindmill()`; relocated to tree-free cell after occlusion review.
+- `torch_post` ×8 on one instanced layer along the main roads (+1 draw, 1,216 tris), flame cones on
+  the existing flames layer (no new lights); `TORCH_POSTS` exported; new torch-fire crackle ambience
+  bed in `__ssAudioState().landmarkBeds.torches` (10 m radius, level 0.018 at post, QA-focus).
 
-### Audio depth
-
-Boss-siege music layer (saw/noise bed) intensifies during boss sieges, releases/tears down after;
-distinct Screamer shriek cue tied to the server event; victory/defeat stings on the recap moment
-(once per outcome); all respect Sound/ducking. `__ssAudioState()` exposes
-`siege:{boss,active,mode,level,gain}` and `cues:{screamerAt,screamerCount,sting,stingAt}`; QA triggers
-`__ssAudioSting`/`__ssAudioScreamer`. QA verified engage (.432→.733) + release, stings, cue contract.
-
-### Shield bash (server-authoritative)
-
-Client `{type:'bash'}` on block+attack chord (mouse RMB+LMB, pad LT+RT, mobile Bash button). Server
-validation: playing/alive/not downed → bash cooldown → attack cd/swing → shield-capable → stamina ≥14
-→ one front target ≤2.2 m with LOS. On success: stamina −14, 1.1 s bash CD, attack-cancel lock,
-6 damage, 0.9 s stagger/windup interrupt, 1.2 m wall-checked knockback, positioned `Shield bash!`
-event, `stats.bashes++`. Defensive opener, not DPS (6 dmg vs sword 34/0.65 s); no bash→attack
-cancel; works while blocking; walls respected. Client: HUD/guide/journal hints, mobile button with
-cooldown feedback, graceful rejection toasts. World FX: one additive ground ring + pooled dust/sparks,
-30 ms hit-stop/shake normally, 120 ms static ring under reduced motion, no double rig flash; single
-`ss-bash` dispatch (server event → scene FX → audio). `__ssBashFx()`/`__ssTriggerBashFx()` hooks.
-
-### Verification (final artifact)
-
-- `npm test` **58/58**; `tsc` 0; two clean builds reproduced `index-Dwublozr.js`; `validate-assets`
-  **85/85**.
-- Fresh-build smoke **27/27** (incl. freshness) + exact hash, characters **120/123** (3 harness-only
-  audio-timing failures fixed and green in perf 123/123), perf **123/123** (spawn **185 calls /
-  1,636,132 tris**), mobile **26/26**, co-op **22/22**, live baseline **32/32**, 11 cards, 0 errors/404s.
-- Payload **17.63 MiB**; props/audio/bash verified with deterministic hooks.
+### Verification
+- `npm test` 58/58; tsc 0; deterministic `index-DYb3SbYc.js` + source-freshness; validator **87/87**.
+- QA: fresh **27/27**, characters **139/140** (one harness timing read, green in probe/perf),
+  perf **137/137** (spawn **186 calls / 1,637,968 tris**), mobile **26/26**, co-op **22/22**,
+  live baseline **34/34**; windmill angle delta 0.442–0.470 rad / reduced 0, torch bed 0.018/0,
+  look/markers gates green; payload **17.74 MiB**; night 50.96.
 
 ### Deployed state
-
-Live bundle is the hosting build of this commit sequence (`feat: AAA cycle 13 …` → hosting pin commit →
-Cloudflare deploy → QA final live pass). Local play: `$env:PORT=3000; node --import tsx
+Live bundle is the hosting build of the cycle-14 commit sequence (`feat: AAA cycle 14 …` → hosting pin
+→ Cloudflare deploy → QA final live pass). Local play: `$env:PORT=3000; node --import tsx
 src/server/index.ts` from the game repo → http://localhost:3000/.
 
-### Cycle-14 (next) — from the audit
-
-1. Warden-mode forced-boss authoritative screenshot; QA forced Screamer capture.
-2. `torch_post` placement (asset installed — add to flames/lightless layer).
-3. Near-forge/chapel audio landmark ear check (human).
-4. Physical-device mobile / real-GPU / perceptual playtests; hardware controller rumble test.
-5. Further content/campaign depth.
+### Cycle-15 (next) — from the roadmap
+1. **Character atlas rebake v5**: semantic armour/leather/skin/cloth regions, richer close-up detail;
+   keep strict-mask palette + tone gates; in-game close-up proof.
+2. Deferred captures: Warden forced-boss shot, forced Screamer via `__ssForceSiege(3)`, normal
+   forced-siege after resolve.
+3. Audio ear check (human); physical-device/real-GPU/perceptual playtests; hardware rumble.
+4. Roadmap milestone B start: animation depth (heavy attack, dodge/step, death variants, foot-slide).
 
 ## Previous cycles
 
-- **2026-10O cycle 12** (`docs/BATCH-2026-10O-RESULTS.md`): chronicle lore (16 entries), run recap +
-  epilogue, Shroud Screamer behaviour, victory/defeat mood, difficulty snapshot fix, freshness gate.
-- **2026-10N cycle 11** (`docs/BATCH-2026-10N-RESULTS.md`): difficulty modes (Squire/Knight/Warden),
-  boss HP bar + world aura/scale/tint, balance sims, QA gap closure.
-- **2026-10M cycle 10** (`docs/BATCH-2026-10M-RESULTS.md`): campaign journal + next-objective HUD,
-  wayfinding overlay, siege bosses, QA force-siege path, audio focus ramp.
-- **2026-10L cycle 9** (`docs/BATCH-2026-10L-RESULTS.md`): War Spear (11th weapon) + rackPool drops,
-  ruined abbey landmark, hit-flash hold, weapon QA hooks, audio diagnostics.
-- **2026-10K cycle 8** (`docs/BATCH-2026-10K-RESULTS.md`): mobile/touch HUD, device-aware quality,
-  enemy preview, per-hit feedback, nest decals.
-- **2026-10J cycle 7** (`docs/BATCH-2026-10J-RESULTS.md`): enemy variants, strict-mask palette 7/7,
-  content-capture culling, plague dressing, a11y captions.
-- **2026-10I cycle 6** (`docs/BATCH-2026-10I-RESULTS.md`): Wandering Survivor, rumble/hints,
-  reduced-motion fix, cloth-wind, altar candles.
-- **2026-10H cycle 5** (`docs/BATCH-2026-10H-RESULTS.md`): armour art v3, cloth wind, snowstorms,
-  combat feel, altar/forge content, surface audio.
-- **2026-10G cycle 4** (`docs/BATCH-2026-10G-RESULTS.md`): armour v2, weather + audio, tone/HUD,
-  wells/stalls.
-- **2026-10F cycle 3** (`docs/BATCH-2026-10F-RESULTS.md`): regional identity, foliage/ruins, elites,
-  fire/smoke, region audio.
-- **2026-10E cycle 2** (`docs/BATCH-2026-10E-RESULTS.md`): character material v2, quantised-ruin fix,
-  trees/shadows, keep atlas, adaptive audio.
-- **2026-10D cycle 1** (`docs/BATCH-2026-10D-RESULTS.md`): fixed blacked-out characters, shadows,
-  301→173 calls, LODs, doc links.
-- **2026-10C / 2026-10B / 2026-10** earlier: performance & smoothness (43.5→9.47 MB payload,
-  88,544→301 calls), combat/arsenal/co-op QA, battlefield overhaul; asset pipeline in
-  `docs/ASSET-PIPELINE.md`.
+- **2026-10P cycle 13**: new camp props (notice board, fences), siege audio layers/stings, shield
+  bash (server+client+FX), hash-freshness process (`docs/BATCH-2026-10P-RESULTS.md`).
+- **2026-10O cycle 12**: chronicle lore (16), run recap+epilogue, Shroud Screamer, victory/defeat
+  mood, difficulty snapshot fix (`docs/BATCH-2026-10O-RESULTS.md`).
+- **2026-10N cycle 11**: difficulty modes (Squire/Knight/Warden), boss HP bar + aura/scale/tint,
+  balance sims (`docs/BATCH-2026-10N-RESULTS.md`).
+- **2026-10M cycle 10**: campaign journal, wayfinding overlay, siege bosses, QA force-siege
+  (`docs/BATCH-2026-10M-RESULTS.md`).
+- **2026-10L cycle 9**: War Spear (11th), ruined abbey, hit-flash hold, audio diagnostics
+  (`docs/BATCH-2026-10L-RESULTS.md`).
+- **2026-10K cycle 8**: mobile/touch HUD, device-aware quality, enemy preview, hit feedback
+  (`docs/BATCH-2026-10K-RESULTS.md`).
+- **2026-10J cycle 7**: enemy variants, strict-mask palette 7/7, content captures, plague dressing,
+  a11y captions (`docs/BATCH-2026-10J-RESULTS.md`).
+- **2026-10I cycle 6**: Wandering Survivor, rumble/hints, reduced-motion fix, cloth wind
+  (`docs/BATCH-2026-10I-RESULTS.md`).
+- **2026-10H cycle 5**: armour v3 + survivor identity, snowstorms, combat feel, surface audio
+  (`docs/BATCH-2026-10H-RESULTS.md`).
+- **2026-10G cycle 4**: armour v2, weather + weather audio, tone/HUD, wells/stalls
+  (`docs/BATCH-2026-10G-RESULTS.md`).
+- **2026-10F cycle 3**: regional identity, foliage/ruins, elites, fire/smoke, region audio
+  (`docs/BATCH-2026-10F-RESULTS.md`).
+- **2026-10E cycle 2**: character material v2, quantised-ruin fix, trees/shadows, adaptive audio
+  (`docs/BATCH-2026-10E-RESULTS.md`).
+- **2026-10D cycle 1**: fixed blacked-out characters, shadows, 301→173 calls, LODs, doc links
+  (`docs/BATCH-2026-10D-RESULTS.md`).
+- Earlier batches: performance & smoothness, combat/arsenal/co-op QA, battlefield overhaul
+  (`docs/BATCH-2026-10*-*`); asset pipeline in `docs/ASSET-PIPELINE.md`.
 
 ## Hosting / deployment
 

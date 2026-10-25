@@ -655,6 +655,24 @@ Staged mirrors validated before each install (76/76 armour v3, 78/78 props), ato
 `tests/armory` 5/5 after both phases. `tests/equipment` is 5/5 for the cycle-5 state; the cycle-6
 rebuild below changes the survivor staff weighting, so that assertion needs the cycle-6 update.
 
+## Batch 2026-10Q — windmill tower + sails (cycle 14)
+
+Two procedural night-palette assets (no warehouse windmill existed), built by
+`scripts/bake/bake-windmill.mjs` from a shared 512² atlas (stone / timber / canvas / iron / dark
+bands), one primitive + one material each, quantized (`KHR_mesh_quantization`), gzip-9, no lights.
+
+| asset | tris | prims | gzip | bbox (x × y × z) | pivot / orientation |
+| --- | --- | --- | --- | --- | --- |
+| `windmill` | 1,000 | 1 | 38.1 KB | 6.10 × 10.01 × 6.45 | ground-centred (min y = 0, x/z centred), door faces **+Z**; stone shaft with timber bands, door + porch, five windows, gallery deck/railing at 6.9–8.0 m, conical cap + finial to 10.0 m |
+| `windmill_sails` | 668 | 1 | 35.8 KB | 7.17 × 7.17 × 0.68 | **hub pivot at the local origin** (bbox symmetric ±3.585 x/y, ±0.34 z), 4 lattice sail blades in the **XY plane** → animate a single rotation about **local Z** |
+
+Mounting contract for the client: add the sails mesh as a child group of the tower at tower-local
+**(0, 7.20, +3.45)** (in front of the gallery, clear of its 3.05 m overhang) and rotate that group
+about its own **Z axis** (positive = counter-clockwise seen from the +Z front). Blade tips sweep a
+7.17 m diameter, y ≈ 3.6–10.8 m. Reduced-motion = stopped. Validator budgets
+`windmill: 2500`, `windmill_sails: 800`. Previews: `temp_sketchlab/armour/c14_windmill2.png`,
+`c14_sails2.png`. Payload 83 files / 15.32 MB.
+
 ## Batch 2026-10P — camp/village props (cycle 13)
 
 Three roadside/camp dressing props, authored procedurally in the night palette because the warehouse

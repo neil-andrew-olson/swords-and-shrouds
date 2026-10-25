@@ -30,6 +30,7 @@ const BUDGETS = {
   stone_altar: 4000, forge_furnace: 8000,
   abbey_ruin: 14000,
   notice_board: 3000, fence_segment: 3000, torch_post: 3000,
+  windmill: 2500, windmill_sails: 800,
   'zombie-bloated': 11000, 'skeleton-armoured': 8500,
   fortress_keep: 14000, castle_tower: 14000,
   well: 6000, chest: 6000, bench: 6000, rock_cluster: 6000, grass_tuft: 1500,
