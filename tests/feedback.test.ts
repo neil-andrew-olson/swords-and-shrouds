@@ -1,4 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue,compassBearing,deriveObjectiveLine,deriveJournalSummary,bossBarState,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,difficultyId,difficultyChoice,isDifficultyId,deriveRunRecap,formatRunTime,bashChordReady,formatBashHint,bossSiegeAudioMode,torchBedProximity,TORCH_BED_RADIUS,casterCueForEvent,stalkerCueForEvent,wardenCueForEvent,type JournalInput} from '../src/client/controller';import {LORE_ENTRIES,unlockedLoreIds,newlyUnlockedLore,loreEntryViews,formatLoreToast,type LoreState} from '../src/shared/lore';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {createGame,addPlayer,spawn} from '../src/simulation/game';import {combatCues,eventCues,swingProfile} from '../src/client/combat-feedback';import {deadzone,deadzoneValue,DEADZONE_PRESETS,readPad,captionText,captionAllowed,CAPTION_RATE_LIMIT_MS,CAPTION_MAX_CHARS,touchStickVector,TOUCH_STICK_RADIUS,touchSensitivityValue,compassBearing,deriveObjectiveLine,deriveJournalSummary,bossBarState,DIFFICULTY_CHOICES,DEFAULT_DIFFICULTY,difficultyId,difficultyChoice,isDifficultyId,deriveRunRecap,formatRunTime,bashChordReady,formatBashHint,bossSiegeAudioMode,torchBedProximity,TORCH_BED_RADIUS,casterCueForEvent,stalkerCueForEvent,wardenCueForEvent,colossusCueForEvent,type JournalInput} from '../src/client/controller';import {LORE_ENTRIES,unlockedLoreIds,newlyUnlockedLore,loreEntryViews,formatLoreToast,type LoreState} from '../src/shared/lore';
 test('combat feedback ignores joins, replayed snapshots and reconnect gaps',()=>{const g=createGame();addPlayer(g,'p','P');assert.deepEqual(combatCues(undefined,g,'p'),[]);assert.deepEqual(combatCues(g,g,'p'),[]);const next=structuredClone(g);next.time=2;next.actors.find(a=>a.id==='p')!.hp=1;assert.deepEqual(combatCues(g,next,'p'),[]);});
 test('combat feedback follows confirmed swings and health loss with range and impact limits',()=>{const g=createGame();g.actors=[];const p=addPlayer(g,'p','P');for(let i=0;i<5;i++)spawn(g,'zombie',p.x+1,p.z);spawn(g,'zombie',70,-400);const next=structuredClone(g);next.time=.1;const n=next.actors.find(a=>a.id==='p')!;n.attackSerial=1;n.hp-=10;n.weapon='hammer';for(const a of next.actors)if(a.kind==='zombie')a.hp-=5;const cues=combatCues(g,next,'p');assert.equal(cues.filter(c=>c.kind==='impact').length,3);assert.equal(cues.filter(c=>c.kind==='swing').length,1);assert.equal(cues.find(c=>c.kind==='swing')!.weapon,'hammer');assert.ok(cues.some(c=>c.kind==='hurt'));assert.ok(cues.some(c=>c.kind==='equip'));assert.ok(cues.filter(c=>c.kind==='impact').every(c=>c.material==='flesh'));assert.ok(cues.every(c=>c.volume>0&&c.volume<=1));assert.deepEqual(combatCues(next,{...next,time:.2},'p'),[]);
 const armed=structuredClone(next),replay=structuredClone(armed);replay.time=.3;assert.deepEqual(combatCues(armed,replay,'p'),[]);
@@ -222,4 +222,19 @@ assert.equal(stalkerCueForEvent('The Shroud Warden howls'),null);
 assert.equal(wardenCueForEvent('The Shroud Warden howls — the shroud thickens!'),'enrage');
 assert.equal(wardenCueForEvent('The Warden enrages'),'enrage');
 assert.equal(wardenCueForEvent('The Shroud Warden strikes'),null);
-assert.equal(wardenCueForEvent('A Shroud Stalker lunges!'),null);});
+assert.equal(wardenCueForEvent('A Shroud Stalker lunges!'),null);
+// Cycle-19: Shroud Colossus slam/phase caption cues + tolerant classifier.
+assert.equal(captionText('colossus-windup'),'The Shroud Colossus raises its fist!');
+assert.equal(captionText('colossus-slam'),'The Colossus splinters the earth!');
+assert.equal(captionText('colossus-phase2'),'The Shroud Colossus roars — its hide splits!');
+assert.equal(captionText('colossus-phase3'),'The Shroud Colossus cracks the earth — no mercy remains!');
+assert.equal(colossusCueForEvent('The Shroud Colossus raises its fist!'),'windup');
+assert.equal(colossusCueForEvent('A Shroud Colossus gathers for a slam'),'windup');
+assert.equal(colossusCueForEvent('The Colossus splinters the earth!'),'slam');
+assert.equal(colossusCueForEvent('The Shroud Colossus slams the ground!'),'slam');
+assert.equal(colossusCueForEvent('The Colossus strikes the stone!'),'slam');
+assert.equal(colossusCueForEvent('The Shroud Colossus roars — its hide splits!'),'phase2');
+assert.equal(colossusCueForEvent('The Shroud Colossus cracks the earth — no mercy remains!'),'phase3');
+assert.equal(colossusCueForEvent('The Shroud Colossus enters phase 3'),'phase3');
+assert.equal(colossusCueForEvent('The Shroud Warden howls — the shroud thickens!'),null);
+assert.equal(colossusCueForEvent('A Shroud Stalker rakes QA Knight!'),null);});

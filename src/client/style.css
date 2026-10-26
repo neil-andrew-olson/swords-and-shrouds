@@ -301,3 +301,17 @@ body.touch-device #perf{display:none}
 #bashBtn{background:#2a2416cc!important;border-color:#cba56866!important;color:#f0e7d0!important}
 #bashBtn:disabled{opacity:.6}
 .guide-bash{margin:10px 0 0;font-size:11px;line-height:1.5;color:#cfc6ab;border-left:2px solid var(--gold);padding-left:8px}
+/* =============================================================================================
+   Cycle-19 HUD fix: boss-siege bar legibility. The bar now sits above the world objective-marker
+   layer (z-index 9995) and gets a subtle backdrop; while a boss siege is up the redundant siege
+   banner, next-objective line and floating wayfinding labels are suppressed so name/HP/phase never
+   collide (desktop + mobile, incl. Colossus).
+   ============================================================================================= */
+#bossSiegeBar{z-index:10000;padding:7px 12px 6px;border:1px solid #ff8a8633;border-radius:8px;background:linear-gradient(180deg,#0b1416e6,#0b1416b3);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+#bossSiegeMeta{white-space:nowrap;gap:12px;font-weight:600}
+#bossSiegeBar.phase-frenzied #bossSiegePhase{color:#ffb066}
+#bossSiegeBar.phase-final #bossSiegePhase{color:#ff5a6e}
+body.boss-siege #siege,body.boss-siege #objectiveLine{display:none!important}
+body.boss-siege #ss-objectives{opacity:0;transition:opacity .18s ease-out}
+@media(prefers-reduced-motion:reduce){body.boss-siege #ss-objectives{transition:none}}
+@media(pointer:coarse) and (max-width:520px){#bossSiegeBar{width:min(340px,92vw);padding:6px 9px 5px}}

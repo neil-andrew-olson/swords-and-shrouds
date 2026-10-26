@@ -163,7 +163,7 @@ export class WorldView{
   private readonly boltSlots=Array.from({length:16},()=>({id:'',active:false,handled:false,seen:0,x:0,z:0,trail:0}));
   private casterPreview={kind:'' as ''|'telegraph'|'bolt'|'impact',x:0,z:0,fromX:0,fromZ:0,start:0,end:0,handled:false};private lastFrameTime=0;
   private readonly stalkerTints=new Map<string,Map<THREE.Material,{color:number;emissive:number;ei:number}>>();
-  private readonly stalkerSerial=new Map<string,number>();private stalkerLunges=0;private stalkerLastLungeAt=0;private stalkerWindupVisible=false;private stalkerEmberAt=0;private stalkerPreviewUntil=0;private stalkerPreviewStart=0;private stalkerPreviewX=0;private stalkerPreviewZ=0;
+  private readonly stalkerSerial=new Map<string,number>();private stalkerLunges=0;private stalkerLastLungeAt=0;private stalkerWindupVisible=false;private stalkerEmberAt=0;private stalkerPreviewUntil=0;private stalkerPreviewStart=0;private stalkerPreviewX=0;private stalkerPreviewZ=0;private colossusRing:THREE.Mesh|null=null;private hazardMesh:THREE.InstancedMesh|null=null;private readonly colossusDummy=new THREE.Object3D();private colossusPreview={kind:'' as ''|'telegraph'|'slam'|'pool',x:0,z:0,start:0,end:0,handled:false};private colossusImpacts=0;private lastColossusEventId=0;private colossusTeleVisible=false;private colossusDraws=0;private colossusPhase=1;private colossusCharge=0;private colossusPoolCount=0;private hazardPreviewUntil=0;private hazardPreviewX=0;private hazardPreviewZ=0;
   private casterFrame=0;private casterImpacts=0;private casterLaunches=0;private casterLastLaunchAt=0;private casterTelegraphVisible=false;private casterBoltCount=0;
   private windmillGroup:THREE.Object3D|null=null;private windmillInner:THREE.Object3D|null=null;private windmillAngle=0;private windmillSpeed=0;private windmillVisible=false;
   private bashRing:THREE.Mesh|null=null;private bashLife=0;private bashCount=0;private lastBashAt=0;private bashX=0;private bashZ=0;private bashPower=1;private bashLastRef:unknown=null;private lastBashEventId=0;
@@ -190,7 +190,8 @@ export class WorldView{
   private groundFrost:{m:THREE.MeshStandardMaterial;base:THREE.Color}[]=[];
   private vignetteEl:HTMLDivElement|null=null;private vignetteLife=0;private vignetteOpacity=0;private vignetteDirX=0;private vignetteDirY=0;
   private reducedMotion=false;private reducedMotionOverride:boolean|null=null;private hitStop=0;private kickPitch=0;private kickRoll=0;private fovPunch=0;private lastHeavyAt=0;private lastHitAt=0;private lastHeavySerial=-1;private visualScale=1;
-  private characterClothWind=true;private hitFeedbackHold=false;private lastHitActorId:string|null=null;private qaWeaponPreview:WeaponId|null=null;private objectiveLayer:HTMLDivElement|null=null;private bossAura:THREE.Mesh|null=null;private bossState={active:false,actorId:null as string|null,scale:1,auraVisible:false,tint:'#ffffff',reducedMotion:false,phase:1};private bossTintedRig:string|null=null;private bossTintPhase=1;private bossEmberAt=0;private readonly bossTintOrig=new Map<THREE.Material,{color:number;emissive:number;emissiveIntensity:number}>();private objectiveMarkers:{el:HTMLDivElement;dot:HTMLSpanElement;text:HTMLSpanElement}[]=[];private lastHitStopMs=0;private lastKickAt=0;private lastKickMag=0;private lastVignetteAt=0;private lastVignetteMag=0;private heavyCount=0;private damageCount=0;
+  private characterClothWind=true;private hitFeedbackHold=false;private lastHitActorId:string|null=null;private qaWeaponPreview:WeaponId|null=null;private objectiveLayer:HTMLDivElement|null=null;private bossAura:THREE.Mesh|null=null;
+  private flagTexture:THREE.Texture|null=null;private bannerMuted=false;private bossState={active:false,actorId:null as string|null,scale:1,auraVisible:false,tint:'#ffffff',reducedMotion:false,phase:1};private bossTintedRig:string|null=null;private bossTintPhase=1;private bossEmberAt=0;private readonly bossTintOrig=new Map<THREE.Material,{color:number;emissive:number;emissiveIntensity:number}>();private objectiveMarkers:{el:HTMLDivElement;dot:HTMLSpanElement;text:HTMLSpanElement}[]=[];private lastHitStopMs=0;private lastKickAt=0;private lastKickMag=0;private lastVignetteAt=0;private lastVignetteMag=0;private heavyCount=0;private damageCount=0;
   private lastAmbientTint=new THREE.Color(0xffffff);private lastSaturation=1;
   /** Landmark coordinates per region for the QA landmark views (ruins-builder placements). */
   private landmarkCoords:{green:{x:number;z:number};ashen:{x:number;z:number};crown:{x:number;z:number}}={
@@ -243,7 +244,7 @@ try{const gl=this.renderer.getContext();const ext=gl.getExtension('WEBGL_debug_r
   // Fixed pool of torch lights; sources are re-assigned to the nearest flames every frame.
   for(let i=0;i<MAX_TORCH_LIGHTS;i++){const light=new THREE.PointLight(0xff9d42,0,12,1.8);light.castShadow=false;this.scene.add(light);this.lightPool.push(light);}
   this.fx=new CombatEffects(this.scene);this.scene.add(this.legacyTowerGroup);this.legacyTowerGroup.visible=false;this.initFlameInstances();this.initDamageLabels();
-   this.initWeather();this.initObjectiveMarkers();this.initBossAura();this.initBashFx();this.initWindmillSails();this.initCasterFx();try{performance.mark('ss:sceneConstructStart');}catch{}
+   this.initWeather();this.initObjectiveMarkers();this.initBossAura();this.initBashFx();this.initWindmillSails();this.initCasterFx();this.initColossusFx();try{performance.mark('ss:sceneConstructStart');}catch{}
   for(const region of REGIONS){const ground=box(this.scene,5,-.3,region.offset-80,175,.6,250,region.color,true);ground.castShadow=false;const m=(ground.material as THREE.MeshStandardMaterial).clone();m.map=m.map!.clone();m.map.repeat.set(38,55);ground.material=m;tagSurface(ground,'ground');}
   const route=[START,...REGIONS.flatMap(r=>[{x:0,z:r.offset+12},{x:0,z:r.offset+24},{x:42,z:r.offset-45},{x:42,z:r.offset-55},{x:42,z:r.offset-43},{x:-24,z:r.offset-113},{x:-24,z:r.offset-123},{x:-24,z:r.offset-112},{x:0,z:r.offset-200}]),NEST];
   {
@@ -732,7 +733,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    return {calls:info.render.calls,triangles:info.render.triangles,software:this.softwareRenderer,weather:{region:this.weatherRegion,phase:this.weatherStates[this.weatherRegion].name,intensity:+this.weatherStates[this.weatherRegion].intensity.toFixed(3)},contentFocus:this.qaView?{name:this.qaView.name,x:this.qaView.x,z:this.qaView.z}:null,points:info.render.points,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,objects,meshes,materials:materials.size,lights,skinned,landscape:this.scene.userData.landscapeDebug??null,quality:this.quality,pixelRatio:this.postfx?.pixelRatio??1,fps:frameMs>0?1000/frameMs:0,frameMs};
   }
   private installPerfHooks(){
-   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssObjectives?:()=>unknown;__ssBossVisual?:()=>unknown;__ssMood?:()=>unknown;__ssWindmill?:()=>unknown;__ssMarkers?:()=>unknown;__ssMoveFx?:()=>unknown;__ssCasters?:()=>unknown;__ssProjectiles?:()=>unknown;__ssCasterFx?:()=>unknown;__ssStalkers?:()=>unknown;__ssStalkerFx?:()=>unknown;__ssTriggerStalkerFx?:(kind?:'lunge'|'hit')=>unknown;__ssTriggerCasterFx?:(kind?:'telegraph'|'bolt'|'impact')=>unknown;__ssTriggerMoveFx?:(kind?:'step'|'land')=>unknown;__ssBashFx?:()=>unknown;__ssTriggerBashFx?:(x?:number,z?:number,power?:number)=>unknown;__ssBashFxTrigger?:(x?:number,z?:number,power?:number)=>unknown;__ssSetMood?:(mode?:'normal'|'victory'|'defeat'|null)=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
+   const view=this;const win=window as unknown as {__ssPerf?:()=>unknown;__ssCharacterPreview?:(actorId?:string|null)=>{ok:boolean;actorId:string|null;name:string|null};__ssQAView?:(name?:string|null)=>{ok:boolean;name:string|null;pose:unknown};__ssRegionInfo?:()=>unknown;__ssSetLandmark?:(region:'green'|'ashen'|'crown',x:number|null,z?:number)=>unknown;__ssWeather?:()=>unknown;__ssSetWeather?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssWeatherForce?:(region?:'march'|'moor'|'crown'|null,phase?:string|null,intensity?:number|null)=>unknown;__ssLoadTimings?:()=>unknown;__ssPreviewBody?:(name?:string|null,distance?:number|{distance?:number})=>unknown;__ssCombatFx?:()=>unknown;__ssSetHitFeedbackHold?:(value?:boolean|null)=>unknown;__ssWeaponState?:()=>unknown;__ssEquipWeapon?:(id?:string|null,opts?:{preview?:boolean})=>unknown;__ssWeaponReadiness?:()=>unknown;__ssObjectives?:()=>unknown;__ssBossVisual?:()=>unknown;__ssMood?:()=>unknown;__ssWindmill?:()=>unknown;__ssMarkers?:()=>unknown;__ssMoveFx?:()=>unknown;__ssCasters?:()=>unknown;__ssProjectiles?:()=>unknown;__ssCasterFx?:()=>unknown;__ssStalkers?:()=>unknown;__ssStalkerFx?:()=>unknown;__ssColossus?:()=>unknown;__ssHazards?:()=>unknown;__ssColossusFx?:()=>unknown;__ssTriggerColossusFx?:(kind?:'telegraph'|'slam'|'pool')=>unknown;__ssTriggerStalkerFx?:(kind?:'lunge'|'hit')=>unknown;__ssTriggerCasterFx?:(kind?:'telegraph'|'bolt'|'impact')=>unknown;__ssTriggerMoveFx?:(kind?:'step'|'land')=>unknown;__ssBashFx?:()=>unknown;__ssTriggerBashFx?:(x?:number,z?:number,power?:number)=>unknown;__ssBashFxTrigger?:(x?:number,z?:number,power?:number)=>unknown;__ssSetMood?:(mode?:'normal'|'victory'|'defeat'|null)=>unknown;__ssCharacterFx?:()=>({quality:string;clothWind:boolean});__ssEnemyVariants?:()=>unknown;__ssClearWeather?:()=>unknown;__ssSetReducedMotion?:(value?:boolean|null)=>unknown;__ssSurfaceAt?:(x:number,z:number)=>unknown;__ssDeviceProfile?:()=>unknown;__ssPreviewEnemy?:(appearance?:string|null,distance?:number|{distance?:number})=>unknown;__ssEliteUndeadIds?:()=>string[];__ssEliteUndeadInfo?:()=>{id:string;name:string;tier:number}[];__ssQAPose?:(pose?:{x:number;z:number;yaw:number;pitch:number;height:number}|null)=>{ok:boolean;name:string|null;pose:unknown};__ssQuality?:(tier?:string)=>{tier:string;applied?:boolean}};
    win.__ssPerf=()=>view.perfStats();
    win.__ssCharacterPreview=(actorId?:string|null)=>{return view.characterPreview(actorId===undefined?undefined:actorId);};
    win.__ssQAView=(name?:string|null)=>{return view.qaViewpoint(name===undefined?null:name);};
@@ -759,6 +760,10 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    win.__ssCasterFx=()=>view.casterFxInfo();
    win.__ssStalkers=()=>view.stalkersInfo();
    win.__ssStalkerFx=()=>view.stalkerFxInfo();
+   win.__ssColossus=()=>view.colossusInfo();
+   win.__ssHazards=()=>view.hazardsInfo();
+   win.__ssColossusFx=()=>view.colossusFxInfo();
+   win.__ssTriggerColossusFx=(kind?:'telegraph'|'slam'|'pool')=>view.triggerColossusFx(kind??'telegraph');
    win.__ssTriggerStalkerFx=(kind?:'lunge'|'hit')=>view.triggerStalkerFx(kind??'lunge');
    win.__ssTriggerCasterFx=(kind?:'telegraph'|'bolt'|'impact')=>view.triggerCasterFx(kind??'telegraph');
    win.__ssTriggerMoveFx=(kind?:'step'|'land')=>view.triggerMoveFx(kind);
@@ -991,7 +996,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     this.bossState.active=false;this.bossState.actorId=null;this.bossState.scale=1;this.bossState.auraVisible=false;this.bossState.tint='#ffffff';this.bossState.reducedMotion=reduced;this.bossState.phase=1;
     return;
    }
-   const id=bossActor!.id;const phase=Math.max(1,Math.min(2,((bossActor as {bossPhase?:number}).bossPhase)??(g.siege?.bossPhase)??((bossActor as {enraged?:boolean}).enraged?2:1)));const enraged=phase>=2;
+   const id=bossActor!.id;const phase=Math.max(1,Math.min(3,((bossActor as {bossPhase?:number}).bossPhase)??(g.siege?.bossPhase)??((bossActor as {enraged?:boolean}).enraged?2:1)));const enraged=phase>=2;const colossus=!!(bossActor as {colossus?:boolean}).colossus||g.siege?.bossKind==='colossus';
    if(this.bossTintedRig!==id||this.bossTintPhase!==phase){
     this.restoreBossTint();this.bossTintedRig=id;this.bossTintPhase=phase;
     const rig=this.animated.get(id)??null;
@@ -999,8 +1004,8 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
      rig.model.traverse(o=>{if(o instanceof THREE.Mesh)for(const mat of Array.isArray(o.material)?o.material:[o.material]){
       const m=mat as THREE.MeshStandardMaterial;if(!m.isMeshStandardMaterial||this.bossTintOrig.has(m))continue;
       this.bossTintOrig.set(m,{color:m.color.getHex(),emissive:m.emissive?m.emissive.getHex():0,emissiveIntensity:m.emissiveIntensity??1});
-      m.color.lerp(this.tmpColor2.setHex(enraged?0x7a2a5a:0x8f2a38),enraged?0.5:0.42);
-      if(m.emissive){m.emissive.lerp(this.tmpColor2.setHex(enraged?0x3a0f3f:0x5a1018),0.6);m.emissiveIntensity=Math.max(m.emissiveIntensity??1,enraged?.85:.55);}
+      m.color.lerp(this.tmpColor2.setHex(colossus?(phase>=3?0x5f3f7a:0x4f7a5f):enraged?0x7a2a5a:0x8f2a38),colossus?0.55:enraged?0.5:0.42);
+      if(m.emissive){m.emissive.lerp(this.tmpColor2.setHex(colossus?(phase>=3?0x2f1a4a:0x1f3a2a):enraged?0x3a0f3f:0x5a1018),0.6);m.emissiveIntensity=Math.max(m.emissiveIntensity??1,colossus?.75:enraged?.85:.55);}
      }});
     }
    }
@@ -1008,13 +1013,16 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     this.bossAura.visible=true;
     const mesh=this.animated.get(id)?.model??null;const px=mesh?mesh.position.x:bossActor!.x,pz=mesh?mesh.position.z:bossActor!.z;
     this.bossAura.position.set(px,0.07,pz);
-    const pulse=reduced?1:1+Math.sin(time*(enraged?4.2:2.4))*(enraged?.3:.12);
-    const op=reduced?.46:(enraged?.62:.4)+Math.sin(time*(enraged?4.2:2.4))*(enraged?.16:.1);
-    this.bossAura.scale.set((enraged?1.35:1)*pulse,1,(enraged?1.35:1)*pulse);
-    const bmat=this.bossAura.material as THREE.MeshBasicMaterial;bmat.opacity=op;bmat.color.setHex(enraged?0xa0305a:0xb43a4a);
-    if(enraged&&!reduced&&time-this.bossEmberAt>.22){this.bossEmberAt=time;this.tmpV.set(this.bossAura.position.x,0.25,this.bossAura.position.z);this.fx.embers(this.tmpV,1);}
+    const rate=enraged?(colossus?3.6:4.2):2.4;
+    const amp=reduced?0:(enraged?.3:.12);
+    const pulse=1+Math.sin(time*rate)*amp;
+    const baseScale=colossus?1.55:1.15;const phaseScale=colossus?(phase>=3?1.2:phase>=2?1.1:1):(enraged?1.2:1);
+    const op=reduced?.46:((colossus?.58:enraged?.62:.4)+Math.sin(time*rate)*(colossus?.14:enraged?.16:.1));
+    this.bossAura.scale.set(baseScale*phaseScale*pulse,1,baseScale*phaseScale*pulse);
+    const bmat=this.bossAura.material as THREE.MeshBasicMaterial;bmat.opacity=op;bmat.color.setHex(colossus?(phase>=3?0x6a4a9a:0x5f9f7f):enraged?0xa0305a:0xb43a4a);
+    if((enraged||colossus)&&!reduced&&time-this.bossEmberAt>(colossus?.28:.22)){this.bossEmberAt=time;this.tmpV.set(this.bossAura.position.x,0.25,this.bossAura.position.z);this.fx.embers(this.tmpV,1);}
    }
-   this.bossState.active=true;this.bossState.actorId=id;this.bossState.scale=1.15;this.bossState.auraVisible=!!this.bossAura?.visible;this.bossState.tint=enraged?'#7a2a5a':'#8f2a38';this.bossState.reducedMotion=reduced;this.bossState.phase=phase;
+   this.bossState.active=true;this.bossState.actorId=id;this.bossState.scale=colossus?1.6:1.15;this.bossState.auraVisible=!!this.bossAura?.visible;this.bossState.tint=colossus?(phase>=3?'#5f3f7a':'#4f7a5f'):enraged?'#7a2a5a':'#8f2a38';this.bossState.reducedMotion=reduced;this.bossState.phase=phase;
   }
   /** Live reduced-motion state: QA override > stored preference > media query. */
   private reducedActive(){let media=false;try{media=matchMedia('(prefers-reduced-motion: reduce)').matches;}catch{}return this.reducedMotionOverride??(this.reducedMotion||media);}
@@ -1146,6 +1154,62 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    bm.count=boltN;bm.visible=boltN>0;this.casterBoltCount=boltN;
    bm.instanceMatrix.needsUpdate=true;if(bm.instanceColor)bm.instanceColor.needsUpdate=true;
   }
+  /** Colossus presentation: slam telegraph ring, pooled corruption-pool decals. */
+  private initColossusFx(){
+   try{
+    const ringGeo=new THREE.RingGeometry(1,1.25,48);ringGeo.rotateX(-Math.PI/2);
+    const ringMat=new THREE.MeshBasicMaterial({color:0x8fd6a0,transparent:true,opacity:.5,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide});
+    const ring=new THREE.Mesh(ringGeo,ringMat);ring.visible=false;ring.frustumCulled=false;ring.renderOrder=2;this.scene.add(ring);this.colossusRing=ring;
+    const poolGeo=new THREE.CircleGeometry(1,24);poolGeo.rotateX(-Math.PI/2);
+    const poolMat=new THREE.MeshBasicMaterial({color:0x5a2a8a,transparent:true,opacity:.3,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide});
+    const pools=new THREE.InstancedMesh(poolGeo,poolMat,6);pools.count=0;pools.frustumCulled=false;pools.renderOrder=1;this.scene.add(pools);this.hazardMesh=pools;
+   }catch{}
+  }
+  private updateColossusFx(g:Game,me:Actor|undefined,time:number,dt:number){
+   const ring=this.colossusRing,pools=this.hazardMesh;if(!ring||!pools)return;
+   const fx=this.qaView?this.qaView.x:(me?.x??this.camera.position.x),fz=this.qaView?this.qaView.z:(me?.z??this.camera.position.z);
+   const reduced=this.reducedActive();
+   let charging:number=0,slamX=0,slamZ=0,phase=1;
+   for(const a of g.actors){if(!a.colossus||a.hp<=0)continue;if(Math.hypot(a.x-fx,a.z-fz)>110)continue;phase=Math.max(phase,a.bossPhase??1);if((a.slamCharge??0)>charging){charging=a.slamCharge??0;slamX=a.slamTarget?.x??a.x;slamZ=a.slamTarget?.z??a.z;}}
+   const pv=this.colossusPreview;
+   if(pv.kind==='telegraph'&&time<pv.end){charging=Math.max(.001,1.4-(time-pv.start));slamX=pv.x;slamZ=pv.z;}
+   const tele=charging>0;
+   if(tele){const progress=Math.min(1,1-charging/1.4);const pulse=reduced?1:1+Math.sin(time*5)*.06;ring.visible=true;ring.position.set(slamX,.08,slamZ);ring.scale.setScalar((1.4+progress*4.1)*pulse);(ring.material as THREE.MeshBasicMaterial).opacity=reduced?.5:(.28+progress*.45);}
+   else ring.visible=false;
+   // events: impacts, wall hits, phase howls (world FX only; phase handled by state)
+   for(const ev of g.events){if(ev.id<=this.lastColossusEventId)continue;this.lastColossusEventId=ev.id;
+    if(/Colossus splinters the earth/i.test(ev.text)){this.colossusImpacts++;this.tmpV.set(ev.x??slamX,1.2,ev.z??slamZ);this.fx.sparks(this.tmpV,'undead',[.9,.5,1.3]);this.tmpV.set(ev.x??slamX,.15,ev.z??slamZ);this.fx.dust(this.tmpV,1.2);this.fx.smoke(this.tmpV.set(ev.x??slamX,.4,ev.z??slamZ));if(!reduced)this.shake=Math.min(1,this.shake+.35);}
+    else if(/Colossus strikes the stone/i.test(ev.text)){this.tmpV.set(ev.x??slamX,.5,ev.z??slamZ);this.fx.dust(this.tmpV,.5);}
+   }
+   if(pv.kind==='slam'&&!pv.handled&&time>=pv.end){pv.handled=true;this.colossusImpacts++;this.tmpV.set(pv.x,1.2,pv.z);this.fx.sparks(this.tmpV,'undead',[.9,.5,1.3]);this.tmpV.set(pv.x,.15,pv.z);this.fx.dust(this.tmpV,1.2);if(!reduced)this.shake=Math.min(1,this.shake+.35);this.hazardPreviewUntil=time+6;this.hazardPreviewX=pv.x;this.hazardPreviewZ=pv.z;}
+   if(pv.kind==='pool'){this.hazardPreviewUntil=time+6;this.hazardPreviewX=pv.x;this.hazardPreviewZ=pv.z;}
+   // pooled dark-violet corruption pools from authoritative hazards + QA preview
+   let n=0;const pulse=reduced?1:1+Math.sin(time*.8)*.06;
+   for(const h of g.hazards){if(n>=6)break;if(Math.hypot(h.x-fx,h.z-fz)>110)continue;this.colossusDummy.position.set(h.x,.06,h.z);this.colossusDummy.rotation.set(0,0,0);this.colossusDummy.scale.setScalar(h.radius*Math.min(1,Math.max(0,(h.expiresAt-time)/1.2))*pulse);this.colossusDummy.updateMatrix();pools.setMatrixAt(n++,this.colossusDummy.matrix);}
+   if(time<this.hazardPreviewUntil&&n<6){this.colossusDummy.position.set(this.hazardPreviewX,.06,this.hazardPreviewZ);this.colossusDummy.rotation.set(0,0,0);this.colossusDummy.scale.setScalar(4.5*pulse);this.colossusDummy.updateMatrix();pools.setMatrixAt(n++,this.colossusDummy.matrix);}
+   pools.count=n;pools.visible=n>0;pools.instanceMatrix.needsUpdate=true;
+   this.colossusTeleVisible=tele;this.colossusDraws=(tele?1:0)+(n>0?1:0);this.colossusPhase=phase;this.colossusCharge=charging;this.colossusPoolCount=n;
+  }
+  /** QA preview: telegraph/slam/pool at the QA focus (deterministic stills). */
+  triggerColossusFx(kind:'telegraph'|'slam'|'pool'){
+   const g=this.lastGame,me=g?.actors.find(a=>a.id===this.lastMeId);
+   const x=this.qaView?this.qaView.x:(me?.x??this.camera.position.x),z=this.qaView?this.qaView.z:(me?.z??this.camera.position.z);
+   const t=this.lastFrameTime,pv=this.colossusPreview;pv.kind=kind;pv.x=x;pv.z=z;pv.start=t;pv.handled=false;
+   pv.end=kind==='telegraph'?t+1.4:kind==='slam'?t+.3:t;
+   if(kind==='slam'){this.hazardPreviewUntil=t+6;this.hazardPreviewX=x;this.hazardPreviewZ=z;}
+   return this.colossusFxInfo();
+  }
+  colossusInfo(){
+   const g=this.lastGame;let count=0,phase=1,charge=0;const ids:string[]=[];
+   if(g)for(const a of g.actors){if(!a.colossus)continue;count++;ids.push(a.id);phase=Math.max(phase,a.bossPhase??1);charge=Math.max(charge,a.slamCharge??0);}
+   return {count,ids,phase,slamCharge:+charge.toFixed(2),colossi:g?.stats.colossi??0,slams:g?.stats.slams??0};
+  }
+  hazardsInfo(){
+   const g=this.lastGame;const positions:{x:number;z:number}[]=[],expires:number[]=[];let count=0;
+   if(g)for(const h of g.hazards){count++;positions.push({x:+h.x.toFixed(2),z:+h.z.toFixed(2)});expires.push(+(h.expiresAt-(g.time??0)).toFixed(1));}
+   return {count,positions,expires};
+  }
+  colossusFxInfo(){return {telegraphVisible:this.colossusTeleVisible,slams:this.lastGame?.stats.slams??0,impacts:this.colossusImpacts,pools:this.colossusPoolCount,draws:this.colossusDraws,reducedMotion:this.reducedActive()};}
   /** QA preview: paint a 0.45 s stalker lunge windup ring at the QA focus. */
   triggerStalkerFx(kind:'lunge'|'hit'){
    const g=this.lastGame,me=g?.actors.find(a=>a.id===this.lastMeId);
@@ -1668,7 +1732,8 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    // Banner is the functional keep/capture point; rear architecture stays behind it.
    this.queueBox(c.x,.2,c.z,3,.4,3,0x858a7b,true);this.queueBox(c.x,2.6,c.z,.16,5.2,.16,palette.wood,true);
    const flagGeo=new THREE.PlaneGeometry(1.8,1.4,8,4);flagGeo.translate(.9,0,0);
-   const flag=new THREE.Mesh(flagGeo,new THREE.MeshStandardMaterial({color:0x9a4d47,side:THREE.DoubleSide,roughness:.8}));flag.position.set(c.x,4.3,c.z);flag.castShadow=true;this.scene.add(flag);this.flags.set(c.id,flag);this.flagMeshes.push({mesh:flag,seed:this.flagMeshes.length*1.7});
+   if(!this.flagTexture){const cv=document.createElement('canvas');cv.width=256;cv.height=192;const cx=cv.getContext('2d')!;cx.fillStyle='#f2ead6';cx.fillRect(0,0,256,192);cx.fillStyle='rgba(70,48,32,.28)';for(let y=0;y<192;y+=24)cx.fillRect(0,y,256,5);cx.strokeStyle='#d8b46a';cx.lineWidth=10;cx.strokeRect(14,14,228,164);cx.fillStyle='#d8b46a';cx.beginPath();cx.moveTo(128,44);cx.lineTo(170,96);cx.lineTo(128,148);cx.lineTo(86,96);cx.closePath();cx.fill();cx.fillStyle='#6b4a2f';cx.beginPath();cx.moveTo(128,66);cx.lineTo(150,96);cx.lineTo(128,126);cx.lineTo(106,96);cx.closePath();cx.fill();this.flagTexture=new THREE.CanvasTexture(cv);this.flagTexture.colorSpace=THREE.SRGBColorSpace;}
+    const flag=new THREE.Mesh(flagGeo,new THREE.MeshStandardMaterial({map:this.flagTexture,color:0x9a4d47,side:THREE.DoubleSide,roughness:.92}));flag.position.set(c.x,4.35,c.z);flag.castShadow=true;this.scene.add(flag);this.flags.set(c.id,flag);this.flagMeshes.push({mesh:flag,seed:this.flagMeshes.length*1.7});
    const keep=new THREE.Group();keep.position.set(c.x-5,0,c.z-6);const isCitadel=c.id.includes('citadel'),isBorder=c.id.includes('border');const kWall=isCitadel?0x3d5560:isBorder?0x404d57:0x2d2433;const kAccent=isCitadel?0x2d6e75:isBorder?0x526070:0x3d2d3a;box(keep,0,2.2,0,4,4.4,4,kWall,true);box(keep,0,4.7,0,4.6,.6,4.6,kAccent);if(isCitadel){box(keep,0,5.5,0,2,.5,2,0x4a8a95);box(keep,0,6.2,0,.3,1.2,.3,palette.gold);}if(isBorder){box(keep,2.2,4.3,0,.3,2.5,.3,palette.iron);box(keep,-2.2,4.3,0,.3,2.5,.3,palette.iron);}if(!isCitadel&&!isBorder){box(keep,0,5,0,4.5,.15,4.5,0x2a1f30);box(keep,0,3,1.5,.3,1.5,.3,0x4a3a55);}this.scene.add(keep);this.keeps.set(c.id,keep);this.mergeGroupStatic(keep,true,true);
    this.fire(c.x-3.6,c.z+11);this.fire(c.x+3.6,c.z+11);
    const gateParent=new THREE.Group();gateParent.position.set(c.x,2,c.z+10);box(gateParent,0,0,0,5.5,4,.35,palette.wood,true);this.scene.add(gateParent);this.gates.set(c.id,gateParent as unknown as THREE.Mesh);gateParent.visible=false;
@@ -1713,6 +1778,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    if(this.corruptionDecals){const fx=this.qaView?this.qaView.x:(me?.x??this.camera.position.x),fz=this.qaView?this.qaView.z:(me?.z??this.camera.position.z);this.corruptionDecals.visible=dist({x:fx,z:fz},NEST)<160;}
    for(const f of this.flagMeshes){const pos=f.mesh.geometry.attributes.position;for(let i=0;i<pos.count;i++){const px=pos.getX(i);pos.setZ(i,Math.sin(time*5.5+px*3+f.seed)*(px/1.8)*.22);}pos.needsUpdate=true;}
    this.updateEffects(dt*this.visualScale,time,me);
+   if(!this.bannerMuted&&this.ruinsUpdate){this.bannerMuted=true;this.scene.traverse(o=>{if(o instanceof THREE.Mesh&&o.name.startsWith('dressing:banners')){const m=(Array.isArray(o.material)?o.material[0]:o.material) as THREE.MeshStandardMaterial;if(m){m.color.multiplyScalar(.42);m.roughness=1;}}});}
    if(this.ruinsUpdate){
     // Content QA views: dressing/ruins are culled around the player distance (85 m) in normal play,
     // so a synthetic focus at the QA camera is needed for altar/furnace/well captures. Allocation is
@@ -1773,7 +1839,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
       if(a.id===me?.id){this.shake=Math.min(.35,this.shake+.2);this.onPlayerDamaged(g,me);}}
     const markerMesh=mesh.getObjectByName('marker') as THREE.Mesh;const markerDist=me?dist(a,me):Infinity;const markerEvil=a.kind==='zombie'||a.kind==='corrupted';const markerReduced=this.reducedActive();
      const markerVisible=!!me&&a.id!==me.id&&markerDist>6&&(a.hp>0||!!a.downed);markerMesh.visible=markerVisible;this.markerTotal++;
-     if(markerVisible){this.markerVisibleCount++;const bob=markerReduced?0:Math.sin(time*2.1+(a.id.length%5)*.7)*.045;markerMesh.position.y=2.55+bob;const mm=markerMesh.material as THREE.MeshBasicMaterial;mm.opacity=a.downed?.9:markerEvil?.85:.55;}this.previousHp.set(a.id,a.hp);const bar=mesh.getObjectByName('hp')!;bar.scale.x=Math.max(.001,a.hp/a.maxHp);bar.visible=a.hp<a.maxHp&&a.hp>0;mesh.scale.setScalar(a.boss?1.15:a.kind==='corrupted'?(a.maxHp>=200?1.4:1.15):1);
+     if(markerVisible){this.markerVisibleCount++;const bob=markerReduced?0:Math.sin(time*2.1+(a.id.length%5)*.7)*.045;markerMesh.position.y=2.55+bob;const mm=markerMesh.material as THREE.MeshBasicMaterial;mm.opacity=a.downed?.9:markerEvil?.85:.55;}this.previousHp.set(a.id,a.hp);const bar=mesh.getObjectByName('hp')!;bar.scale.x=Math.max(.001,a.hp/a.maxHp);bar.visible=a.hp<a.maxHp&&a.hp>0;mesh.scale.setScalar(a.colossus?1.6:a.boss?1.15:a.kind==='corrupted'?(a.maxHp>=200?1.4:1.15):1);
    }
    for(const effect of this.effects){effect.life-=dt;effect.mesh.position.y+=dt*1.5;effect.mesh.material.opacity=Math.max(0,effect.life/.8);if(effect.life<=0){if(effect.pooled){effect.mesh.visible=false;}else{this.scene.remove(effect.mesh);effect.mesh.material.map?.dispose();effect.mesh.material.dispose();}}}this.effects=this.effects.filter(e=>e.life>0);
    for(const item of this.debris){item.life-=dt;item.velocity.y-=9*dt;item.mesh.position.addScaledVector(item.velocity,dt);item.mesh.rotation.x+=dt*3;if(item.mesh.position.y<.12){item.mesh.position.y=.12;item.velocity.set(0,0,0);}if(item.life<=0){this.scene.remove(item.mesh);item.mesh.geometry.dispose();for(const m of Array.isArray(item.mesh.material)?item.mesh.material:[item.mesh.material])m.dispose();}}this.debris=this.debris.filter(d=>d.life>0);while(this.debris.length>48){const d=this.debris.shift()!;this.scene.remove(d.mesh);d.mesh.geometry.dispose();for(const m of Array.isArray(d.mesh.material)?d.mesh.material:[d.mesh.material])m.dispose();}
@@ -1825,6 +1891,7 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
    if(this.qaBody&&this.qaBodyActor){this.camera.getWorldQuaternion(this.rainQuat);this.tmpV2.set(0,0,-1).applyQuaternion(this.rainQuat);this.tmpV2.y=0;const flen=Math.hypot(this.tmpV2.x,this.tmpV2.z)||1;this.tmpV2.x/=flen;this.tmpV2.z/=flen;this.qaBody.position.set(this.camera.position.x+this.tmpV2.x*this.qaBodyDistance,0,this.camera.position.z+this.tmpV2.z*this.qaBodyDistance);this.qaBody.visible=true;this.qaBody.rotation.y=Math.atan2(this.camera.position.x-this.qaBody.position.x,this.camera.position.z-this.qaBody.position.z);this.qaBody.updateMatrixWorld(true);this.qaBodyRig?.update(this.qaBodyActor,false,dt*this.visualScale);}
    if(g&&!this.firstGameFrameMarked){this.firstGameFrameMarked=true;try{performance.mark('ss:firstGameFrame');}catch{}}
    if(g)this.updateCasterFx(g,me as Actor|undefined,time,dt);
+   if(g)this.updateColossusFx(g,me as Actor|undefined,time,dt);
    this.updateWindmill(dt,me as Actor|undefined,time);if(g)this.updateBashFx(dt);this.detectBashEvents(g,me as Actor|undefined);this.updateMood(g,dt);this.updateBossPresentation(g,time);
    if(g)this.updateObjectiveMarkers(g,me);
    if(this.postfx)this.postfx.render();else this.renderer.render(this.scene,this.camera);

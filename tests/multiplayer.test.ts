@@ -41,11 +41,13 @@ const bad=await client(url);clients.push(bad);bad.send({type:'join',code:'XXXXXX
  await wait(450);
  const pA=latest(resumed).game.projectiles??[],pB=latest(b).game.projectiles??[];
  assert.equal(pA.length,pB.length,'co-op projectile count synced');if(pA.length){assert.equal(pA[0].id,pB[0].id);assert.equal(pA[0].caster,castA.id);assert.ok(pA[0].speed>0);}
- assert.equal(latest(resumed).game.stats.casterBolts,latest(b).game.stats.casterBolts); // Cycle-18 stalker co-op sync from the index-3 snapshots, then Warden enrage phase sync on an index-4 boss.
+ assert.equal(latest(resumed).game.stats.casterBolts,latest(b).game.stats.casterBolts); // Cycle-18 stalker co-op sync from the index-3 snapshots, then Warden enrage phase sync on an index-2 boss.
  const stalkA=s3a.actors.filter((x:any)=>x.stalker),stalkB=s3b.actors.filter((x:any)=>x.stalker);assert.equal(stalkA.length,2,'two siege stalkers in the host snapshot');assert.equal(stalkB.length,2);assert.deepEqual(stalkA.map((x:any)=>x.id).sort(),stalkB.map((x:any)=>x.id).sort());assert.equal(s3a.stats.stalkers,s3b.stats.stalkers);
- roomGame.siege=null;process.env.SS_QA='1';b.send({type:'qa-siege',index:4});await wait(2900);process.env.SS_QA='';delete process.env.SS_QA;
- const roomBoss=roomGame.actors.find((x:any)=>x.boss);assert.ok(roomBoss,'index-4 boss spawned in co-op');assert.equal(roomBoss.bossPhase,2,'QA auto-enrage drove the boss to phase 2');
+ roomGame.siege=null;process.env.SS_QA='1';b.send({type:'qa-siege',index:2});await wait(2900);process.env.SS_QA='';delete process.env.SS_QA;
+ const roomBoss=roomGame.actors.find((x:any)=>x.boss);assert.ok(roomBoss,'index-2 boss spawned in co-op');assert.equal(roomBoss.bossPhase,2,'QA auto-enrage drove the boss to phase 2');
  const whA=latest(resumed).game,whB=latest(b).game;assert.equal(whA.siege?.bossPhase,2,'host sees enraged boss phase');assert.equal(whB.siege?.bossPhase,2,'joiner sees enraged boss phase');assert.equal(whA.actors.find((x:any)=>x.id===roomBoss.id).bossPhase,2);assert.ok(whA.events.some((e:any)=>e.text==='The Shroud Warden howls — the shroud thickens!'),'howl event synced');assert.equal(whA.stats.screamers,whB.stats.screamers);assert.equal(whA.stats.casters,whB.stats.casters);
+ // Cycle-19 Colossus co-op sync: index-4 boss is the Colossus in both snapshots with shared counters.
+ roomGame.siege=null;process.env.SS_QA='1';b.send({type:'qa-siege',index:4});await wait(500);process.env.SS_QA='';delete process.env.SS_QA;const cA=latest(resumed).game,cB=latest(b).game;const coA=cA.actors.find((x:any)=>x.colossus),coB=cB.actors.find((x:any)=>x.colossus);assert.ok(coA&&coB,'Colossus present in both co-op snapshots');assert.equal(coA.id,coB.id);assert.equal(cA.siege?.bossKind,'colossus');assert.equal(cB.siege?.bossKind,'colossus');assert.equal(cA.siege?.bossName,'Shroud Colossus');assert.equal(cA.stats.colossi,cB.stats.colossi);
 
  const otherState=other.messages.filter((m:any)=>m.type==='state').at(-1);
  assert.equal(otherState.game.difficulty,'knight','default/invalid-difficulty room snapshot is explicit knight');

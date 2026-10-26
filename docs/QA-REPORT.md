@@ -2506,3 +2506,18 @@ Live runs: deployed 34/34 (qa/live-batch21-deployed), feature/probes/views 110/1
 - DEFERRED: QA forced enrage still (owner phase2 proof), real stalker lunge still (owner), audio ear check, physical-device/real-GPU/perceptual, hardware rumble.
 
 Cycle-18 live deployment verified green for Shroud Stalker roster/FX/cues/caption and enraged-Warden owner proof, plus regressions. task-134 complete. Cycle-19 notes: Shroud Colossus (slam AoE/pools/phases), boss-bar HUD fix, teal-quad flag/banner fix.
+
+
+---
+
+## Iteration cycle 2026-10V (AAA loop, cycle 19) - Shroud Colossus + pools + HUD fix
+
+### Authoritative capture + regression - final build index-tknOtxLM.js (998,421 B): PASS (one death-induced controller harness check)
+
+Fresh bundled-Node-24 build reproduced index-tknOtxLM.js exactly; freshness passed (scene.ts 20:11:54 < artifact 20:17:55). Authoritative: fresh smoke 27/27 (night 55.65), characters 117/118, perf 163/164, mobile 26/26, co-op 22/22, live baseline 34/34. 0 page/console/log errors, 0 404s, 11 cards. The one characters + one perf failure were the same death-induced controller-hints timing (QA player died mid-run; "QA Knight is down/risen"); all new cycle-19 gates passed.
+1) SHROUD COLOSSUS - PASS on hooks/alternation/telegraph/FX/audio; forced phase-2/3 captures owner-evidenced. __ssColossus()/__ssHazards()/__ssColossusFx() exposed; QA trigger stills colossus-telegraph/slam/pool.png; hazards fields radius/expiry/dps (cap 6, 12 s, 4.5 r, 6 dps); audio cues colossusChargeAt/SlamAt/PhaseAt counts 1/1/1 via __ssColossusAudio; reduced-motion static telegraph/pools; alternation index%4===0 Colossus else Warden (contract); boss bar name/phase and slam 1.4s/AoE 5.5/34/wall by owner in-game evidence (ingame-colossus-phase1/2/3, telegraph, slam, pool) and server tests. Phase2/3 (hp246/420, hp120/420) + one-time 2-stalker summon owner-evidenced; no force-phase hook (documented).
+2) BOSS-BAR HUD FIX - PASS by owner screenshots + DOM gate tolerance: z10000 above markers, phase label coloured/non-wrapping, #siege/#objectiveLine hidden and #ss-objectives opacity 0 during boss sieges; desktop and mobile layouts verified (c19-bossbar-desktop/mobile); hidden when no boss. QA DOM read tolerated the no-active-siege window (documented).
+3) TEAL-QUAD FIX - PASS owner-verified (friendly castle flag now textured heraldic banner, ruins banner cloth muted; no aura/instanced artifacts in enrage/Colossus captures).
+4) BASE REGRESSION - PASS. Perf spawn 187 calls / 1,646,274 tris (<290/<2.15M; high sample), payload 18,394,681 B = 17.54 MiB; foot-slide 1.11e-16; stalker roster/FX/lunge cues; caster roster/trigger stills/cues; look torso 92.4/limb 72.3; markers 3/5 bob-false; windmill angle/reduced 0; torch bed .018/0; journal/lore/recap/mood/difficulty/wayfinding; 11 weapons/bash; mobile 26/26; co-op 22/22; live baseline 34/34.
+
+Cycle-19 verdict: PASS on Colossus roster/telegraph/slam/pool hooks, FX/reduced/cues/captions and regressions; deferred: QA forced phase2/3 + slam-happy-path stills (no force-phase hook; owner in-game evidence on this dist), boss-bar DOM capture during an active event (owner screenshots), audio landmark ear check, physical-device/real-GPU/perceptual, hardware rumble. After deploy: final live pass + task-139 complete.

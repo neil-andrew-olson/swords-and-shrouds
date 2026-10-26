@@ -23,52 +23,61 @@ workspace-relative paths and/or use the `present` tool.
 broad `taskkill /IM node.exe`. One dist builder at a time; QA owns authoritative captures. **Always**
 re-check source mtimes vs the artifact mtime before handing a hash, and rebuild twice with
 `node_modules/.vite` cleared (cycle-11/13/14/18 lessons: post-freeze edits and races produced
-superseded artifacts — only gate a hash a clean rebuild reproduces; cycle 18 needed an emergency
-rebuild after a last-minute scene fix, and the client hash legitimately repeated because server-only
-code does not enter the client bundle).
+superseded artifacts — only gate a hash a clean rebuild reproduces).
 
-## Cycle 18 (2026-10U) — Stalker + two-phase Warden (DEPLOYING)
+## Cycle 19 (2026-10V) — Shroud Colossus second boss (DEPLOYING)
 
-Final bundle **`index-Bnc8c7Xv.js`** (986,604 B). Contract `docs/BATCH-2026-10U-SPEC.md`, results
-`docs/BATCH-2026-10U-RESULTS.md`. Roadmap milestone B continues.
+Final bundle **`index-tknOtxLM.js`** (998,421 B). Contract `docs/BATCH-2026-10V-SPEC.md`, results
+`docs/BATCH-2026-10V-RESULTS.md`. Roadmap milestone B.
 
-### Shroud Stalker (fast harasser, server-authoritative)
-Kind corrupted `stalker:true`, HP 62, speed 5.2, existing undead rig: picks a player, orbits ~7.5 m
-to side/back, **0.45 s telegraphed windup** (`A Shroud Stalker closes in!`), **0.32 s lunge dash**
-(`Shroud Stalker lunges!`) for **18 dmg** wall-checked (`A Shroud Stalker rakes <name>!` on connect),
-2.5 s cooldown, melee fallback; spawns 2 wilds + 2/siege index ≥3; counters `stats.stalkers`/
-`stalkerLunges`; co-op synced. Presentation: pale green-violet tint + aura, pooled bright lunge-windup
-ring (≤1 draw, static reduced-motion), 1.25 m-stride dust trail; hooks `__ssStalkers/__ssStalkerFx/
-__ssTriggerStalkerFx`; lunge/hit cues + caption (corrected to server wording).
+### Shroud Colossus (distinct second boss, server-authoritative)
+- Alternation documented: Colossus when boss siege `index%4===0` (4, 8, 12), Warden otherwise;
+  `siege.bossKind/bossName/bossPhase/bossHp` exposed. HP **420** difficulty-scaled, heavy armour,
+  speed 2.2, `colossus:true`.
+- **Ground slam**: 1.4 s telegraph at `slamTarget` (0.95 s phase 3, event
+  `The Shroud Colossus raises its fist!`) → **radius 5.5 / 34 dmg**, wall-checked (stone event),
+  impact event `The Colossus splinters the earth!`.
+- **Corruption pools**: `game.hazards[]` `{id,x,z,radius:4.5,expiresAt:+12 s,damagePerSecond:6}`,
+  max 6, co-op synced, pooled dark-violet decals with slow pulse (static reduced-motion).
+- **Phases**: p2 ≤66 % (`The Shroud Colossus roars — its hide splits!`) faster cadence + summons
+  2 Stalkers once; p3 ≤33 % (`The Shroud Colossus cracks the earth — no mercy remains!`) speed 2.8,
+  shorter telegraph, occasional double slam; one-shot guards; counters `stats.colossi/slams/pools`.
+- Presentation: 1.6× scale, violet-green aura `#5f9f7f` → phase-3 `#6a4a9a`, rig tint
+  `#4f7a5f` → `#5f3f7a`; HUD bar per-boss name/phase (FRENZIED); `__ssBossVisual()` reports scale/phase.
+- Hooks `__ssColossus/__ssHazards/__ssColossusFx/__ssTriggerColossusFx`; audio cues
+  `colossusChargeAt/SlamAt/PhaseAt` + captions; sims index4 78 s (castle held, 5 slams/5 pools),
+  index8 59.8 s, index12 82.6 s — all winnable.
 
-### Two-phase Shroud Warden
-`actor.bossPhase`/`siege.bossPhase`; at ≤50 % HP **enrages once**: howl event, cadence up
-(move 3.8 / windup .62 / cd 1.5), **summons 1 Screamer + 1 Caster once** (no dupe), co-op synced;
-presentation aura ×1.35/opacity .62, crimson → violet-crimson `#7a2a5a` tint, embers, FRENZIED HUD,
-`__ssBossVisual().phase`; enrage reverts on death. **QA-only force-enrage**: `qaForceEnrage()` +
-2 s `SS_QA`-gated room timer drops a live boss to 45 % and runs the normal enrage; production-safe;
-one-shot guard tested.
+### Fixes from cycle-18 review
+- **HUD boss-bar overlap**: `#bossSiegeBar` z-index 10000 above wayfinding markers, backdrop,
+  non-wrapping phase-coloured FRENZIED/FINAL label; `#siege`/`#objectiveLine`/marker layer suppressed
+  during boss sieges; desktop 520×79 and mobile 340×71 verified.
+- **Teal-quad artifact**: caused by flat cloth planes (captured castle flag + courtyard banner cloth),
+  not aura geometry — flags now use a generated heraldic cloth texture at y 4.35 and banner cloth is
+  muted/roughened; banners read as cloth.
 
 ### Verification
-- 58/58 tests; tsc 0; deterministic `index-Bnc8c7Xv.js` + freshness; validator 87/87.
-- QA: fresh smoke **27/27**, characters **112/113** (one death-induced harness sample), perf
-  **157/159** (2 fails = harness's forced siege rejected while a prior siege active; owner in-game
-  phase-2 proof on this exact hash), mobile 26/26, co-op 22/22, live baseline 34/34; spawn
-  **184 calls / 1,645,056 tris** (low 149/1,367,728); payload **17.53 MiB**; night 56.93.
-- Deferred (documented): QA forced-enrage still (owner phase-2 proof exists), real stalker lunge
-  still (owner forced run), audio landmark ear check, physical-device/real-GPU/perceptual, hardware
-  rumble.
+- 58/58 tests; tsc 0; deterministic `index-tknOtxLM.js` + freshness; validator 87/87.
+- QA: fresh smoke 27/27, characters **117/118**, perf **163/164** (both one death-induced
+  controller-hints timing + post-death timeout; all new gates green), mobile 26/26, co-op 22/22,
+  live baseline 34/34; spawn **187 calls / 1,646,274 tris** (high sample), payload **17.54 MiB**;
+  night 55.65; Colossus hooks/trigger stills/pools/phase evidence owner-verified on this exact dist.
+- Deferred (documented): QA forced Colossus phase2/3 + slam happy-path stills (owner in-game
+  evidence), boss-bar DOM sampled outside an active event (owner screenshots), audio landmark ear
+  check, physical-device/real-GPU/perceptual, hardware rumble.
 
-### Cycle-19 (next) — roadmap B
-1. **Distinct second boss encounter** with its own arena/phases (nest-mother/bone-colossus style),
-   reusing the multi-phase infrastructure.
-2. Close harness capture gaps (clean enrage-still sequence).
-3. Human/device debts; then roadmap C (progression/meta systems) and more world content.
+### Cycle-20 (next) — roadmap C
+1. **Progression/meta systems**: weapon/armour upgrade tiers at camps, crafting/resource sinks,
+   cross-run unlocks (meta progression), New Game+ modifier.
+2. Close capture gaps with a clean harness sequence (forced-phase helper if useful).
+3. Human/device debts; continued world/content polish.
 
 ## Previous cycles
 
-- **2026-10T cycle 17**: sprint foot-slide recalibration (slideFactor 1.11e-16) + Shroud Caster ranged
-  enemy with projectile AI/telegraph/FX/cues/captions (`docs/BATCH-2026-10T-RESULTS.md`).
+- **2026-10U cycle 18**: Shroud Stalker flanking harasser + two-phase Warden (enrage, FRENZIED,
+  adds) + production-safe QA force-enrage (`docs/BATCH-2026-10U-RESULTS.md`).
+- **2026-10T cycle 17**: sprint foot-slide recalibration + Shroud Caster ranged enemy
+  (`docs/BATCH-2026-10T-RESULTS.md`).
 - **2026-10S cycle 16**: body-atlas tone pass, animation-depth pass, movement VFX
   (`docs/BATCH-2026-10S-RESULTS.md`).
 - **2026-10R cycle 15**: armour atlas v5.1 + look-pass v5; Warden/Screamer capture debt closed

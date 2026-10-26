@@ -42,11 +42,11 @@ export function touchSensitivityValue(value:unknown){const n=Number(value);retur
  * Accessibility captions (CC): pure text formatter + rate limiter. main.ts owns the HUD element,
  * persistence and gating; these helpers keep the behaviour unit-testable.
  * ------------------------------------------------------------------------------------------- */
-export type CaptionCue='thunder'|'undead'|'siege-start'|'siege-end'|'low-health'|'castle-captured'|'caster-charge'|'caster-launch'|'stalker-lunge'|'warden-enrage';
+export type CaptionCue='thunder'|'undead'|'siege-start'|'siege-end'|'low-health'|'castle-captured'|'caster-charge'|'caster-launch'|'stalker-lunge'|'warden-enrage'|'colossus-windup'|'colossus-slam'|'colossus-phase2'|'colossus-phase3';
 export const CAPTION_RATE_LIMIT_MS=2200;
 export const CAPTION_MAX_CHARS=96;
 /** Higher-priority cues may replace a different lower-priority cue after half the rate window. */
-export const CAPTION_PRIORITY:Record<CaptionCue,number>={undead:1,thunder:3,'siege-end':3,'caster-charge':3,'stalker-lunge':3,'siege-start':4,'caster-launch':4,'low-health':4,'castle-captured':5,'warden-enrage':5};
+export const CAPTION_PRIORITY:Record<CaptionCue,number>={undead:1,thunder:3,'siege-end':3,'caster-charge':3,'stalker-lunge':3,'siege-start':4,'caster-launch':4,'low-health':4,'castle-captured':5,'warden-enrage':5,'colossus-windup':3,'colossus-slam':5,'colossus-phase2':5,'colossus-phase3':5};
 export function captionText(cue:CaptionCue,detail?:string):string{
  const base:Record<CaptionCue,string>={
   thunder:'Lightning. Thunder rolls in the distance.',
@@ -58,7 +58,11 @@ export function captionText(cue:CaptionCue,detail?:string):string{
   'caster-charge':'A Shroud Caster gathers shadow.',
   'caster-launch':'Shadow bolt!',
   'stalker-lunge':'A Shroud Stalker closes in!',
-  'warden-enrage':'The Shroud Warden howls — the shroud thickens!'
+  'warden-enrage':'The Shroud Warden howls — the shroud thickens!',
+  'colossus-windup':'The Shroud Colossus raises its fist!',
+  'colossus-slam':'The Colossus splinters the earth!',
+  'colossus-phase2':'The Shroud Colossus roars — its hide splits!',
+  'colossus-phase3':'The Shroud Colossus cracks the earth — no mercy remains!'
  };
  const text=detail&&(cue==='siege-start'||cue==='castle-captured')?`${base[cue]} ${detail}`:base[cue];
  return text.slice(0,CAPTION_MAX_CHARS);
@@ -309,5 +313,17 @@ export function wardenCueForEvent(text:string):WardenCue|null{
  const value=String(text??'').toLowerCase();
  if(!/warden|shroud warden/.test(value))return null;
  if(/(howl|enrag|thicken|phase)/.test(value))return 'enrage';
+ return null;
+}
+/* Cycle-19 Shroud Colossus cue mapping: tolerant event-text classifier used by main.ts (pure). */
+export type ColossusCue='windup'|'slam'|'phase2'|'phase3';
+export function colossusCueForEvent(text:string):ColossusCue|null{
+ const value=String(text??'').toLowerCase();
+ if(!/colossus/.test(value))return null;
+ if(/(crack|no mercy|phase 3|third phase)/.test(value))return 'phase3';
+ if(/(hide splits|roar|phase 2|second phase|enrag)/.test(value))return 'phase2';
+ if(/(raise|gather|charge|wind|telegraph|fist)/.test(value))return 'windup';
+ if(/(splinter|slam|impact|smash|quake|earth|debris|boom|strik|stone)/.test(value))return 'slam';
+ if(/(coil|brace)/.test(value))return 'windup';
  return null;
 }

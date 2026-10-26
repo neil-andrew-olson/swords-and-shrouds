@@ -17,7 +17,7 @@ export function createGame(difficulty:Difficulty=DEFAULT_DIFFICULTY):Game{
  // Weapon-rack drops are WEAPON_IDS-driven: the starter hammer plus one rack per castle. Filtering
  // out the two starter weapons keeps every rackable weapon covered exactly once as WEAPON_IDS grows.
  const rackPool:WeaponId[]=WEAPON_IDS.filter(id=>id!=='sword'&&id!=='hammer');
- const g:Game={time:0,difficulty,armory:['sword'],weaponDrops:[{id:'starter-hammer',weapon:'hammer',x:-3,z:30,taken:false},...CASTLES.map((c,i)=>({id:'rack-'+c.id,weapon:rackPool[i%rackPool.length],x:c.x-5,z:c.z+4,taken:false}))],regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],projectiles:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0,bossesSeen:0,bossesFelled:0,screamers:0,screams:0,bashes:0,casters:0,casterBolts:0,stalkers:0,stalkerLunges:0},events:[],nextId:0};
+ const g:Game={time:0,difficulty,armory:['sword'],weaponDrops:[{id:'starter-hammer',weapon:'hammer',x:-3,z:30,taken:false},...CASTLES.map((c,i)=>({id:'rack-'+c.id,weapon:rackPool[i%rackPool.length],x:c.x-5,z:c.z+4,taken:false}))],regions:REGIONS.map(r=>({id:r.id,name:r.name,held:false,paid:false,incomeAt:0})),shots:[],projectiles:[],hazards:[],noises:[],status:'playing',actors:[],castles:CASTLES.map(c=>({...c,friendly:false,artilleryCd:3,level:0,gate:0,barrier:0,capture:0,lost:0,rewarded:false})),camps:CAMPS.map(c=>({...c,rescued:false})),resources:{wood:24,iron:14,medicine:5,recruits:0},caches:[],nest:{...NEST,hp:500,maxHp:500},everCaptured:false,siege:null,nextSiege:150,stats:{captures:0,rescues:0,sieges:0,recruited:0,kills:0,bossesSeen:0,bossesFelled:0,screamers:0,screams:0,bashes:0,casters:0,casterBolts:0,stalkers:0,stalkerLunges:0,colossi:0,slams:0,pools:0},events:[],nextId:0};
  g.castles.forEach((c,i)=>{for(let n=0;n<4+(i%3)*2+Math.floor(i/3);n++)spawn(g,n===5?'corrupted':'zombie',c.x-5+(n%3)*4,c.z-5+Math.floor(n/3)*4,{castle:c.id});});
  g.camps.forEach(c=>{for(let n=0;n<3;n++)spawn(g,'zombie',c.x+n*2-2,c.z-4);});
  for(let n=0;n<5;n++)spawn(g,n===4?'corrupted':'zombie',NEST.x-6+n*3,NEST.z+5,n===4?{name:'Plague Champion',hp:200,maxHp:200,weapon:'zweihander'}:{});
@@ -65,6 +65,29 @@ function enrageWarden(g:Game,boss:Actor){
  spawn(g,'corrupted',boss.x+4,boss.z+2,{castle,name:'Shroud Screamer',hp:72,maxHp:72,armor:'light',screamer:true,appearance:'skeleton-armoured'});g.stats.screamers++;
  spawnCaster(g,boss.x-4,boss.z+2,{castle,appearance:'fallen'});
 }
+export const COLOSSUS={hp:420,speed:2.2,armor:'heavy',slamTelegraph:1.4,slamTelegraphFast:.95,slamRadius:5.5,slamDamage:34,pools:12,poolDps:6,poolRadius:4.5,poolCap:6,cooldown:[4,2.8,2] as const};
+function colossusPhase(g:Game,boss:Actor,phase:2|3){
+ if((boss.bossPhase??1)>=phase)return;
+ boss.bossPhase=phase;if(g.siege&&g.siege.bossId===boss.id)g.siege.bossPhase=phase;
+ if(phase===2){
+  event(g,'The Shroud Colossus roars — its hide splits!',{x:boss.x,z:boss.z});
+  const castle=boss.castle;spawnStalker(g,boss.x+5,boss.z+2,{castle,appearance:'skeleton-armoured'});spawnStalker(g,boss.x-5,boss.z+2,{castle,appearance:'fallen'});
+ }else event(g,'The Shroud Colossus cracks the earth — no mercy remains!',{x:boss.x,z:boss.z});
+}
+function resolveColossusSlam(g:Game,boss:Actor,secondary=false){
+ const aim=boss.slamTarget;if(!aim)return;
+ if(!lineClear(boss,aim)){event(g,'The Colossus strikes the stone!',{x:aim.x,z:aim.z});boss.slamCharge=0;boss.slamCd=COLOSSUS.cooldown[Math.min(2,(boss.bossPhase??1)-1)];return;}
+ for(const a of g.actors)if(a.hp>0&&!hostile(a)&&dist(a,aim)<=COLOSSUS.slamRadius)hurt(g,a,COLOSSUS.slamDamage,boss);
+ g.stats.slams++;event(g,'The Colossus splinters the earth!',{x:aim.x,z:aim.z});
+ g.hazards.push({id:'h'+(++g.nextId),x:aim.x,z:aim.z,radius:COLOSSUS.poolRadius,expiresAt:g.time+COLOSSUS.pools,damagePerSecond:COLOSSUS.poolDps});
+ g.stats.pools++;while(g.hazards.length>COLOSSUS.poolCap)g.hazards.splice(0,1);
+ boss.slamCharge=0;boss.slamCd=COLOSSUS.cooldown[Math.min(2,(boss.bossPhase??1)-1)];
+ if(!secondary&&(boss.bossPhase??1)>=3&&g.stats.slams%2===0)boss.slamDouble=.35;
+}
+function updateHazards(g:Game,dt:number){
+ for(const h of g.hazards)if(g.time<h.expiresAt)for(const a of g.actors)if(a.hp>0&&!hostile(a)&&dist(a,h)<=h.radius)hurt(g,a,h.damagePerSecond*dt);
+ g.hazards=g.hazards.filter(h=>h.expiresAt>g.time);
+}
 function updateProjectiles(g:Game,dt:number){
  const living=[];
  for(const p of g.projectiles){
@@ -99,7 +122,7 @@ function hurt(g:Game,a:Actor,amount:number,attacker?:Actor){
  if(attacker&&hostile(attacker)&&!hostile(a))amount*=difficultyPreset(g.difficulty).enemyDamage;
  if(a.block&&attacker){const towards=Math.atan2(attacker.x-a.x,-(attacker.z-a.z));if(Math.cos(towards-a.yaw)>.2)amount*=attacker&&a.kind==='player'&&!weaponStats(a.weapon).shield?.55:.2;}
  if(a.kind==='player'&&a.armor==='heavy')amount*=.7;
- a.hp=Math.max(0,a.hp-amount);if(a.boss&&a.hp>0&&a.hp<=a.maxHp*.5&&(a.bossPhase??1)<2)enrageWarden(g,a);if(a.kind==='zombie'&&attacker?.kind==='player'&&attacker.weapon!=='hammer'){if(a.hp===0)sever(g,a,'head');else if(a.hp<=a.maxHp*.5)sever(g,a,(a.severed??[]).includes('rightArm')?'leftArm':(a.severed??[]).includes('leftArm')?'rightArm':attacker.x<a.x?'leftArm':'rightArm');}
+ a.hp=Math.max(0,a.hp-amount);if(a.boss&&!a.colossus&&a.hp>0&&a.hp<=a.maxHp*.5&&(a.bossPhase??1)<2)enrageWarden(g,a);if(a.colossus&&a.hp>0){if(a.hp<=a.maxHp*.33&&(a.bossPhase??1)<3)colossusPhase(g,a,3);else if(a.hp<=a.maxHp*.66&&(a.bossPhase??1)<2)colossusPhase(g,a,2);}if(a.kind==='zombie'&&attacker?.kind==='player'&&attacker.weapon!=='hammer'){if(a.hp===0)sever(g,a,'head');else if(a.hp<=a.maxHp*.5)sever(g,a,(a.severed??[]).includes('rightArm')?'leftArm':(a.severed??[]).includes('leftArm')?'rightArm':attacker.x<a.x?'leftArm':'rightArm');}
  if(a.hp===0){a.deadUntil=g.time+(a.kind==='player'?12:a.kind==='soldier'?7:2);a.windup=0;if(a.kind==='player'){a.downed=true;a.revive=0;a.block=false;event(g,`${a.name} is down! Hold Interact nearby for 3 seconds before corruption takes hold.`);}if(hostile(a)){g.stats.kills++;g.resources.wood+=2;g.resources.iron++;if(a.boss){g.stats.bossesFelled++;}if(a.boss&&g.siege&&g.siege.bossId===a.id&&!g.siege.bossRewarded){g.siege.bossRewarded=true;g.siege.bossKilled=true;g.resources.wood+=10;g.resources.iron+=5;g.resources.medicine+=1;event(g,`${a.name} falls: +10 wood, +5 iron, +1 healing supply.`);}}if(a.kind==='soldier')event(g,'An Oathsworn has fallen. Corruption rises in 7 seconds.');}
 }
 function swing(g:Game,a:Actor){const w=weaponStats(a.weapon);a.stamina=Math.max(0,(a.stamina??100)-w.stamina);noise(g,a,22);a.cd=w.cooldown;a.swing=.25;a.attackSerial=(a.attackSerial??0)+1;for(const e of g.actors){if(!hostile(e)||e.hp<=0||dist(a,e)>w.reach||!lineClear(a,e))continue;const angle=Math.atan2(e.x-a.x,-(e.z-a.z));if(Math.cos(angle-a.yaw)>w.arc)hurt(g,e,w.damage,a);}
@@ -177,9 +200,11 @@ function openSiege(g:Game,requestedIndex=g.stats.sieges+1,startsAt=g.time+30):bo
  g.stats.sieges=index-1;
  const target=friendly[((index-1)+g.stats.captures)%friendly.length];
  const boss=index%2===0||index>=9;
- const bossName=boss?'Shroud Warden':'';
- const bossHp=boss?240+Math.min(40,Math.max(0,(index-2)*5)):0;
- g.siege={castle:target.id,starts:startsAt,active:false,boss,bossName,bossHp,index,waveSize:0,bossId:'',bossKilled:false,bossRewarded:false,bossPhase:boss?1:undefined};
+ // Cycle-19 alternation: boss sieges stay Warden except every fourth index (4,8,12,...) which is the Colossus.
+ const colossus=boss&&index%4===0;
+ const bossName=boss?(colossus?'Shroud Colossus':'Shroud Warden'):'';
+ const bossHp=boss?(colossus?420:240+Math.min(40,Math.max(0,(index-2)*5))):0;
+ g.siege={castle:target.id,starts:startsAt,active:false,boss,bossName,bossHp,index,waveSize:0,bossId:'',bossKilled:false,bossRewarded:false,bossPhase:boss?1:undefined,bossKind:boss?(colossus?'colossus':'warden'):undefined};
  const lead=boss?`${bossName} leads the horde.`:'';event(g,startsAt<=g.time?`The siege of ${target.name} begins! ${lead}`.trim():`Siege approaching ${target.name} in 30 seconds. ${lead}`.trim());
  return true;
 }
@@ -195,7 +220,7 @@ export function qaEnsureFriendlyCastle(g:Game):boolean{
  return true;
 }
 export function qaForceEnrage(g:Game,fraction=.45):boolean{
- const boss=g.actors.find(a=>a.boss&&a.hp>0&&(a.bossPhase??1)<2);
+ const boss=g.actors.find(a=>a.boss&&!a.colossus&&a.hp>0&&(a.bossPhase??1)<2);
  if(!boss)return false;
  boss.hp=Math.min(boss.hp,Math.ceil(boss.maxHp*Math.max(.05,Math.min(.9,fraction))));
  enrageWarden(g,boss);
@@ -212,7 +237,7 @@ export function tick(g:Game,dt=.05){
   if(a.hp>0&&!hostile(a)&&g.castles.some(c=>c.friendly&&c.level>0&&dist(a,c)<9))a.hp=Math.min(a.maxHp,a.hp+dt*2);
   a.abilityCd=Math.max(0,(a.abilityCd??0)-dt);
   if(a.hp>0&&a.kind==='player')a.stamina=Math.max(0,Math.min(100,(a.stamina??100)+dt*(a.block?-22:a.cd>0?0:a.armor==='heavy'?10:18)));
-  a.cd=Math.max(0,a.cd-dt);a.swing=Math.max(0,a.swing-dt);a.bashCd=Math.max(0,(a.bashCd??0)-dt);a.casterCd=Math.max(0,(a.casterCd??0)-dt);a.stalkerCd=Math.max(0,(a.stalkerCd??0)-dt);
+  a.cd=Math.max(0,a.cd-dt);a.swing=Math.max(0,a.swing-dt);a.bashCd=Math.max(0,(a.bashCd??0)-dt);a.casterCd=Math.max(0,(a.casterCd??0)-dt);a.stalkerCd=Math.max(0,(a.stalkerCd??0)-dt);a.slamCd=Math.max(0,(a.slamCd??0)-dt);
   if(a.hp<=0){if(a.deadUntil>g.time)continue;
    if(a.kind==='player'){if(a.downed){a.downed=false;const boss=spawn(g,'corrupted',a.x,a.z,{name:`${a.name}, the Fallen`,hp:220,maxHp:220});noise(g,boss,35);a.deadUntil=g.time+8;event(g,`${a.name} has risen as a corrupted knight. Their spirit returns in 8 seconds.`);continue;}const c=g.castles.find(c=>c.friendly);if(!c&&g.everCaptured)continue;a.hp=a.maxHp;a.stamina=100;a.x=c?.x??START.x;a.z=c?c.z+3:START.z;a.input=idle();a.block=false;}
    else{g.actors=g.actors.filter(x=>x!==a);if(a.kind==='soldier')spawn(g,'corrupted',a.x,a.z);continue;}}
@@ -254,7 +279,13 @@ export function tick(g:Game,dt=.05){
     }
    }
   }else{
-   if(a.stalker&&a.hp>0){
+   if(a.colossus&&a.hp>0){
+    if((a.slamDouble??0)>0){a.slamDouble=Math.max(0,(a.slamDouble??0)-dt);if(a.slamDouble<=0)resolveColossusSlam(g,a,true);continue;}
+    if((a.slamCharge??0)>0){a.slamCharge=Math.max(0,(a.slamCharge??0)-dt);if(a.slamTarget)a.yaw=Math.atan2(a.slamTarget.x-a.x,-(a.slamTarget.z-a.z));if(a.slamCharge<=0)resolveColossusSlam(g,a);continue;}
+    const players=g.actors.filter(p=>p.kind==='player'&&p.hp>0);const target=players.sort((x,y)=>dist(a,x)-dist(a,y))[0]??nearest;
+    if(target){const d=dist(a,target);if((a.slamCd??0)<=0&&d<=12){a.slamCharge=(a.bossPhase??1)>=3?COLOSSUS.slamTelegraphFast:COLOSSUS.slamTelegraph;a.slamTarget={x:target.x,z:target.z};a.yaw=Math.atan2(target.x-a.x,-(target.z-a.z));event(g,'The Shroud Colossus raises its fist!',{x:target.x,z:target.z});continue;}if(d>2.8)moveEnemy(g,a,waypoint(a,target),dt*((a.bossPhase??1)>=3?2.8:(a.bossPhase??1)>=2?2.5:COLOSSUS.speed));continue;}
+   }
+      if(a.stalker&&a.hp>0){
     const players=g.actors.filter(p=>p.kind==='player'&&p.hp>0);
     const target=players.sort((x,y)=>dist(a,x)-dist(a,y))[0]??nearest;
     if(target){
@@ -295,12 +326,13 @@ export function tick(g:Game,dt=.05){
    const defense=g.castles.find(c=>c.friendly&&(c.barrier>0||c.gate>0)&&a.z>=c.z+(c.barrier>0?12:9)&&dist(a,c)<30&&(a.castle===c.id||(nearest&&Math.abs(nearest.x-c.x)<9&&Math.abs(nearest.z-c.z)<9)||(a.investigate&&Math.abs(a.investigate.x-c.x)<9&&Math.abs(a.investigate.z-c.z)<9)));
    if(defense){const front={x:defense.x,z:defense.z+(defense.barrier>0?14:11)};a.yaw=Math.atan2(front.x-a.x,-(front.z-a.z));if(dist(a,front)>1.8)moveEnemy(g,a,waypoint(a,front),dt*2.6);else if(a.cd===0){if(defense.barrier>0)defense.barrier=Math.max(0,defense.barrier-12);else defense.gate=Math.max(0,defense.gate-12);a.cd=1;a.swing=.25;a.attackSerial=(a.attackSerial??0)+1;noise(g,front,30);}continue;}
    if(a.windup>0){a.windup-=dt;if(a.windup<=0&&target&&dist(a,target)<2.8&&lineClear(a,target)){hurt(g,target,(a.boss?(a.maxHp<=240?28:30):a.kind==='corrupted'?24:13)*Math.max(.25,1-(a.severed??[]).filter(p=>p!=='head').length*.4),a);a.swing=.2;}continue;}
-   if(target){a.yaw=Math.atan2(target.x-a.x,-(target.z-a.z));if(dist(a,target)>2||!lineClear(a,target))moveEnemy(g,a,waypoint(a,target),dt*(a.boss?((a.bossPhase??1)>=2?3.8:2.9):a.kind==='corrupted'?3.6:2.6));else if(a.cd===0){a.windup=a.boss?((a.bossPhase??1)>=2?.62:.95):.65;a.cd=a.boss?((a.bossPhase??1)>=2?1.5:2.2):1.65;a.attackSerial=(a.attackSerial??0)+1;}}
+   if(target){a.yaw=Math.atan2(target.x-a.x,-(target.z-a.z));if(dist(a,target)>2||!lineClear(a,target)){const bossSpeed=a.boss?(a.colossus?((a.bossPhase??1)>=3?2.8:(a.bossPhase??1)>=2?2.5:COLOSSUS.speed):((a.bossPhase??1)>=2?3.8:2.9)):a.kind==='corrupted'?3.6:2.6;moveEnemy(g,a,waypoint(a,target),dt*bossSpeed);}else if(a.cd===0){a.windup=a.colossus?.9:a.boss?((a.bossPhase??1)>=2?.62:.95):.65;a.cd=a.colossus?1.8:a.boss?((a.bossPhase??1)>=2?1.5:2.2):1.65;a.attackSerial=(a.attackSerial??0)+1;}}
    else if(a.investigate&&a.investigate.until>g.time&&dist(a,a.investigate)>1.5){a.yaw=Math.atan2(a.investigate.x-a.x,-(a.investigate.z-a.z));moveEnemy(g,a,waypoint(a,a.investigate),dt*2.6);}
    else if(fort?.friendly){const gate={x:fort.x,z:fort.z+11};if(fort.gate>0||fort.barrier>0){if(dist(a,gate)>2.5)moveEnemy(g,a,waypoint(a,gate),dt*2.6);else if(a.cd===0){if(fort.barrier>0)fort.barrier=Math.max(0,fort.barrier-12);else fort.gate=Math.max(0,fort.gate-12);noise(g,gate,30);a.cd=1;a.swing=.2;}}else moveEnemy(g,a,waypoint(a,fort),dt*2.6);}
   }
  }
  updateProjectiles(g,dt);
+ updateHazards(g,dt);
  separateCompanions(g,dt);
  interactions(g,dt);
  for(const c of g.castles.filter(c=>c.friendly)){
@@ -316,7 +348,7 @@ export function tick(g:Game,dt=.05){
  if(g.everCaptured&&!g.castles.some(c=>c.friendly)){g.status='defeat';event(g,'The last stronghold has fallen.');return;}
  if(!g.siege&&g.everCaptured&&g.time>=g.nextSiege)openSiege(g);
  if(g.siege){const c=g.castles.find(c=>c.id===g.siege!.castle)!;
-  if(!g.siege.active&&g.time>=g.siege.starts){g.siege.active=true;const extra=Math.max(0,g.actors.filter(a=>a.kind==='player'&&a.connected).length-1)*2;const boss=!!g.siege.boss;const count=Math.max(4,Math.min(14,6+g.stats.sieges*2+extra+(boss?1:0)+difficultyPreset(g.difficulty).waveBonus));const normals=count-(boss?1:0);for(let n=0;n<normals;n++)spawn(g,n===normals-1?'corrupted':'zombie',c.x+(n%3-1)*2,c.z+19+Math.floor(n/3)*2,{castle:c.id});if(boss){const bossHp=Math.max(240,Math.min(280,g.siege.bossHp||240));const bossActor=spawn(g,'corrupted',c.x,c.z+19+Math.floor(normals/3)*2,{castle:c.id,name:g.siege.bossName||'Shroud Warden',hp:bossHp,maxHp:bossHp,armor:'heavy',boss:true,bossPhase:1});g.siege.bossId=bossActor.id;g.siege.bossHp=bossActor.maxHp;g.stats.bossesSeen++;}if((g.siege.index??1)>=3){const screamerHp=72+Math.min(18,((g.siege.index??3)-3)*3);spawn(g,'corrupted',c.x+4,c.z+21+((g.siege.index??3)%3)*2,{castle:c.id,name:'Shroud Screamer',hp:screamerHp,maxHp:screamerHp,armor:'light',screamer:true,appearance:(g.siege.index??3)%2===0?'fallen':'skeleton-armoured'});g.stats.screamers++;}if((g.siege.index??1)>=2){spawnCaster(g,c.x-4,c.z+23+((g.siege.index??2)%3)*2,{castle:c.id,appearance:(g.siege.index??2)%2===0?'fallen':'skeleton-armoured'});}if((g.siege.index??1)>=3){spawnStalker(g,c.x-9,c.z+26,{castle:c.id,appearance:'skeleton-armoured'});spawnStalker(g,c.x+9,c.z+27,{castle:c.id,appearance:'fallen'});}g.siege.waveSize=count;event(g,boss?`${g.siege.bossName} leads the siege of ${c.name}!`:`The siege of ${c.name} has begun.`);}
+  if(!g.siege.active&&g.time>=g.siege.starts){g.siege.active=true;const extra=Math.max(0,g.actors.filter(a=>a.kind==='player'&&a.connected).length-1)*2;const boss=!!g.siege.boss;const count=Math.max(4,Math.min(14,6+g.stats.sieges*2+extra+(boss?1:0)+difficultyPreset(g.difficulty).waveBonus));const normals=count-(boss?1:0);for(let n=0;n<normals;n++)spawn(g,n===normals-1?'corrupted':'zombie',c.x+(n%3-1)*2,c.z+19+Math.floor(n/3)*2,{castle:c.id});if(boss){const isColossus=g.siege.bossKind==='colossus';const bossHp=isColossus?420:Math.max(240,Math.min(280,g.siege.bossHp||240));const bossActor=spawn(g,'corrupted',c.x,c.z+19+Math.floor(normals/3)*2,{castle:c.id,name:g.siege.bossName||(isColossus?'Shroud Colossus':'Shroud Warden'),hp:bossHp,maxHp:bossHp,armor:'heavy',boss:true,bossPhase:1,appearance:isColossus?'skeleton-armoured':undefined});if(isColossus){bossActor.colossus=true;g.stats.colossi++;}g.siege.bossId=bossActor.id;g.siege.bossHp=bossActor.maxHp;g.stats.bossesSeen++;}if((g.siege.index??1)>=3){const screamerHp=72+Math.min(18,((g.siege.index??3)-3)*3);spawn(g,'corrupted',c.x+4,c.z+21+((g.siege.index??3)%3)*2,{castle:c.id,name:'Shroud Screamer',hp:screamerHp,maxHp:screamerHp,armor:'light',screamer:true,appearance:(g.siege.index??3)%2===0?'fallen':'skeleton-armoured'});g.stats.screamers++;}if((g.siege.index??1)>=2){spawnCaster(g,c.x-4,c.z+23+((g.siege.index??2)%3)*2,{castle:c.id,appearance:(g.siege.index??2)%2===0?'fallen':'skeleton-armoured'});}if((g.siege.index??1)>=3){spawnStalker(g,c.x-9,c.z+26,{castle:c.id,appearance:'skeleton-armoured'});spawnStalker(g,c.x+9,c.z+27,{castle:c.id,appearance:'fallen'});}g.siege.waveSize=count;event(g,boss?`${g.siege.bossName} leads the siege of ${c.name}!`:`The siege of ${c.name} has begun.`);}
   if(g.siege.active&&(!c.friendly||!g.actors.some(a=>hostile(a)&&a.hp>0&&a.castle===c.id))){if(c.friendly){g.stats.sieges++;g.resources.wood+=16;g.resources.iron+=6;event(g,`Siege repelled at ${c.name}.`);}g.siege=null;const players=g.actors.filter(a=>a.kind==='player'&&a.connected);const pressure=players.length?players.reduce((v,a)=>v+1-a.hp/a.maxHp,0)/players.length:0;g.nextSiege=g.time+120+Math.round(pressure*60);}
  }
 }

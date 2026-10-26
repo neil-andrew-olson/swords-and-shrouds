@@ -170,6 +170,13 @@ export class Ambience{
  private stalkerLungeCount=0;
  private stalkerHitCount=0;
  private wardenEnrageCount=0;
+ // Cycle-19 Shroud Colossus slam/phase cues.
+ private lastColossusChargeAt:number|null=null;
+ private lastColossusSlamAt:number|null=null;
+ private lastColossusPhaseAt:number|null=null;
+ private colossusChargeCount=0;
+ private colossusSlamCount=0;
+ private colossusPhaseCount=0;
  private captureRelief=0;
  private prevCaptures=0;
  private capturesSeen=false;
@@ -276,7 +283,7 @@ export class Ambience{
    masterGain:level(this.master),
    focus:this.focusOverride?{x:this.focusOverride.x,z:this.focusOverride.z}:null,
    siege:{boss:this.bossMode==='boss',active:this.bossMode!=='idle',mode:this.bossMode,level:Math.round(this.bossLevel*1000)/1000,gain:level(this.bossGain)},
-   cues:{screamerAt:this.lastScreamerAt===null?null:Math.round(this.lastScreamerAt*1000)/1000,screamerCount:this.screamerCount,sting:this.stingMode,stingAt:this.stingAt===null?null:Math.round(this.stingAt*1000)/1000,casterChargeAt:this.lastCasterChargeAt===null?null:Math.round(this.lastCasterChargeAt*1000)/1000,casterLaunchAt:this.lastCasterLaunchAt===null?null:Math.round(this.lastCasterLaunchAt*1000)/1000,casterImpactAt:this.lastCasterImpactAt===null?null:Math.round(this.lastCasterImpactAt*1000)/1000,casterChargeCount:this.casterChargeCount,casterLaunchCount:this.casterLaunchCount,casterImpactCount:this.casterImpactCount,stalkerLungeAt:this.lastStalkerLungeAt===null?null:Math.round(this.lastStalkerLungeAt*1000)/1000,stalkerHitAt:this.lastStalkerHitAt===null?null:Math.round(this.lastStalkerHitAt*1000)/1000,wardenEnrageAt:this.lastWardenEnrageAt===null?null:Math.round(this.lastWardenEnrageAt*1000)/1000,stalkerLungeCount:this.stalkerLungeCount,stalkerHitCount:this.stalkerHitCount,wardenEnrageCount:this.wardenEnrageCount}
+   cues:{screamerAt:this.lastScreamerAt===null?null:Math.round(this.lastScreamerAt*1000)/1000,screamerCount:this.screamerCount,sting:this.stingMode,stingAt:this.stingAt===null?null:Math.round(this.stingAt*1000)/1000,casterChargeAt:this.lastCasterChargeAt===null?null:Math.round(this.lastCasterChargeAt*1000)/1000,casterLaunchAt:this.lastCasterLaunchAt===null?null:Math.round(this.lastCasterLaunchAt*1000)/1000,casterImpactAt:this.lastCasterImpactAt===null?null:Math.round(this.lastCasterImpactAt*1000)/1000,casterChargeCount:this.casterChargeCount,casterLaunchCount:this.casterLaunchCount,casterImpactCount:this.casterImpactCount,stalkerLungeAt:this.lastStalkerLungeAt===null?null:Math.round(this.lastStalkerLungeAt*1000)/1000,stalkerHitAt:this.lastStalkerHitAt===null?null:Math.round(this.lastStalkerHitAt*1000)/1000,wardenEnrageAt:this.lastWardenEnrageAt===null?null:Math.round(this.lastWardenEnrageAt*1000)/1000,stalkerLungeCount:this.stalkerLungeCount,stalkerHitCount:this.stalkerHitCount,wardenEnrageCount:this.wardenEnrageCount,colossusChargeAt:this.lastColossusChargeAt===null?null:Math.round(this.lastColossusChargeAt*1000)/1000,colossusSlamAt:this.lastColossusSlamAt===null?null:Math.round(this.lastColossusSlamAt*1000)/1000,colossusPhaseAt:this.lastColossusPhaseAt===null?null:Math.round(this.lastColossusPhaseAt*1000)/1000,colossusChargeCount:this.colossusChargeCount,colossusSlamCount:this.colossusSlamCount,colossusPhaseCount:this.colossusPhaseCount}
   };
  }
  private ensureBossSiege(){
@@ -371,6 +378,41 @@ export class Ambience{
    osc.connect(filter);filter.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+1.22);
    const shriek=c.createOscillator(),sg=c.createGain();shriek.type='sawtooth';shriek.frequency.setValueAtTime(1100,t+.15);shriek.frequency.exponentialRampToValueAtTime(520,t+.7);sg.gain.setValueAtTime(.0001,t);sg.gain.exponentialRampToValueAtTime(.022*(1-.55*this.duckLevel),t+.16);sg.gain.exponentialRampToValueAtTime(.0001,t+.9);shriek.connect(sg);sg.connect(master);shriek.start(t);shriek.stop(t+.92);
    if(this.noise){const roar=c.createBufferSource();roar.buffer=this.noise;roar.loop=true;const rf=c.createBiquadFilter();rf.type='bandpass';rf.frequency.setValueAtTime(300,t);rf.frequency.exponentialRampToValueAtTime(700,t+.4);rf.Q.value=.8;const rg=c.createGain();rg.gain.setValueAtTime(.0001,t);rg.gain.exponentialRampToValueAtTime(.04*(1-.55*this.duckLevel),t+.1);rg.gain.exponentialRampToValueAtTime(.0001,t+1.1);roar.connect(rf);rf.connect(rg);rg.connect(master);roar.start(t);roar.stop(t+1.12);}
+   osc.onended=()=>{try{osc.disconnect();filter.disconnect();gain.disconnect();}catch{}};}catch{}
+ }
+ /** Colossus slam windup: ~1.4 s rising rumble matching the telegraph (recorded even muted). */
+ colossusCharge(){
+  const now=this.context?.currentTime??performance.now()/1000;if(this.lastColossusChargeAt!==null&&now-this.lastColossusChargeAt<.5)return;
+  this.lastColossusChargeAt=now;this.colossusChargeCount++;
+  const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const t=c.currentTime,gain=c.createGain(),osc=c.createOscillator(),filter=c.createBiquadFilter();
+   osc.type='sawtooth';osc.frequency.setValueAtTime(30,t);osc.frequency.exponentialRampToValueAtTime(58,t+1.4);
+   filter.type='lowpass';filter.frequency.setValueAtTime(130,t);filter.frequency.exponentialRampToValueAtTime(520,t+1.4);filter.Q.value=1.1;
+   gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.065*(1-.5*this.duckLevel),t+.25);gain.gain.exponentialRampToValueAtTime(.0001,t+1.42);
+   osc.connect(filter);filter.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+1.44);
+   if(this.noise){const rumble=c.createBufferSource();rumble.buffer=this.noise;rumble.loop=true;const rf=c.createBiquadFilter();rf.type='lowpass';rf.frequency.setValueAtTime(160,t);rf.frequency.exponentialRampToValueAtTime(460,t+1.4);const rg=c.createGain();rg.gain.setValueAtTime(.0001,t);rg.gain.exponentialRampToValueAtTime(.03*(1-.5*this.duckLevel),t+.3);rg.gain.exponentialRampToValueAtTime(.0001,t+1.42);rumble.connect(rf);rf.connect(rg);rg.connect(master);rumble.start(t);rumble.stop(t+1.44);}
+   osc.onended=()=>{try{osc.disconnect();filter.disconnect();gain.disconnect();}catch{}};}catch{}
+ }
+ /** Colossus slam impact: heavy boom with a debris tail (recorded even muted). */
+ colossusSlam(){
+  const now=this.context?.currentTime??performance.now()/1000;if(this.lastColossusSlamAt!==null&&now-this.lastColossusSlamAt<.3)return;
+  this.lastColossusSlamAt=now;this.colossusSlamCount++;
+  const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const t=c.currentTime,osc=c.createOscillator(),gain=c.createGain();osc.type='sine';osc.frequency.setValueAtTime(60,t);osc.frequency.exponentialRampToValueAtTime(26,t+.55);gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.1*(1-.5*this.duckLevel),t+.012);gain.gain.exponentialRampToValueAtTime(.0001,t+.75);osc.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+.78);
+   if(this.noise){const debris=c.createBufferSource();debris.buffer=this.noise;debris.loop=true;const df=c.createBiquadFilter();df.type='highpass';df.frequency.value=420;const dg=c.createGain();dg.gain.setValueAtTime(.0001,t);dg.gain.exponentialRampToValueAtTime(.045*(1-.5*this.duckLevel),t+.02);dg.gain.exponentialRampToValueAtTime(.0001,t+.85);debris.connect(df);df.connect(dg);dg.connect(master);debris.start(t);debris.stop(t+.87);}
+   osc.onended=()=>{try{osc.disconnect();gain.disconnect();}catch{}};}catch{}
+ }
+ /** Colossus phase change: heavy roar/gong (recorded even muted). */
+ colossusPhase(){
+  const now=this.context?.currentTime??performance.now()/1000;if(this.lastColossusPhaseAt!==null&&now-this.lastColossusPhaseAt<1)return;
+  this.lastColossusPhaseAt=now;this.colossusPhaseCount++;
+  const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const t=c.currentTime,gain=c.createGain(),osc=c.createOscillator(),filter=c.createBiquadFilter();
+   osc.type='sawtooth';osc.frequency.setValueAtTime(45,t);osc.frequency.exponentialRampToValueAtTime(72,t+.3);osc.frequency.exponentialRampToValueAtTime(36,t+1.25);
+   filter.type='lowpass';filter.frequency.setValueAtTime(320,t);filter.frequency.exponentialRampToValueAtTime(1400,t+.3);filter.frequency.exponentialRampToValueAtTime(260,t+1.25);filter.Q.value=1.2;
+   gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.08*(1-.55*this.duckLevel),t+.06);gain.gain.setValueAtTime(.065*(1-.55*this.duckLevel),t+.95);gain.gain.exponentialRampToValueAtTime(.0001,t+1.3);
+   osc.connect(filter);filter.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+1.32);
+   if(this.noise){const roar=c.createBufferSource();roar.buffer=this.noise;roar.loop=true;const rf=c.createBiquadFilter();rf.type='bandpass';rf.frequency.setValueAtTime(240,t);rf.frequency.exponentialRampToValueAtTime(620,t+.35);rf.Q.value=.9;const rg=c.createGain();rg.gain.setValueAtTime(.0001,t);rg.gain.exponentialRampToValueAtTime(.05*(1-.55*this.duckLevel),t+.08);rg.gain.exponentialRampToValueAtTime(.0001,t+1.2);roar.connect(rf);rf.connect(rg);rg.connect(master);roar.start(t);roar.stop(t+1.22);}
    osc.onended=()=>{try{osc.disconnect();filter.disconnect();gain.disconnect();}catch{}};}catch{}
  }
  private noiseBuffer(c:AudioContext,seconds:number,pink:boolean):AudioBuffer{

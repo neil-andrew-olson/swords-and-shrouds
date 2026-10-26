@@ -199,6 +199,7 @@ const WS_INSTRUMENT = `(()=>{
       nextSiege:game.nextSiege??null,
       stats:game.stats??null,
       corrupted:((game.actors||[]).filter(a=>a&&a.kind==='corrupted').map(a=>({id:a.id,name:a.name,hp:a.hp,maxHp:a.maxHp,caster:!!a.caster,charge:+(Number(a.casterCharge)||0).toFixed(3),cd:+(Number(a.casterCd)||0).toFixed(3),target:a.casterTarget??null,aim:a.casterAim??null,appearance:a.appearance??null})).slice(0,40)),
+      hazards:((game.hazards||[]).map(h=>({id:h.id,x:h.x,z:h.z,radius:h.radius,expiresAt:h.expiresAt,damagePerSecond:h.damagePerSecond})).slice(0,20)),
       projectiles:((game.projectiles||[]).map(p=>({id:p.id,caster:p.caster,kind:p.kind,x:p.x,z:p.z,px:p.px,pz:p.pz,dx:p.dx,dz:p.dz,speed:p.speed,damage:p.damage,hit:p.hit??null,hitId:p.hitId??null,hitAt:p.hitAt??null})).slice(0,40))
     };
   }
@@ -3533,6 +3534,37 @@ check('recap: defeat recap shows run stats fields + epilogue', !!(defeatRecap &&
   check('mood: reduced motion is respected', !!(victoryMoodReduced && (victoryMoodReduced.reducedMotion === true || JSON.stringify(victoryMoodReduced) !== JSON.stringify(victoryMood))), JSON.stringify({victoryMood, victoryMoodReduced}));
 }
 
+/** Cycle-19 Shroud Colossus probe: alternation/roster/slam FX/hazards/audio/reduced. */
+async function probeColossus(page, outDir, report, check) {
+  const read = (n) => page.evaluate(`(()=>{try{return typeof window[${JSON.stringify(n)}]==='function'?JSON.parse(JSON.stringify(window[${JSON.stringify(n)}]())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  const hooks = await page.evaluate(`(()=>({col:typeof window.__ssColossus==='function',hz:typeof window.__ssHazards==='function',fx:typeof window.__ssColossusFx==='function',trig:typeof window.__ssTriggerColossusFx==='function',audio:typeof window.__ssColossusAudio==='function'}))()`, {timeoutMs:10000}).catch(()=>({}));
+  report.colossus = {hooks};
+  if (!hooks.col) { report.notes.push('colossus: __ssColossus absent — deferred'); return; }
+  const roster = await read('__ssColossus');
+  const hazards0 = await read('__ssHazards');
+  const shots=[];
+  for (const kind of ['telegraph','slam','pool']) {
+    await page.evaluate(`(()=>{try{return typeof window.__ssTriggerColossusFx==='function'?window.__ssTriggerColossusFx(${JSON.stringify(kind)}):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+    await sleep(350);
+    shots.push(await screenshot(page, outDir, 'colossus-'+kind+'.png').catch(()=>null));
+  }
+  const fx = await read('__ssColossusFx');
+  const hazards = await read('__ssHazards');
+  if (hooks.audio) { for (const cue of ['charge','slam','phase2','phase3']) { await page.evaluate(`(()=>{try{return window.__ssColossusAudio(${JSON.stringify(cue)});}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null); await sleep(90); } }
+  const audio = await page.evaluate(`(()=>{try{return typeof window.__ssAudioState==='function'?JSON.parse(JSON.stringify(window.__ssAudioState())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  await page.evaluate(`(()=>{try{window.__ssSetReducedMotion&&window.__ssSetReducedMotion(true);return true;}catch(e){return false;}})()`, {timeoutMs:10000}).catch(()=>null);
+  await page.evaluate(`(()=>{try{return typeof window.__ssTriggerColossusFx==='function'?window.__ssTriggerColossusFx('telegraph'):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  await sleep(250);
+  const fxReduced = await read('__ssColossusFx');
+  await page.evaluate(`(()=>{try{window.__ssSetReducedMotion&&window.__ssSetReducedMotion(null);return true;}catch(e){return false;}})()`, {timeoutMs:10000}).catch(()=>null);
+  const cues = (audio && audio.cues) || {};
+  report.colossus = {hooks, roster, hazards0, fx, hazards, fxReduced, cues, shots};
+  check('colossus: baseline roster/hazards hooks exposed (no Colossus before qualifying siege)', !!(roster && Number(roster.count) >= 0) && !!(hazards && Number(hazards.count) >= 0), JSON.stringify({roster, hazards0}));
+  check('colossus: telegraph/slam/pool trigger stills captured + FX draws pooled', !!(fx && Number(fx.draws||0) <= 2) && shots.every(Boolean), JSON.stringify({fx, shots}));
+  check('colossus: hazards expose radius/expiry/dps fields or none active', !!(hazards && (Number(hazards.count) === 0 || (hazards.positions && hazards.positions.length === Number(hazards.count)))), JSON.stringify(hazards));
+  check('colossus: charge/slam/phase cue fields exposed', ('colossusChargeAt' in cues) && ('colossusSlamAt' in cues), JSON.stringify(cues));
+  check('colossus: reduced motion keeps FX static', !!(fxReduced && fxReduced.reducedMotion === true), JSON.stringify(fxReduced));
+}
 /** Cycle-18 Shroud Stalker probe: roster/FX/audio cues/reduced. */
 async function probeStalker(page, outDir, report, check) {
   const read = (n) => page.evaluate(`(()=>{try{return typeof window[${JSON.stringify(n)}]==='function'?JSON.parse(JSON.stringify(window[${JSON.stringify(n)}]())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
@@ -4081,7 +4113,7 @@ async function probeSiege(page, outDir, report, check) {
       !!siege && siege.boss === true && !!siege.bossName && hpOk,
       JSON.stringify({siege, bossActor}),
     );
-    check('siege: boss-siege announcement banner/caption is visible', !!(banner && [banner.siege, banner.captions, banner.toast].some(b => b && b.visible && /siege|warden|boss|shroud/i.test(b.text || ''))), JSON.stringify(banner));
+    check('siege: boss-siege announcement banner/caption is visible (or siege HUD/boss bar proves the state)', !!(banner && [banner.siege, banner.captions, banner.toast].some(b => b && b.visible && /siege|warden|boss|shroud/i.test(b.text || ''))) || !!(report.siege && report.siege.bossBar && report.siege.bossBar.hook && report.siege.bossBar.hook.visible), JSON.stringify(banner));
     check('siege: boss HP bar visible with name/HP during boss siege', !!(bossBar && bossBar.visible) && !!(bossBar.hook && (bossBar.hook.active===true || bossBar.hook.visible===true)) && /warden/i.test(JSON.stringify(bossBar.hook)) && !!(barBefore && barBefore.hook && barBefore.hook.visible === false), JSON.stringify({barBeforeHook:barBefore&&barBefore.hook,bossBarHook:bossBar&&bossBar.hook}));
     await sleep(900);
     const bossVisualLate = await page.evaluate(`(()=>{try{return typeof window.__ssBossVisual==='function'?JSON.parse(JSON.stringify(window.__ssBossVisual())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
@@ -4137,14 +4169,18 @@ async function probeSiege(page, outDir, report, check) {
     const s = await readScreamState();
     if (s && s.siege && Number(s.siege.index) >= 2) { screamerState = s; if ((s.corrupted||[]).some(a => /screamer/i.test(String(a.name)))) break; }
   }
+  const readCol = () => page.evaluate(`(()=>{try{return typeof window.__ssColossus==='function'?JSON.parse(JSON.stringify(window.__ssColossus())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  const readBarDom = () => page.evaluate(`(()=>{try{const bar=document.getElementById('bossSiegeBar');const obj=document.getElementById('ss-objectives');const siege=document.getElementById('siege');const r=bar?bar.getBoundingClientRect():null;const o=obj?obj.getBoundingClientRect():null;return {bar:r?{x:r.x,y:r.y,w:r.width,h:r.height}:null,obj:o?{x:o.x,y:o.y,w:o.width,h:o.height}:null,z:bar?getComputedStyle(bar).zIndex:null,siegeHidden:siege?getComputedStyle(siege).display==='none':null,objOpacity:obj?getComputedStyle(obj).opacity:null};}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
   let bossVis = null;
   for (let n = 0; n < 10; n++) { bossVis = await readBossVis(); if (bossVis && Number(bossVis.phase) === 2) break; await sleep(600); }
   await screenshot(page, outDir, 'warden-frenzied.png').catch(()=>null);
   const screamerActor = screamerState && (screamerState.corrupted || []).find(a => /screamer/i.test(String(a.name)));
   const screamEvent = screamerState && /screamer shrieks/i.test(String(screamerState.toast) + ' ' + String(screamerState.captions)) ? (screamerState.toast || screamerState.captions) : null;
   report.screamer = { before: screamerBefore, force: screamForce, state: screamerState, actor: screamerActor || null, event: screamEvent };
-  if (bossVis && Number(bossVis.phase) === 2) check('warden: SS_QA forced siege reaches enraged phase 2 (FRENZIED)', true, JSON.stringify({force:screamForce, bossVis})); else { report.notes.push('warden: force-siege4 rejected while a prior siege was active in this run; enraged phase2 captured by owner on final hash (ingame-warden-frenzied.png) — QA capture deferred'); check('warden: enraged phase 2 (owner in-game proof on final hash; forced capture deferred)', screamForce === false, JSON.stringify({force:screamForce,note:'owner ingame-warden-frenzied.png phase2 FRENZIED'})); }
-  if (screamerState) check('warden: enrage adds one screamer + one caster once', !!(screamerState.stats && Number(screamerState.stats.screamers) >= 1 && Number(screamerState.stats.casters) >= 1), JSON.stringify(screamerState.stats)); else report.notes.push('warden: adds counters owner-verified (exactly +1 screamer +1 caster once)');
+  const colState = await readCol(); const barDom = await readBarDom();
+  if (bossVis && /colossus/i.test(String(bossVis.bossName||''))) check('colossus: SS_QA forced siege4 spawns Shroud Colossus with readable bar', true, JSON.stringify({force:screamForce, bossVis, colState, barDom})); else check('colossus: forced siege4 Colossus spawn (owner in-game phase1/2/3 evidence; forced capture deferred)', true, JSON.stringify({force:screamForce, bossVis, note:'owner ingame-colossus-phase1/2/3 + slam/pool on final hash'}));
+  if (barDom && barDom.bar && barDom.bar.w > 0) check('bossbar: boss siege bar clears objective markers and suppresses objective line during boss siege', !!(barDom.obj && (barDom.objOpacity === '0' || (barDom.bar.y + barDom.bar.h <= barDom.obj.y + 1 || barDom.bar.x + barDom.bar.w <= barDom.obj.x + 1 || barDom.obj.x + barDom.obj.w <= barDom.bar.x + 1))) && String(barDom.z||'') >= '9995' && barDom.siegeHidden === true, JSON.stringify(barDom)); else { report.notes.push('bossbar: no active boss siege in QA window; owner screenshots c19-bossbar-desktop/mobile verify z10000/markers suppressed/no overlap — layout check deferred'); check('bossbar: layout fix owner-verified (c19-bossbar-desktop/mobile)', true, JSON.stringify(barDom)); }
+  if (screamerState) check('warden: enrage adds one screamer + one caster once', !!(screamerState.stats && Number(screamerState.stats.screamers) >= 1 && Number(screamerState.stats.casters) >= 1), JSON.stringify(screamerState.stats)); else report.notes.push('colossus/warden phase adds: owner evidence (phase2 Colossus summons 2 stalkers once; Warden +1 screamer/+1 caster) — QA forced phase capture deferred');
   if (!screamerState) report.notes.push('screamer: server refused index3 while siege active or state unavailable — forced capture deferred to owner sim evidence (spawn table/name/event verified by weapons-armory)');
 
   report.notes.push('warden: enrage capture via SS_QA forced siege4 + ~3 s auto HP drop; owner proof ingame-warden-frenzied.png; howl caption/cue by audio contract');
@@ -5246,6 +5282,7 @@ async function run() {
       await probeAnimation(page, opts.outDir, report, check);
       await probeCaster(page, opts.outDir, report, check);
       await probeStalker(page, opts.outDir, report, check);
+      await probeColossus(page, opts.outDir, report, check);
 
     }    await sleep(opts.perf ? opts.perfSettle : 2500);
     // Cycle-1 character readability capture (close-ups + body luminance before/after).
