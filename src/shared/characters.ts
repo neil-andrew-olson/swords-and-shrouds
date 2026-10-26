@@ -11,21 +11,20 @@ export type PlayerCharacter = keyof typeof PLAYER_CHARACTERS;
 export function isPlayerCharacter(value:string):value is PlayerCharacter {
   return Object.hasOwn(PLAYER_CHARACTERS,value);
 }
-/** Cycle-7 undead silhouettes: two bases + two variants that reuse the same rigs/clip sets. */
-export const UNDEAD_ASSETS = ['zombie','skeleton-soldier','zombie-bloated','skeleton-armoured'] as const;
+/** Undead and goblin silhouettes use deterministic visual variants; combat stays melee-only. */
+export const UNDEAD_ASSETS = ['zombie','skeleton-soldier','zombie-bloated','skeleton-armoured','goblin'] as const;
 export type UndeadAsset = typeof UNDEAD_ASSETS[number];
-/** Deterministic undead silhouette: id%4 -> zombie | skeleton-soldier | zombie-bloated | skeleton-armoured.
- *  Spawn ids are `a<N>` with a stable increment, so a region mixes 50 % base rigs and 50 % variants
- *  (≈25 % per variant) deterministically; map/gameplay logic never depends on the visual asset. */
+/** Deterministic silhouette: id%5 -> zombie | skeleton | bloated | armoured | goblin.
+ *  Stable spawn ids give each appearance 20 % of the horde without coupling art to game rules. */
 export function undeadVariant(a:Actor):UndeadAsset {
   const numeric=Number(a.id.replace(/[^0-9]/g,'')||0);
-  return UNDEAD_ASSETS[((numeric%4)+4)%4];
+  return UNDEAD_ASSETS[((numeric%5)+5)%5];
 }
 /** Base asset a variant falls back to if its GLB is missing/failed to load (undefined for bases). */
 export function characterAssetFallback(a:Actor):string|undefined {
   if(a.kind!=='zombie') return undefined;
   const asset=undeadVariant(a);
-  return asset==='zombie-bloated'?'zombie':asset==='skeleton-armoured'?'skeleton-soldier':undefined;
+  return asset==='zombie-bloated'||asset==='goblin'?'zombie':asset==='skeleton-armoured'?'skeleton-soldier':undefined;
 }
 export function characterAsset(a:Actor):string {
   if(a.kind==='player') return a.appearance && isPlayerCharacter(a.appearance) ? a.appearance : 'templar';

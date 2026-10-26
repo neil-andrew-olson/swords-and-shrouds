@@ -455,7 +455,8 @@ function installCombatHitHooks(){
 }
 export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,unarmed=false){
  const model=clone(source.scene);model.updateMatrixWorld(true);
- const bounds=meshBounds(model),scale=1.85/bounds.getSize(new THREE.Vector3()).y;
+ const authoredHeight=source.scene.userData.characterHeight;
+ const bounds=meshBounds(model),scale=(typeof authoredHeight==='number'?authoredHeight:1.85)/bounds.getSize(new THREE.Vector3()).y;
  const pivot=new THREE.Group();pivot.add(model);model.scale.multiplyScalar(scale);model.position.y-=bounds.min.y*scale;pivot.rotation.y=Math.PI;
  model.traverse(o=>{if(o instanceof THREE.Mesh){o.castShadow=o.receiveShadow=true;const list=Array.isArray(o.material)?o.material:[o.material];const copies=list.map(m=>m.clone());o.material=Array.isArray(o.material)?copies:copies[0];}});
  pivot.updateMatrixWorld(true);
@@ -502,14 +503,14 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
  const headRef=skinBody?skeletonBone(skinBody.skeleton,['mixamorigHead','Head','Bip01_Head1','head.x','c_subneck_1.x','neck.x','mixamorigNeck','Neck']):undefined;
  const head=headRef?.bone??getBone('mixamorigHead');
  if(head&&(a.kind==='corrupted'||a.kind==='zombie')){
-  const tier=undeadEliteTier(a);
-  const eyeColor=a.kind==='corrupted'?(tier>=3?0xff3a7a:0xff253a):(tier>0?0xff5533:0x9ae640);
+  const tier=undeadEliteTier(a),goblin=!!source.scene.getObjectByName('GoblinBody');
+  const eyeColor=goblin?0xd6a24a:a.kind==='corrupted'?(tier>=3?0xff3a7a:0xff253a):(tier>0?0xff5533:0x9ae640);
   const eyeMat=new THREE.MeshBasicMaterial({color:eyeColor});
   const eyeGeo=eyePairGeometry(.025,.05);
   const eyes=new THREE.Mesh(eyeGeo,eyeMat);
   eyes.name='undead-eye';eyes.position.set(0,.07,.11);
   head.add(eyes);proceduralGeometries.push(eyeGeo);
-  if(tier>0){
+  if(tier>0&&!goblin){
    // Subtle additive glow (violet-red) so elites read at range without blowing out the face.
    const haloGeo=new THREE.SphereGeometry(.075,8,4);
    const halo=new THREE.Mesh(haloGeo,new THREE.MeshBasicMaterial({color:a.kind==='corrupted'?0xb46cff:0xff4433,transparent:true,opacity:.3,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}));
@@ -527,7 +528,7 @@ export function customCharacter(source:GLTF,a:Actor,equipment:Map<string,GLTF>,u
  const lookDeep=soldier?0x474b53:(DEEP_CLOTH[lookKey]??0x3a4258);
  let proceduralHeadwear:{group:THREE.Group;head:THREE.Object3D;style:'great-helm'|'hood'}|null=null;
  let headwearInfo:{style:'great-helm'|'hood';tris:number}|null=null;
- if(head&&(a.kind==='player'||a.kind==='soldier')){
+ if(head&&(a.kind==='player'||a.kind==='soldier')&&!source.scene.userData.pbrCharacter){
   const style=helmetStyleFor(a);
   const headwear=style==='hood'?buildHood(lookDeep):buildGreatHelm();
   const group=new THREE.Group();group.name=style==='hood'?'human-hood':'human-great-helm';

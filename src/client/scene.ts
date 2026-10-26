@@ -9,7 +9,7 @@ import {CharacterAssets,loadAsset} from './assets';
 import {CASTLES,CAMPS,REGIONS,NEST,START,walls,dist} from '../shared/world';
 import type {Game,Actor} from '../shared/types';
 import {createPostFX,type PostFX} from './postfx';
-import {CombatEffects} from './effects';
+import {CombatEffects,torchLightProfile} from './effects';
 import {addRuins,WINDMILL,WINDMILL_SAILS} from './ruins';
 import {applySurfaceTextures} from './terrain-surfaces';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
@@ -934,12 +934,12 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
   }
   /** window.__ssEnemyVariants(): undead variant mapping + asset availability for QA. */
   enemyVariants(){
-   const mapping:{[variant:string]:string}={'zombie-bloated':'zombie','skeleton-armoured':'skeleton-soldier'};
+   const mapping:{[variant:string]:string}={'zombie-bloated':'zombie','skeleton-armoured':'skeleton-soldier','goblin':'zombie'};
    const variants:{[name:string]:{asset:string;available:boolean;fallback:string}}={};
    for(const [variant,fallback] of Object.entries(mapping)){
     variants[variant]={asset:variant,available:this.characterAssets.custom.has(variant),fallback};
    }
-   return {mapping,rule:'undead id%4: 0 zombie, 1 skeleton-soldier, 2 zombie-bloated, 3 skeleton-armoured',variants,base:{zombie:this.characterAssets.custom.has('zombie'),'skeleton-soldier':this.characterAssets.custom.has('skeleton-soldier')}};
+   return {mapping,rule:'undead id%5: 0 zombie, 1 skeleton-soldier, 2 zombie-bloated, 3 skeleton-armoured, 4 goblin',variants,base:{zombie:this.characterAssets.custom.has('zombie'),'skeleton-soldier':this.characterAssets.custom.has('skeleton-soldier')}};
   }
   /** window.__ssDeviceProfile(): detected device class + quality defaults for QA/mobile checks. */
   deviceInfo(){
@@ -947,18 +947,18 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
   }
   /** window.__ssPreviewEnemy(appearance,distance): frame an undead rig in an open spot in front of camera. */
   async previewEnemy(appearance:string|null,distance=10){
-   const allowed=['zombie','skeleton-soldier','zombie-bloated','skeleton-armoured'];
+   const allowed=['zombie','skeleton-soldier','zombie-bloated','skeleton-armoured','goblin'];
    if(appearance!==null&&!allowed.includes(appearance))return {ok:false,appearance,distance,ready:false,reason:'unsupported-appearance',allowed};
    if(this.qaBody){this.scene.remove(this.qaBody);this.qaBody.traverse(o=>{if(o instanceof THREE.Mesh&&!o.userData.sharedAsset)o.geometry.dispose();});this.qaBody=null;this.qaBodyRig=null;this.qaBodyActor=null;}
    if(appearance===null)return {ok:true,appearance:null,distance:0,ready:true,actorId:null};
    let source=this.characterAssets.custom.get(appearance);
    if(!source){try{source=await loadAsset('custom/'+appearance);this.characterAssets.custom.set(appearance,source);}catch{}}
-   const fallback={'zombie-bloated':'zombie','skeleton-armoured':'skeleton-soldier'}[appearance];
+   const fallback={'zombie-bloated':'zombie','skeleton-armoured':'skeleton-soldier','goblin':'zombie'}[appearance];
    if(!source&&fallback)source=this.characterAssets.custom.get(fallback);
    if(!source)return {ok:false,appearance,distance,ready:false,reason:'asset-unavailable',actorId:null};
-   // Encode the variant index in the id (undeadVariant uses id%4) and route through CharacterAssets so
+   // Encode the variant index in the id (undeadVariant uses id%5) and route through CharacterAssets so
    // the rig registers with the character rig registry (QA can then __ssTriggerEnemyHit(actorId)).
-   const idx={'zombie':0,'skeleton-soldier':1,'zombie-bloated':2,'skeleton-armoured':3}[appearance]??0;
+   const idx={'zombie':0,'skeleton-soldier':1,'zombie-bloated':2,'skeleton-armoured':3,'goblin':4}[appearance]??0;
    const actor={id:'qa-preview-'+idx,kind:'zombie',hp:100,maxHp:100,attackSerial:0,weapon:'sword',appearance} as unknown as Actor;
    const created=this.characterAssets.create(actor);
    const rig=created??customCharacter(source,actor,this.characterAssets.custom);
@@ -1590,12 +1590,13 @@ const towerLod=await loadAsset('custom/castle_tower_lod').catch(()=>null);
     let j=max-1;while(j>0&&d2s[j-1]>d2){d2s[j]=d2s[j-1];idx[j]=idx[j-1];j--;}
     d2s[j]=d2;idx[j]=s;
    }
+   const reduced=this.reducedActive();
    for(let i=0;i<pool.length;i++){
     const light=pool[i];
     const source=i<max&&idx[i]>=0?sources[idx[i]]:undefined;
     if(!source){light.intensity=0;continue;}
-    const flicker=0.86+Math.sin(time*10+source.seed)*0.14+Math.sin(time*24+source.seed*2.7)*0.07;
-    light.position.set(source.x,source.y,source.z);light.color.setHex(source.color);light.distance=source.distance;light.intensity=source.intensity*Math.max(0.2,flicker);
+    const profile=torchLightProfile(source.intensity,source.distance,time,source.seed,reduced);
+    light.position.set(source.x,source.y,source.z);light.color.setHex(source.color);light.distance=profile.distance;light.intensity=profile.intensity;
    }
   }
   /** Region fog/light grading, moonlight follow + pooled torch flicker. */

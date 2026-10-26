@@ -31,7 +31,7 @@ const BUDGETS = {
   abbey_ruin: 14000,
   notice_board: 3000, fence_segment: 3000, torch_post: 3000,
   windmill: 2500, windmill_sails: 800,
-  'zombie-bloated': 11000, 'skeleton-armoured': 8500,
+  'zombie-bloated': 11000, 'skeleton-armoured': 8500, goblin: 12000,
   fortress_keep: 14000, castle_tower: 14000,
   well: 6000, chest: 6000, bench: 6000, rock_cluster: 6000, grass_tuft: 1500,
   camp_tent: 6000, stone_wall: 8000,
@@ -43,6 +43,9 @@ const FORBIDDEN_EXT = ['KHR_draco_mesh_compression', 'KHR_texture_basisu', 'EXT_
 
 function readGlb(file) {
   const raw = fs.readFileSync(file);
+  if (raw.length < 10 || raw[0] !== 0x1f || raw[1] !== 0x8b) throw new Error('not a gzip container');
+  if (raw[2] !== 8) throw new Error(`gzip compression method ${raw[2]} (expected deflate)`);
+  if (raw[8] !== 2) throw new Error(`gzip XFL=${raw[8]} (expected 2: maximum compression / level 9)`);
   const buf = zlib.gunzipSync(raw);
   if (buf.toString('ascii', 0, 4) !== 'glTF') throw new Error('not a GLB');
   if (buf.readUInt32LE(4) !== 2) throw new Error('not glTF 2.0 container');

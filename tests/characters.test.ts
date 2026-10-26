@@ -34,24 +34,26 @@ test('all actor kinds select generated character models',()=>{
  assert.equal(characterAsset({...a,kind:'soldier',role:'heavy'}),'berserker');
  assert.equal(characterAsset({...a,kind:'soldier',role:undefined}),'ally');
  assert.equal(characterAsset({...a,kind:'corrupted'}),'fallen');
- // Cycle-7 deterministic undead silhouettes: id%4 -> zombie | skeleton-soldier | zombie-bloated | skeleton-armoured.
+ // Deterministic undead/goblin silhouettes: id%5 -> five melee appearances.
  const undead=(id:string)=>({...a,kind:'zombie' as const,id});
  assert.equal(characterAsset(undead('z0')),'zombie');
  assert.equal(characterAsset(undead('z1')),'skeleton-soldier');
  assert.equal(characterAsset(undead('z2')),'zombie-bloated');
  assert.equal(characterAsset(undead('z3')),'skeleton-armoured');
+ assert.equal(characterAsset(undead('z4')),'goblin');
  const reachable=new Set<string>();const fallbacks:Record<string,string|undefined>={};
- for(let n=0;n<16;n++){
+ for(let n=0;n<20;n++){
   const actor=undead('a'+n),asset=characterAsset(actor);
   reachable.add(asset);
   assert.equal(characterAsset(actor),asset,'deterministic id '+n);
   fallbacks[asset]=characterAssetFallback(actor);
  }
- assert.deepEqual([...reachable].sort(),[...UNDEAD_ASSETS].sort(),'all four undead assets reachable');
+ assert.deepEqual([...reachable].sort(),[...UNDEAD_ASSETS].sort(),'all five undead/goblin assets reachable');
  assert.equal(fallbacks['zombie'],undefined,'base zombie has no fallback');
  assert.equal(fallbacks['skeleton-soldier'],undefined,'base skeleton has no fallback');
  assert.equal(fallbacks['zombie-bloated'],'zombie','bloated falls back to the base zombie');
  assert.equal(fallbacks['skeleton-armoured'],'skeleton-soldier','armoured falls back to the base skeleton');
+ assert.equal(fallbacks['goblin'],'zombie','goblin falls back to the base zombie');
  // Variants keep the same actor kind/rig identity; non-undead kinds never report a fallback.
  assert.equal(characterAssetFallback({...a,kind:'player'}),undefined);
  assert.equal(characterAssetFallback({...a,kind:'corrupted'}),undefined);

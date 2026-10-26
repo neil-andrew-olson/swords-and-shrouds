@@ -1,15 +1,23 @@
 import * as THREE from 'three';
 
 /**
- * Pooled combat particles (sparks, blood, dust, embers).
- *
- * Everything is instanced: three InstancedMeshes total no matter how much combat is
- * happening, no per-frame allocations (flat typed arrays, swap-remove compaction) and
- * a hard cap per pool so the frame budget stays predictable. The caller passes a
- * reusable vector (no cloning inside the hot path).
+ * Pooled combat and ambient particles (sparks, blood, dust, embers, smoke and weather).
+ * Fixed-capacity instanced meshes, flat typed arrays and swap-remove compaction keep the
+ * frame budget predictable. The caller passes a reusable vector (no hot-path cloning).
  */
 
 export type SparkKind = 'metal' | 'flesh' | 'undead';
+
+export function torchLightProfile(baseIntensity: number, baseDistance: number, time: number, seed: number, reducedMotion = false): {intensity: number; distance: number} {
+  const intensity = Number.isFinite(baseIntensity) ? Math.max(0, baseIntensity) : 0;
+  const distance = Number.isFinite(baseDistance) ? Math.max(0, baseDistance) : 0;
+  if (reducedMotion) return {intensity, distance};
+  const t = Number.isFinite(time) ? time : 0;
+  const s = Number.isFinite(seed) ? seed : 0;
+  const wave = Math.sin(t * 10 + s) * 0.14 + Math.sin(t * 24 + s * 2.7) * 0.07;
+  const radiusScale = Math.max(0.96, Math.min(1.04, 1 + wave * 0.18));
+  return {intensity: intensity * Math.max(0.2, 0.86 + wave), distance: distance * radiusScale};
+}
 
 const MAX_DT = 0.1;
 
@@ -555,8 +563,6 @@ export class CombatEffects {
     this.smokePool.update(step);
     this.motePool.update(step);
     this.snowPool.update(step);
-    this.smokePool.update(step);
-    this.motePool.update(step);
   }
 
   /** Slow torch-smoke wisp above a fire (additive pale haze, grows and fades). */

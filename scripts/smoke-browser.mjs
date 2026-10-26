@@ -356,6 +356,7 @@ function parseArgs(argv) {
     url: null,
     coop: false,
     perf: false,
+    perfLite: false,
     characters: false,
     views: false,
     probePreview: false,
@@ -377,6 +378,7 @@ function parseArgs(argv) {
     else if (a === '--url') opts.url = argv[++i];
     else if (a === '--coop') opts.coop = true;
     else if (a === '--perf') opts.perf = true;
+    else if (a === '--perf-lite') opts.perfLite = true;
     else if (a === '--characters') opts.characters = true;
     else if (a === '--views') opts.views = true;
     else if (a === '--probe-preview') opts.probePreview = true;
@@ -1355,6 +1357,7 @@ async function selectorRect(page, selector) {
 }
 
 async function clickSelector(page, selector) {
+  await page.evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});if(el)el.scrollIntoView({block:'center',inline:'center'});})()`);
   const rect = await selectorRect(page, selector);
   if (!rect) throw new Error(`cannot click missing/invisible element: ${selector}`);
   await clickAt(page, rect.x, rect.y);
@@ -2726,7 +2729,7 @@ async function probeCharacterFx(page, report, check) {
 
 
 /** Cycle-7 undead-variant probe: capture base zombie/skeleton-soldier vs zombie-bloated and
- * skeleton-armoured for the deterministic id subset (id%4 mapping), check distinct silhouettes,
+ * skeleton-armoured for the deterministic id subset (id%5 mapping), check distinct silhouettes,
  * animation motion/grounding, and report the hook/fallback state. */
 async function probeEnemyVariants(page, outDir, report, check) {
   const hook = await page.evaluate(
@@ -2739,12 +2742,13 @@ async function probeEnemyVariants(page, outDir, report, check) {
   const open = a => Math.abs(a.x || 0) > 12 || (typeof a.z === 'number' && a.z < -200);
   const pick = fn => actors.filter(a => enemy(a) && fn(num(a))).sort((a, b) => (open(b) ? 1 : 0) - (open(a) ? 1 : 0))[0] || null;
   const targets = {
-    zombieBase: pick(n => n % 4 === 0),
-    skeletonBase: pick(n => n % 4 === 1),
-    bloated: pick(n => n % 4 === 2),
-    armoured: pick(n => n % 4 === 3),
+    zombieBase: pick(n => n % 5 === 0),
+    skeletonBase: pick(n => n % 5 === 1),
+    bloated: pick(n => n % 5 === 2),
+    armoured: pick(n => n % 5 === 3),
   };
-  report.enemyVariants = {hook, mapping: 'id%4: 0 zombie, 1 skeleton-soldier, 2 zombie-bloated, 3 skeleton-armoured', actors: {}};
+  targets.goblin = pick(n => n % 5 === 4);
+  report.enemyVariants = {hook, mapping: 'id%5: 0 zombie, 1 skeleton-soldier, 2 zombie-bloated, 3 skeleton-armoured, 4 goblin', actors: {}};
   // Variant checks require the cycle-7 hook/preload state; an older deployed build has no variants
   // (id-based actor selection would just frame base assets under variant labels), so skip cleanly.
   if (!hook) {
@@ -2775,14 +2779,15 @@ async function probeEnemyVariants(page, outDir, report, check) {
   report.enemyVariants.captures = captures;
   if (hook && hook.variants) {
     check(
-      'enemy: both variant assets report available/preloaded + fallback mapping',
+      'enemy: all three variant assets report available/preloaded + goblin fallback',
       hook.variants['zombie-bloated'] && hook.variants['zombie-bloated'].available === true &&
-        hook.variants['skeleton-armoured'] && hook.variants['skeleton-armoured'].available === true,
+        hook.variants['skeleton-armoured'] && hook.variants['skeleton-armoured'].available === true &&
+        hook.variants['goblin'] && hook.variants['goblin'].available === true && hook.variants['goblin'].fallback === 'zombie',
       JSON.stringify(hook.variants),
     );
     check(
-      'enemy: variant mapping rule is the deterministic id%4 mix',
-      /id%4|%4/i.test(String(hook.rule || '')) || (hook.mapping && hook.mapping['zombie-bloated'] === 'zombie' && hook.mapping['skeleton-armoured'] === 'skeleton-soldier'),
+      'enemy: variant mapping rule is the deterministic id%5 mix',
+      /id%5|%5/i.test(String(hook.rule || '')) || (hook.mapping && hook.mapping['zombie-bloated'] === 'zombie' && hook.mapping['skeleton-armoured'] === 'skeleton-soldier' && hook.mapping['goblin'] === 'zombie'),
       JSON.stringify({rule: hook.rule, mapping: hook.mapping}),
     );
   }
@@ -3062,7 +3067,7 @@ async function captureMobileChecks(page, {report, check, outDir, opts}) {
 }
 
 
-/** Cycle-8 `__ssPreviewEnemy(appearance, distance)`: frame all 4 undead appearances at 2.8 m + 10 m,
+/** Cycle-8 `__ssPreviewEnemy(appearance, distance)`: frame all 5 undead/goblin appearances at 2.8 m + 10 m,
  * verify distinct silhouettes, and that null restores the normal view. */
 async function probeEnemyPreview(page, outDir, report, check) {
   const hookName = await page.evaluate(
@@ -3078,7 +3083,7 @@ async function probeEnemyPreview(page, outDir, report, check) {
     `(()=>{try{const f=window[${JSON.stringify(hookName)}];const r=f(${name === null ? 'null' : JSON.stringify(name)}, ${JSON.stringify({distance})});return r===undefined?{ok:true}:JSON.parse(JSON.stringify(r));}catch(e){return {ok:false,error:String((e&&e.message)||e)};}})()`,
     {timeoutMs: 15000},
   ).catch(error => ({ok: false, error: String(error?.message || error)}));
-  const appearances = ['zombie', 'skeleton-soldier', 'zombie-bloated', 'skeleton-armoured'];
+  const appearances = ['zombie', 'skeleton-soldier', 'zombie-bloated', 'skeleton-armoured', 'goblin'];
   const captures = {};
   const base = await screenshot(page, outDir, 'preview-enemy-base.png');
   for (const name of appearances) {
@@ -3100,7 +3105,7 @@ async function probeEnemyPreview(page, outDir, report, check) {
   }
   report.enemyPreview = {hook: hookName, captures};
   const pairs = {};
-  for (const [a, b] of [['zombie', 'zombie-bloated'], ['skeleton-soldier', 'skeleton-armoured']]) {
+  for (const [a, b] of [['zombie', 'zombie-bloated'], ['skeleton-soldier', 'skeleton-armoured'], ['zombie', 'goblin']]) {
     for (const d of ['2.8', '10']) {
       const ca = captures[a]?.[d], cb = captures[b]?.[d];
       if (!ca || !cb) continue;
@@ -3112,10 +3117,10 @@ async function probeEnemyPreview(page, outDir, report, check) {
   }
   report.enemyPreview.distinctness = pairs;
   const rendered = appearances.filter(name => captures[name]?.['2.8']?.stats?.sampled > 1000 && captures[name]?.['10']?.stats?.sampled > 1000);
-  check('enemy-preview: __ssPreviewEnemy frames all 4 undead appearances at 2.8 m + 10 m', rendered.length === appearances.length, `${rendered.length}/${appearances.length} rendered: ${rendered.join(',')}`);
-  const distinct = Object.values(pairs).length > 0 && Object.values(pairs).filter(d => d && (d.meanAbsLum > 0.5 || d.changedPct > 1)).length >= 3;
+  check('enemy-preview: __ssPreviewEnemy frames all 5 undead/goblin appearances at 2.8 m + 10 m', rendered.length === appearances.length, `${rendered.length}/${appearances.length} rendered: ${rendered.join(',')}`);
+  const distinct = Object.values(pairs).length === 6 && Object.values(pairs).filter(d => d && (d.meanAbsLum > 0.5 || d.changedPct > 1)).length === 6;
   check('enemy-preview: base vs variant silhouettes distinct at both distances', distinct, JSON.stringify(pairs));
-  const lastBodyShot = captures['skeleton-armoured']?.['2.8']?.file || captures['zombie']?.['2.8']?.file || captures['skeleton-armoured']?.['10']?.file || null;
+  const lastBodyShot = captures['goblin']?.['2.8']?.file || captures['zombie']?.['2.8']?.file || captures['goblin']?.['10']?.file || null;
   const restored = await screenshot(page, outDir, 'preview-enemy-restored.png');
   const restoreResult = await call(null, 10).catch(() => null);
   const restoreDiff = lastBodyShot ? await comparePngs(page, lastBodyShot, restored, {x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8}).catch(() => null) : null;
@@ -3360,7 +3365,7 @@ async function probeHitFeedback(page, outDir, report, check) {
   }
   const readFx = () => page.evaluate(`(()=>{try{return JSON.parse(JSON.stringify(window.__ssEnemyHitFx()));}catch(e){return null;}})()`, {timeoutMs: 10000}).catch(() => null);
   const rigIds = hooks.ids ? await page.evaluate(`(()=>{try{return window.__ssHitRigIds();}catch(e){return [];}})()`, {timeoutMs: 10000}).catch(() => []) : [];
-  const appearances = ['zombie', 'skeleton-soldier', 'zombie-bloated', 'skeleton-armoured'];
+  const appearances = ['zombie', 'skeleton-soldier', 'zombie-bloated', 'skeleton-armoured', 'goblin'];
   const previewHook = await page.evaluate(`typeof window.__ssPreviewEnemy==='function'`, {timeoutMs: 10000}).catch(() => false);
   const results = [];
   for (const name of appearances) {
@@ -3371,7 +3376,7 @@ async function probeHitFeedback(page, outDir, report, check) {
     const idsNow = hooks.ids ? await page.evaluate(`(()=>{try{return window.__ssHitRigIds();}catch(e){return [];}})()`, {timeoutMs: 10000}).catch(() => []) : rigIds;
     const targetId = (idsNow && idsNow.length) ? idsNow[idsNow.length - 1] : undefined;
     const before = await readFx();
-    // Frame evidence only for one base and one variant (state evidence covers all 4; SwiftShader
+    // Frame evidence only for one base and one variant (state evidence covers all 5; SwiftShader
     // screenshots are very slow when each preview loads a new rig).
     const captureFrames = name === 'zombie' || name === 'zombie-bloated';
     const beforeShot = previewHook && captureFrames ? await screenshot(page, outDir, `hit-${name}-before.png`).catch(() => null) : null;
@@ -5267,7 +5272,7 @@ async function run() {
     }
     // Cycle-9 early feature probes (run before the idle corruption timer kills the player so the
     // hit-flash still/audio state/spear grip frames are captured in a live camera).
-    if (!opts.coop && !opts.mobile && (opts.characters || opts.perf || opts.probes)) {
+    if (!opts.coop && !opts.mobile && (opts.characters || (opts.perf && !opts.perfLite) || opts.probes)) {
       await probeHitHold(page, opts.outDir, report, check);
       await probeWeapons(page, opts.outDir, report, check);
       await probeAudioState(page, report, check);
@@ -5445,10 +5450,10 @@ async function run() {
       await probeCharacterFx(page, report, check);
       // Heavy cycle-7/8 probes run in the feature/perf passes (fresh-build smoke and live baselines
       // stay lean; live feature hooks are covered by the deployed mobile/targeted pass after deploy).
-      if (opts.characters || opts.perf || opts.probes) {
+      if (opts.characters || (opts.perf && !opts.perfLite) || opts.probes) {
         // Cycle-7 undead variants (base vs bloated/armoured), screenshot + distinctness checks.
         await probeEnemyVariants(page, opts.outDir, report, check);
-        // Cycle-8 enemy QA framing hook (`__ssPreviewEnemy`) for all 4 undead appearances.
+        // Cycle-8 enemy QA framing hook (`__ssPreviewEnemy`) for all 5 undead/goblin appearances.
         await probeEnemyPreview(page, opts.outDir, report, check);
         // Cycle-8 hit feedback v2 (flash/stagger/impact, variant coverage, reduced-motion suppression).
         await probeHitFeedback(page, opts.outDir, report, check);
@@ -5728,11 +5733,11 @@ async function run() {
     check('renderer string available', !!(report.renderer && report.renderer.webgl && report.renderer.renderer), report.renderer?.renderer || 'none');
     const expectedShots = ['01-third-person.png', '02-first-person.png', '03-combat.png', '04-third-person-return.png'];
     const shotNames = report.screenshots.map(f => path.basename(f));
-    if (opts.characters || opts.perf || opts.probes || opts.url) {
+    if (opts.characters || (opts.perf && !opts.perfLite) || opts.probes || opts.url) {
       await probeRecapMood(page, opts.outDir, report, check);
   
     }
-    if (opts.characters || opts.perf || opts.probes || opts.url) await probeSiege(page, opts.outDir, report, check);
+    if (opts.characters || (opts.perf && !opts.perfLite) || opts.probes || opts.url) await probeSiege(page, opts.outDir, report, check);
     // (siege forced last: it can end the campaign, so no visual checks follow)
 
     check('required screenshots saved', expectedShots.every(s => shotNames.includes(s)), shotNames.join(', '));
