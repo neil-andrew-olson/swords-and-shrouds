@@ -2521,3 +2521,16 @@ Fresh bundled-Node-24 build reproduced index-tknOtxLM.js exactly; freshness pass
 4) BASE REGRESSION - PASS. Perf spawn 187 calls / 1,646,274 tris (<290/<2.15M; high sample), payload 18,394,681 B = 17.54 MiB; foot-slide 1.11e-16; stalker roster/FX/lunge cues; caster roster/trigger stills/cues; look torso 92.4/limb 72.3; markers 3/5 bob-false; windmill angle/reduced 0; torch bed .018/0; journal/lore/recap/mood/difficulty/wayfinding; 11 weapons/bash; mobile 26/26; co-op 22/22; live baseline 34/34.
 
 Cycle-19 verdict: PASS on Colossus roster/telegraph/slam/pool hooks, FX/reduced/cues/captions and regressions; deferred: QA forced phase2/3 + slam-happy-path stills (no force-phase hook; owner in-game evidence on this dist), boss-bar DOM capture during an active event (owner screenshots), audio landmark ear check, physical-device/real-GPU/perceptual, hardware rumble. After deploy: final live pass + task-139 complete.
+
+
+### Final live deployment verification - cycle-19 (game c98ff1d2, hosting 91a70c22)
+
+Live runs: deployed 34/34 (qa/live-batch22-deployed), feature/probes/views 115/116 (qa/live-feature-c19), live mobile 26/26 (qa/live-mobile-c19). Live serves index-DIThYzGd.js (998,596 B) = hosting build of authoritative index-tknOtxLM.js (998,421 B; +175 B); /health OK; 11 cards; payload 18,366,056 B = 17.52 MiB / 96 assets; 0 page/console errors, 0 404s (external Cloudflare beacon only); night TP 56.55.
+- COLOSSUS live: __ssColossus() count0 baseline / __ssHazards() 0; trigger stills colossus-telegraph/slam/pool; FX draws 1 pooled, reduced static; hazards fields count/positions/expires; cues colossusChargeAt/SlamAt/PhaseAt 1/1/1 via __ssColossusAudio; owner phase2 hp246/420 and phase3 hp120/420 in-game evidence on this dist acknowledged (no force-phase hook); phase2 summons/one-time by server tests.
+- BOSS-BAR HUD: owner screenshots c19-bossbar-desktop/mobile verify z10000/markers suppressed/no overlap; QA DOM read outside active event documented deferred.
+- TEAL-QUAD: owner-verified fixed (heraldic flag/muted banners).
+- REGRESSION live: foot-slide 1.11e-16, caster roster2+cues, stalker roster2+cues, look torso 91.98/limb 71.94, markers 3/5 bob-false, windmill delta .4407/reduced 0, torch bed .018/0, journal/lore/recap/mood/difficulty/wayfinding, 11 cards, mobile 26/26.
+- HARNESS CAVEAT: feature's one fail was controller-hints after the QA player went down ("QA Knight is down! Hold Interact…"); all new cycle-19 gates passed.
+- DEFERRED: QA forced Colossus phase2/3 + slam-happy-path stills (owner evidence), boss-bar DOM during active event (owner screenshots), audio ear check, physical-device/real-GPU/perceptual, hardware rumble.
+
+Cycle-19 live deployment verified green for Shroud Colossus hooks/FX/cues/pools, boss-bar/teal-quad owner fixes and regressions. task-139 complete. Cycle-20 notes: camp upgrades, New Game+, veteran meta.
