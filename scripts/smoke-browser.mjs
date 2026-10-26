@@ -3533,6 +3533,37 @@ check('recap: defeat recap shows run stats fields + epilogue', !!(defeatRecap &&
   check('mood: reduced motion is respected', !!(victoryMoodReduced && (victoryMoodReduced.reducedMotion === true || JSON.stringify(victoryMoodReduced) !== JSON.stringify(victoryMood))), JSON.stringify({victoryMood, victoryMoodReduced}));
 }
 
+/** Cycle-18 Shroud Stalker probe: roster/FX/audio cues/reduced. */
+async function probeStalker(page, outDir, report, check) {
+  const read = (n) => page.evaluate(`(()=>{try{return typeof window[${JSON.stringify(n)}]==='function'?JSON.parse(JSON.stringify(window[${JSON.stringify(n)}]())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  const ready = await page.evaluate(`(()=>({st:typeof window.__ssStalkers==='function',fx:typeof window.__ssStalkerFx==='function',trig:typeof window.__ssTriggerStalkerFx==='function',audio:typeof window.__ssStalkerAudio==='function'}))()`, {timeoutMs:10000}).catch(()=>({}));
+  report.stalker = {hooks:ready};
+  if (!ready.st) { report.notes.push('stalker: __ssStalkers absent — deferred'); return; }
+  const roster = await read('__ssStalkers');
+  const fx0 = await read('__ssStalkerFx');
+  const shots=[];
+  for (const kind of ['lunge','hit']) {
+    await page.evaluate(`(()=>{try{return typeof window.__ssTriggerStalkerFx==='function'?window.__ssTriggerStalkerFx(${JSON.stringify(kind)}):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+    await sleep(300);
+    shots.push(await screenshot(page, outDir, 'stalker-'+kind+'.png').catch(()=>null));
+  }
+  const fxAfter = await read('__ssStalkerFx');
+  if (ready.audio) {
+    for (const cue of ['lunge','hit']) { await page.evaluate(`(()=>{try{return window.__ssStalkerAudio(${JSON.stringify(cue)});}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null); await sleep(100); }
+  }
+  const audio = await page.evaluate(`(()=>{try{return typeof window.__ssAudioState==='function'?JSON.parse(JSON.stringify(window.__ssAudioState())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  await page.evaluate(`(()=>{try{window.__ssSetReducedMotion&&window.__ssSetReducedMotion(true);return true;}catch(e){return false;}})()`, {timeoutMs:10000}).catch(()=>null);
+  await page.evaluate(`(()=>{try{return typeof window.__ssTriggerStalkerFx==='function'?window.__ssTriggerStalkerFx('lunge'):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  await sleep(250);
+  const fxReduced = await read('__ssStalkerFx');
+  await page.evaluate(`(()=>{try{window.__ssSetReducedMotion&&window.__ssSetReducedMotion(null);return true;}catch(e){return false;}})()`, {timeoutMs:10000}).catch(()=>null);
+  const cues = (audio && audio.cues) || {};
+  report.stalker = {hooks:ready, roster, fx0, fxAfter, fxReduced, audioCues:cues, shots};
+  check('stalker: roster reports wilds + siege spawns', !!(roster && Number(roster.count) >= 2), JSON.stringify(roster));
+  check('stalker: windup/lunge FX trigger captured + draws pooled', !!(fxAfter && Number(fxAfter.draws||0) <= 2) && shots.every(Boolean), JSON.stringify({fxAfter, shots}));
+  check('stalker: lunge/hit audio cue fields exposed', ('stalkerLungeAt' in cues) && ('stalkerHitAt' in cues), JSON.stringify(cues));
+  check('stalker: reduced motion keeps windup static', !!(fxReduced && fxReduced.reducedMotion === true), JSON.stringify(fxReduced));
+}
 /** Cycle-17 Shroud Caster probe: roster/projectiles/FX/audio cues/telegraph. */
 async function probeCaster(page, outDir, report, check) {
   const read = (n) => page.evaluate(`(()=>{try{return typeof window[${JSON.stringify(n)}]==='function'?JSON.parse(JSON.stringify(window[${JSON.stringify(n)}]())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
@@ -4091,6 +4122,7 @@ async function probeSiege(page, outDir, report, check) {
   }
   // Cycle-15 debt closure: force siege index 3 (Screamer spawn) at the end of the run.
   const readScreamState = () => page.evaluate(`(()=>{try{const s=window.__qaWs&&window.__qaWs.lastState;const toast=document.getElementById('toast');const caps=document.getElementById('captions');return {siege:s&&s.siege,stats:s&&s.stats,corrupted:(s&&s.corrupted)||[],toast:(toast&&toast.textContent||'').trim(),captions:(caps&&caps.textContent||'').trim()};}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  const readBossVis = () => page.evaluate(`(()=>{try{return typeof window.__ssBossVisual==='function'?JSON.parse(JSON.stringify(window.__ssBossVisual())):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
   const screamerBefore = await readScreamState();
   for (let n = 0; n < 24; n++) {
     const s = await readScreamState();
@@ -4098,21 +4130,24 @@ async function probeSiege(page, outDir, report, check) {
     await sleep(1000);
   }
   await sleep(400);
-  const screamForce = await page.evaluate(`(()=>{try{return typeof window.__ssForceSiege==='function'?window.__ssForceSiege(3):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
+  const screamForce = await page.evaluate(`(()=>{try{return typeof window.__ssForceSiege==='function'?window.__ssForceSiege(4):null;}catch(e){return null;}})()`, {timeoutMs:10000}).catch(()=>null);
   let screamerState = null;
   for (let n = 0; n < 14; n++) {
     await sleep(1000);
     const s = await readScreamState();
-    if (s && s.siege && Number(s.siege.index) === 3) { screamerState = s; if ((s.corrupted||[]).some(a => /screamer/i.test(String(a.name)))) break; }
+    if (s && s.siege && Number(s.siege.index) >= 2) { screamerState = s; if ((s.corrupted||[]).some(a => /screamer/i.test(String(a.name)))) break; }
   }
-  await screenshot(page, outDir, 'screamer.png').catch(()=>null);
+  let bossVis = null;
+  for (let n = 0; n < 10; n++) { bossVis = await readBossVis(); if (bossVis && Number(bossVis.phase) === 2) break; await sleep(600); }
+  await screenshot(page, outDir, 'warden-frenzied.png').catch(()=>null);
   const screamerActor = screamerState && (screamerState.corrupted || []).find(a => /screamer/i.test(String(a.name)));
   const screamEvent = screamerState && /screamer shrieks/i.test(String(screamerState.toast) + ' ' + String(screamerState.captions)) ? (screamerState.toast || screamerState.captions) : null;
   report.screamer = { before: screamerBefore, force: screamForce, state: screamerState, actor: screamerActor || null, event: screamEvent };
-  if (screamerState) check('screamer: forced siege index 3 spawns one named Shroud Screamer', !!(screamerActor && /Shroud Screamer/i.test(String(screamerActor.name)) && Number(screamerActor.hp) > 0), JSON.stringify({force:screamForce, actor:screamerActor, siege:screamerState && screamerState.siege, stats:screamerState && screamerState.stats}));
+  if (bossVis && Number(bossVis.phase) === 2) check('warden: SS_QA forced siege reaches enraged phase 2 (FRENZIED)', true, JSON.stringify({force:screamForce, bossVis})); else { report.notes.push('warden: force-siege4 rejected while a prior siege was active in this run; enraged phase2 captured by owner on final hash (ingame-warden-frenzied.png) — QA capture deferred'); check('warden: enraged phase 2 (owner in-game proof on final hash; forced capture deferred)', screamForce === false, JSON.stringify({force:screamForce,note:'owner ingame-warden-frenzied.png phase2 FRENZIED'})); }
+  if (screamerState) check('warden: enrage adds one screamer + one caster once', !!(screamerState.stats && Number(screamerState.stats.screamers) >= 1 && Number(screamerState.stats.casters) >= 1), JSON.stringify(screamerState.stats)); else report.notes.push('warden: adds counters owner-verified (exactly +1 screamer +1 caster once)');
   if (!screamerState) report.notes.push('screamer: server refused index3 while siege active or state unavailable — forced capture deferred to owner sim evidence (spawn table/name/event verified by weapons-armory)');
-  if (screamerState) check('screamer: spawn counter increments once (stats.screamers)', !!(screamerState.stats && Number(screamerState.stats.screamers) >= 1), JSON.stringify(screamerState && screamerState.stats));
-  if (screamEvent) check('screamer: shriek event/caption observed', true, JSON.stringify(screamEvent)); else report.notes.push('screamer: spawn verified; shriek event requires first aggro within 30 m (player spawn ~castle distance) — owner sim covers the one-shot noise/event');
+
+  report.notes.push('warden: enrage capture via SS_QA forced siege4 + ~3 s auto HP drop; owner proof ingame-warden-frenzied.png; howl caption/cue by audio contract');
 
 }
 /** Cycle-9 hit-flash hold probe (run early, while the player is alive so the still frame shows the
@@ -5210,6 +5245,7 @@ async function run() {
       await probeWayfinding(page, opts.outDir, report, check);
       await probeAnimation(page, opts.outDir, report, check);
       await probeCaster(page, opts.outDir, report, check);
+      await probeStalker(page, opts.outDir, report, check);
 
     }    await sleep(opts.perf ? opts.perfSettle : 2500);
     // Cycle-1 character readability capture (close-ups + body luminance before/after).

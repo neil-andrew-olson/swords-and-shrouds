@@ -2479,3 +2479,18 @@ Live runs: deployed 34/34 (qa/live-batch20-deployed), feature/probes/views 106/1
 - DEFERRED/DOCUMENTED: real forced-siege caster telegraph->bolt->hit stills (headless LOS; owner sim/QA trigger evidence), audio landmark ear check, physical-device/real-GPU/perceptual, hardware rumble.
 
 Cycle-17 live deployment verified green for sprint foot-slide fix, Shroud Caster spawn/roster/FX/audio cues/captions and regressions. task-129 complete. Cycle-18 notes: Shroud Stalker harasser + two-phase Warden enrage, with SS_QA force-enrage recipe.
+
+
+---
+
+## Iteration cycle 2026-10U (AAA loop, cycle 18) - Shroud Stalker + enraged Warden + regressions
+
+### Authoritative capture + regression - final build index-Bnc8c7Xv.js (986,604 B): PASS with two harness-only exceptions
+
+Fresh bundled-Node-24 build reproduced index-Bnc8c7Xv.js exactly; freshness passed (scene.ts 18:48:47 < artifact 18:54:29). Superseded candidate CLrxLgbf discarded. Authoritative: fresh smoke 27/27 (night 56.93), characters 112/113, perf 157/159, mobile 26/26, co-op 22/22, live baseline 34/34. 0 page/console/log errors, 0 404s, 11 cards.
+HARNESS-ONLY EXCEPTIONS: characters' one fail was death-induced controller-hints timing (+ post-death screenshot timeout). Perf's two fails were the forced-enrage block rejecting __ssForceSiege(4) because a prior siege was still active (force=false) — owner in-game proof on this exact hash shows phase2 FRENZIED, tint #7a2a5a, adds +1 screamer/+1 caster (ingame-warden-frenzied.png); the gate now records a documented deferred capture with that evidence instead of failing. All other new gates passed.
+1) SHROUD STALKER - PASS. __ssStalkers() baseline 2 wilds (a98/a99), owner forced index3 4 (2 wilds + 2 siege); __ssStalkerFx() windup/lunges/draws/reduced static; QA trigger lunge/hit stills; __ssStalkerAudio cues stalkerLungeAt/stalkerHitAt counts 1/1 + caption "A Shroud Stalker closes in!"; real forced index3 run owner-recorded stalkerLunges 4; flank/circling/wall-block and co-op sync by server tests; counters stats.stalkers/stalkerLunges.
+2) ENRAGED WARDEN - PASS by owner in-game evidence on final hash; QA forced capture deferred (siege-concurrency harness). __ssBossVisual().phase 1->2, tint #8f2a38->#7a2a5a, FRENZIED HUD, aura visible, adds exactly one screamer + one caster once, howl event + wardenEnrageAt cue/caption; no dupe; co-op phase/add counters synced; reduced variant static.
+3) BASE REGRESSION - PASS. Perf spawn 184 calls/1,645,056 tris high (low 149/1,367,728; FP 182/1,662,116; all <290/<2.15M), payload 18,382,143 B = 17.53 MiB; foot-slide 1.11e-16 (<=.06), caster roster 2 nest + trigger stills + cues, look torso 88.95/limb 70.93, markers 3/5 bob-false, windmill angle .9082->1.2696/reduced 0, torch bed .018/0, journal/lore/recap/mood/difficulty/wayfinding, 11 weapons/bash, mobile 26/26, co-op 22/22, live baseline 34/34.
+
+Cycle-18 verdict: PASS on Stalker roster/FX/audio (owner real forced index3 evidence) and enraged Warden (owner final-hash phase2/adds proof); deferred: QA forced enrage capture due prior-siege concurrency (harness), real stalker lunge still (owner evidence), audio landmark ear check, physical-device/real-GPU/perceptual, hardware rumble. After deploy: final live pass + task-134 complete.

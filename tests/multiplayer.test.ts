@@ -10,7 +10,7 @@ test('independent sockets: rooms, sync, capacity, reconnect, leadership, isolati
 const bad=await client(url);clients.push(bad);bad.send({type:'join',code:'XXXXXX'});assert.match((await bad.next('error')).text,/not found/);
  for(let i=0;i<2;i++){const c=await client(url);clients.push(c);c.send({type:'join',code:aw.code});await c.next('welcome');}bad.send({type:'join',code:aw.code});assert.match((await bad.next('error')).text,/full/);
  a.ws.close();await wait(80);const resumed=await client(url);clients.push(resumed);resumed.send({type:'resume',code:aw.code,token:aw.token});assert.equal((await resumed.next('welcome')).id,aw.id);assert.equal(s.rooms.get(aw.code)!.seats.length,4);
- const room=s.rooms.get(aw.code)!;assert.equal(room.host,bw.id);room.game.status='defeat';resumed.send({type:'restart'});assert.match((await resumed.next('error')).text,/leader/);b.send({type:'restart'});await wait(80);assert.equal(room.game.status,'playing');assert.equal(room.game.actors.filter(a=>a.kind==='player').length,4);assert.equal(room.game.difficulty,'warden','restart preserves the room difficulty');assert.equal(room.game.stats.casters,2,'restart resets/repopulates caster counter');assert.equal(room.game.stats.casterBolts,0,'restart resets bolt counter');
+ const room=s.rooms.get(aw.code)!;assert.equal(room.host,bw.id);room.game.status='defeat';resumed.send({type:'restart'});assert.match((await resumed.next('error')).text,/leader/);b.send({type:'restart'});await wait(80);assert.equal(room.game.status,'playing');assert.equal(room.game.actors.filter(a=>a.kind==='player').length,4);assert.equal(room.game.difficulty,'warden','restart preserves the room difficulty');assert.equal(room.game.stats.casters,2,'restart resets/repopulates caster counter');assert.equal(room.game.stats.casterBolts,0,'restart resets bolt counter');assert.equal(room.game.stats.stalkers,2,'restart resets stalker counter');assert.equal(room.game.stats.stalkerLunges,0,'restart resets lunge counter');
  // Every room must receive snapshots, including even-index rooms.
  other.messages.length=0;await wait(230);assert.ok(other.messages.some(m=>m.type==='state'));
  // Cycle-10 co-op siege sync: both clients see the same boss siege + boss actor.
@@ -41,7 +41,11 @@ const bad=await client(url);clients.push(bad);bad.send({type:'join',code:'XXXXXX
  await wait(450);
  const pA=latest(resumed).game.projectiles??[],pB=latest(b).game.projectiles??[];
  assert.equal(pA.length,pB.length,'co-op projectile count synced');if(pA.length){assert.equal(pA[0].id,pB[0].id);assert.equal(pA[0].caster,castA.id);assert.ok(pA[0].speed>0);}
- assert.equal(latest(resumed).game.stats.casterBolts,latest(b).game.stats.casterBolts);
+ assert.equal(latest(resumed).game.stats.casterBolts,latest(b).game.stats.casterBolts); // Cycle-18 stalker co-op sync from the index-3 snapshots, then Warden enrage phase sync on an index-4 boss.
+ const stalkA=s3a.actors.filter((x:any)=>x.stalker),stalkB=s3b.actors.filter((x:any)=>x.stalker);assert.equal(stalkA.length,2,'two siege stalkers in the host snapshot');assert.equal(stalkB.length,2);assert.deepEqual(stalkA.map((x:any)=>x.id).sort(),stalkB.map((x:any)=>x.id).sort());assert.equal(s3a.stats.stalkers,s3b.stats.stalkers);
+ roomGame.siege=null;process.env.SS_QA='1';b.send({type:'qa-siege',index:4});await wait(2900);process.env.SS_QA='';delete process.env.SS_QA;
+ const roomBoss=roomGame.actors.find((x:any)=>x.boss);assert.ok(roomBoss,'index-4 boss spawned in co-op');assert.equal(roomBoss.bossPhase,2,'QA auto-enrage drove the boss to phase 2');
+ const whA=latest(resumed).game,whB=latest(b).game;assert.equal(whA.siege?.bossPhase,2,'host sees enraged boss phase');assert.equal(whB.siege?.bossPhase,2,'joiner sees enraged boss phase');assert.equal(whA.actors.find((x:any)=>x.id===roomBoss.id).bossPhase,2);assert.ok(whA.events.some((e:any)=>e.text==='The Shroud Warden howls — the shroud thickens!'),'howl event synced');assert.equal(whA.stats.screamers,whB.stats.screamers);assert.equal(whA.stats.casters,whB.stats.casters);
 
  const otherState=other.messages.filter((m:any)=>m.type==='state').at(-1);
  assert.equal(otherState.game.difficulty,'knight','default/invalid-difficulty room snapshot is explicit knight');

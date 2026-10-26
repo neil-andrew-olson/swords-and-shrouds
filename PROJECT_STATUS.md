@@ -22,52 +22,54 @@ workspace-relative paths and/or use the `present` tool.
 **Process discipline:** teammates kill only their own PIDs (`Stop-Process -Id` / `/PID`), never
 broad `taskkill /IM node.exe`. One dist builder at a time; QA owns authoritative captures. **Always**
 re-check source mtimes vs the artifact mtime before handing a hash, and rebuild twice with
-`node_modules/.vite` cleared (cycle-11/13/14 lessons: post-freeze edits and races produced superseded
-artifacts — only gate a hash a clean rebuild reproduces).
+`node_modules/.vite` cleared (cycle-11/13/14/18 lessons: post-freeze edits and races produced
+superseded artifacts — only gate a hash a clean rebuild reproduces; cycle 18 needed an emergency
+rebuild after a last-minute scene fix, and the client hash legitimately repeated because server-only
+code does not enter the client bundle).
 
-## Cycle 17 (2026-10T) — foot-slide fix + Shroud Caster (DEPLOYED after live pass)
+## Cycle 18 (2026-10U) — Stalker + two-phase Warden (DEPLOYING)
 
-Final bundle **`index-EHFLh_ew.js`** (976,975 B). Contract `docs/BATCH-2026-10T-SPEC.md`, results
-`docs/BATCH-2026-10T-RESULTS.md`. Roadmap A closed (foot-slide), milestone B started.
+Final bundle **`index-Bnc8c7Xv.js`** (986,604 B). Contract `docs/BATCH-2026-10U-SPEC.md`, results
+`docs/BATCH-2026-10U-RESULTS.md`. Roadmap milestone B continues.
 
-### Foot-slide recalibration
-`ANIM_STRIDE` light 5.925 / heavy 5.08, clamp 0.6–1.6: helper table 4.2→.709/0, 6→1.013/0,
-**8→1.350/slide 0** (real full speed), 10→1.600/.054; in-game `__ssAnimState()` slideFactor 1.11e-16;
-movement speed unchanged.
+### Shroud Stalker (fast harasser, server-authoritative)
+Kind corrupted `stalker:true`, HP 62, speed 5.2, existing undead rig: picks a player, orbits ~7.5 m
+to side/back, **0.45 s telegraphed windup** (`A Shroud Stalker closes in!`), **0.32 s lunge dash**
+(`Shroud Stalker lunges!`) for **18 dmg** wall-checked (`A Shroud Stalker rakes <name>!` on connect),
+2.5 s cooldown, melee fallback; spawns 2 wilds + 2/siege index ≥3; counters `stats.stalkers`/
+`stalkerLunges`; co-op synced. Presentation: pale green-violet tint + aura, pooled bright lunge-windup
+ring (≤1 draw, static reduced-motion), 1.25 m-stride dust trail; hooks `__ssStalkers/__ssStalkerFx/
+__ssTriggerStalkerFx`; lunge/hit cues + caption (corrected to server wording).
 
-### Shroud Caster (first ranged enemy, server-authoritative)
-Kind corrupted `caster:true`, HP 88, 2 nest guards + 1 per siege index ≥2; LOS 10–20 m, 1.0 s
-telegraph (`casterCharge` + `A Shroud Caster gathers shadow!`), speed-8.5 shadow bolt (16 dmg, 3 s
-cooldown, lead prediction), `game.projectiles[]` with wall/actor/ground hits, co-op synced,
-`stats.casters/casterBolts`; events gather/launch/strike/fizzle/scatter. Client: pooled InstancedMesh
-telegraph ring (violet aura idle, pulsing charge, static under reduced motion, 1 draw), pooled bolt orb
-+ additive trail (1 draw active), impact sparks/smoke + scorch; `__ssCasters/__ssProjectiles/
-__ssCasterFx/__ssTriggerCasterFx`. Audio: charge/launch/impact synth cues + cue counts in
-`__ssAudioState().cues`, captions "A Shroud Caster gathers shadow." / "Shadow bolt!",
-`__ssCasterAudio`. Sim: index2 32.6 s/7 bolts, index5 37.1 s/8, index9 73.5 s/15, castle held.
+### Two-phase Shroud Warden
+`actor.bossPhase`/`siege.bossPhase`; at ≤50 % HP **enrages once**: howl event, cadence up
+(move 3.8 / windup .62 / cd 1.5), **summons 1 Screamer + 1 Caster once** (no dupe), co-op synced;
+presentation aura ×1.35/opacity .62, crimson → violet-crimson `#7a2a5a` tint, embers, FRENZIED HUD,
+`__ssBossVisual().phase`; enrage reverts on death. **QA-only force-enrage**: `qaForceEnrage()` +
+2 s `SS_QA`-gated room timer drops a live boss to 45 % and runs the normal enrage; production-safe;
+one-shot guard tested.
 
 ### Verification
-- 58/58 tests; tsc 0; deterministic `index-EHFLh_ew.js` + freshness; validator 87/87.
-- QA: fresh 27/27, characters **108/109** (one death-induced harness sample; new gates green),
-  perf **153/153** (spawn **158 calls / 1,622,187 tris**; high 188/1,646,952), mobile 26/26,
-  co-op 22/22, live baseline 34/34; foot-slide pass; caster roster/FX/cues/captions pass; payload
-  **17.52 MiB**; night 56.93.
-- **Deferred (honest):** real forced-siege caster telegraph→bolt→hit stills (headless caster stayed
-  out of LOS >30 s) — covered by tests/sim + deterministic FX trigger; also audio ear check,
-  physical-device/real-GPU/perceptual, hardware rumble remain human/device debts.
+- 58/58 tests; tsc 0; deterministic `index-Bnc8c7Xv.js` + freshness; validator 87/87.
+- QA: fresh smoke **27/27**, characters **112/113** (one death-induced harness sample), perf
+  **157/159** (2 fails = harness's forced siege rejected while a prior siege active; owner in-game
+  phase-2 proof on this exact hash), mobile 26/26, co-op 22/22, live baseline 34/34; spawn
+  **184 calls / 1,645,056 tris** (low 149/1,367,728); payload **17.53 MiB**; night 56.93.
+- Deferred (documented): QA forced-enrage still (owner phase-2 proof exists), real stalker lunge
+  still (owner forced run), audio landmark ear check, physical-device/real-GPU/perceptual, hardware
+  rumble.
 
-### Cycle-18 (next) — roadmap B (spec already written: `docs/BATCH-2026-10U-SPEC.md`)
-1. **Shroud Stalker** — fast flanking harasser (existing rig): circles 6–10 m, telegraphed lunge
-   (~0.45 s), ~18 dmg, 2/siege index ≥3 + moor wilds, counters, co-op sync; FX/windup/trail,
-   lunge cue + caption.
-2. **Two-phase Shroud Warden** — enrage at ≤50 % HP (cadence up, aura intensifies, summons 2 adds
-   once, event), HUD phase FRENZIED, co-op synced.
-3. Cycle 19: fully distinct second boss (phases/arena).
-4. Human/device debts: audio ear check, real-GPU/perceptual/mobile hardware, hardware rumble.
+### Cycle-19 (next) — roadmap B
+1. **Distinct second boss encounter** with its own arena/phases (nest-mother/bone-colossus style),
+   reusing the multi-phase infrastructure.
+2. Close harness capture gaps (clean enrage-still sequence).
+3. Human/device debts; then roadmap C (progression/meta systems) and more world content.
 
 ## Previous cycles
 
-- **2026-10S cycle 16**: body-scan atlas tone, animation depth, movement VFX
+- **2026-10T cycle 17**: sprint foot-slide recalibration (slideFactor 1.11e-16) + Shroud Caster ranged
+  enemy with projectile AI/telegraph/FX/cues/captions (`docs/BATCH-2026-10T-RESULTS.md`).
+- **2026-10S cycle 16**: body-atlas tone pass, animation-depth pass, movement VFX
   (`docs/BATCH-2026-10S-RESULTS.md`).
 - **2026-10R cycle 15**: armour atlas v5.1 + look-pass v5; Warden/Screamer capture debt closed
   (`docs/BATCH-2026-10R-RESULTS.md`).

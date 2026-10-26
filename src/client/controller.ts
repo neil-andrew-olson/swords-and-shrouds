@@ -42,11 +42,11 @@ export function touchSensitivityValue(value:unknown){const n=Number(value);retur
  * Accessibility captions (CC): pure text formatter + rate limiter. main.ts owns the HUD element,
  * persistence and gating; these helpers keep the behaviour unit-testable.
  * ------------------------------------------------------------------------------------------- */
-export type CaptionCue='thunder'|'undead'|'siege-start'|'siege-end'|'low-health'|'castle-captured'|'caster-charge'|'caster-launch';
+export type CaptionCue='thunder'|'undead'|'siege-start'|'siege-end'|'low-health'|'castle-captured'|'caster-charge'|'caster-launch'|'stalker-lunge'|'warden-enrage';
 export const CAPTION_RATE_LIMIT_MS=2200;
 export const CAPTION_MAX_CHARS=96;
 /** Higher-priority cues may replace a different lower-priority cue after half the rate window. */
-export const CAPTION_PRIORITY:Record<CaptionCue,number>={undead:1,thunder:3,'siege-end':3,'caster-charge':3,'siege-start':4,'caster-launch':4,'low-health':4,'castle-captured':5};
+export const CAPTION_PRIORITY:Record<CaptionCue,number>={undead:1,thunder:3,'siege-end':3,'caster-charge':3,'stalker-lunge':3,'siege-start':4,'caster-launch':4,'low-health':4,'castle-captured':5,'warden-enrage':5};
 export function captionText(cue:CaptionCue,detail?:string):string{
  const base:Record<CaptionCue,string>={
   thunder:'Lightning. Thunder rolls in the distance.',
@@ -56,7 +56,9 @@ export function captionText(cue:CaptionCue,detail?:string):string{
   'low-health':'Low health. Find cover or heal.',
   'castle-captured':'Castle captured.',
   'caster-charge':'A Shroud Caster gathers shadow.',
-  'caster-launch':'Shadow bolt!'
+  'caster-launch':'Shadow bolt!',
+  'stalker-lunge':'A Shroud Stalker closes in!',
+  'warden-enrage':'The Shroud Warden howls — the shroud thickens!'
  };
  const text=detail&&(cue==='siege-start'||cue==='castle-captured')?`${base[cue]} ${detail}`:base[cue];
  return text.slice(0,CAPTION_MAX_CHARS);
@@ -291,5 +293,21 @@ export function casterCueForEvent(text:string):CasterCue|null{
  if(/bolt|shadow/.test(value)&&/(hit|impact|strik|burst|wall|ground|explod|dissipat|fizzl|stone|scatter)/.test(value))return 'impact';
  if(/shadow bolt/.test(value)||/(caster|bolt).*(launch|fire|release|cast)/.test(value))return 'launch';
  if(/caster/.test(value)&&/(gather|charg|wind|summon|telegraph|shadow)/.test(value))return 'charge';
+ return null;
+}
+/* Cycle-18 Stalker/Warden cue mapping: tolerant event-text classifiers used by main.ts (pure). */
+export type StalkerCue='lunge'|'hit';
+export function stalkerCueForEvent(text:string):StalkerCue|null{
+ const value=String(text??'').toLowerCase();
+ if(!/stalker/.test(value))return null;
+ if(/(hit|strik|pounce|rake|claw|bite|maul|wound)/.test(value))return 'hit';
+ if(/(lung|leap|crouch|coil|spring|charge|snarl|clos)/.test(value))return 'lunge';
+ return null;
+}
+export type WardenCue='enrage';
+export function wardenCueForEvent(text:string):WardenCue|null{
+ const value=String(text??'').toLowerCase();
+ if(!/warden|shroud warden/.test(value))return null;
+ if(/(howl|enrag|thicken|phase)/.test(value))return 'enrage';
  return null;
 }

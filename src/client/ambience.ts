@@ -163,6 +163,13 @@ export class Ambience{
  private casterChargeCount=0;
  private casterLaunchCount=0;
  private casterImpactCount=0;
+ // Cycle-18 Stalker lunge / Warden enrage cues.
+ private lastStalkerLungeAt:number|null=null;
+ private lastStalkerHitAt:number|null=null;
+ private lastWardenEnrageAt:number|null=null;
+ private stalkerLungeCount=0;
+ private stalkerHitCount=0;
+ private wardenEnrageCount=0;
  private captureRelief=0;
  private prevCaptures=0;
  private capturesSeen=false;
@@ -269,7 +276,7 @@ export class Ambience{
    masterGain:level(this.master),
    focus:this.focusOverride?{x:this.focusOverride.x,z:this.focusOverride.z}:null,
    siege:{boss:this.bossMode==='boss',active:this.bossMode!=='idle',mode:this.bossMode,level:Math.round(this.bossLevel*1000)/1000,gain:level(this.bossGain)},
-   cues:{screamerAt:this.lastScreamerAt===null?null:Math.round(this.lastScreamerAt*1000)/1000,screamerCount:this.screamerCount,sting:this.stingMode,stingAt:this.stingAt===null?null:Math.round(this.stingAt*1000)/1000,casterChargeAt:this.lastCasterChargeAt===null?null:Math.round(this.lastCasterChargeAt*1000)/1000,casterLaunchAt:this.lastCasterLaunchAt===null?null:Math.round(this.lastCasterLaunchAt*1000)/1000,casterImpactAt:this.lastCasterImpactAt===null?null:Math.round(this.lastCasterImpactAt*1000)/1000,casterChargeCount:this.casterChargeCount,casterLaunchCount:this.casterLaunchCount,casterImpactCount:this.casterImpactCount}
+   cues:{screamerAt:this.lastScreamerAt===null?null:Math.round(this.lastScreamerAt*1000)/1000,screamerCount:this.screamerCount,sting:this.stingMode,stingAt:this.stingAt===null?null:Math.round(this.stingAt*1000)/1000,casterChargeAt:this.lastCasterChargeAt===null?null:Math.round(this.lastCasterChargeAt*1000)/1000,casterLaunchAt:this.lastCasterLaunchAt===null?null:Math.round(this.lastCasterLaunchAt*1000)/1000,casterImpactAt:this.lastCasterImpactAt===null?null:Math.round(this.lastCasterImpactAt*1000)/1000,casterChargeCount:this.casterChargeCount,casterLaunchCount:this.casterLaunchCount,casterImpactCount:this.casterImpactCount,stalkerLungeAt:this.lastStalkerLungeAt===null?null:Math.round(this.lastStalkerLungeAt*1000)/1000,stalkerHitAt:this.lastStalkerHitAt===null?null:Math.round(this.lastStalkerHitAt*1000)/1000,wardenEnrageAt:this.lastWardenEnrageAt===null?null:Math.round(this.lastWardenEnrageAt*1000)/1000,stalkerLungeCount:this.stalkerLungeCount,stalkerHitCount:this.stalkerHitCount,wardenEnrageCount:this.wardenEnrageCount}
   };
  }
  private ensureBossSiege(){
@@ -329,6 +336,42 @@ export class Ambience{
   try{const t=c.currentTime,osc=c.createOscillator(),gain=c.createGain();osc.type='sine';osc.frequency.setValueAtTime(110,t);osc.frequency.exponentialRampToValueAtTime(42,t+.3);gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.07*(1-.5*this.duckLevel),t+.015);gain.gain.exponentialRampToValueAtTime(.0001,t+.34);osc.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+.36);
    if(this.noise){const burst=c.createBufferSource();burst.buffer=this.noise;const bf=c.createBiquadFilter();bf.type='lowpass';bf.frequency.value=900;const bg=c.createGain();bg.gain.setValueAtTime(.0001,t);bg.gain.exponentialRampToValueAtTime(.035*(1-.5*this.duckLevel),t+.01);bg.gain.exponentialRampToValueAtTime(.0001,t+.2);burst.connect(bf);bf.connect(bg);bg.connect(master);burst.start(t);burst.stop(t+.22);}
    osc.onended=()=>{try{osc.disconnect();gain.disconnect();}catch{}};}catch{}
+ }
+ /** Stalker lunge windup: ~0.45 s snarl + whoosh matching the telegraph (recorded even muted). */
+ stalkerLunge(){
+  const now=this.context?.currentTime??performance.now()/1000;if(this.lastStalkerLungeAt!==null&&now-this.lastStalkerLungeAt<.25)return;
+  this.lastStalkerLungeAt=now;this.stalkerLungeCount++;
+  const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const t=c.currentTime,gain=c.createGain(),osc=c.createOscillator(),filter=c.createBiquadFilter();
+   osc.type='sawtooth';osc.frequency.setValueAtTime(190,t);osc.frequency.exponentialRampToValueAtTime(85,t+.45);
+   filter.type='bandpass';filter.frequency.setValueAtTime(950,t);filter.frequency.exponentialRampToValueAtTime(380,t+.45);filter.Q.value=1.3;
+   gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.05*(1-.5*this.duckLevel),t+.05);gain.gain.exponentialRampToValueAtTime(.0001,t+.47);
+   osc.connect(filter);filter.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+.49);
+   if(this.noise){const whoosh=c.createBufferSource();whoosh.buffer=this.noise;whoosh.loop=true;const wf=c.createBiquadFilter();wf.type='bandpass';wf.frequency.setValueAtTime(1600,t);wf.frequency.exponentialRampToValueAtTime(500,t+.45);wf.Q.value=1;whoosh.connect(wf);wf.connect(gain);whoosh.start(t);whoosh.stop(t+.47);}
+   osc.onended=()=>{try{osc.disconnect();filter.disconnect();gain.disconnect();}catch{}};}catch{}
+ }
+ /** Stalker pounce/hit: short claw thud (recorded even muted). */
+ stalkerHit(){
+  const now=this.context?.currentTime??performance.now()/1000;if(this.lastStalkerHitAt!==null&&now-this.lastStalkerHitAt<.15)return;
+  this.lastStalkerHitAt=now;this.stalkerHitCount++;
+  const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const t=c.currentTime,osc=c.createOscillator(),gain=c.createGain();osc.type='triangle';osc.frequency.setValueAtTime(150,t);osc.frequency.exponentialRampToValueAtTime(55,t+.2);gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.065*(1-.5*this.duckLevel),t+.012);gain.gain.exponentialRampToValueAtTime(.0001,t+.24);osc.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+.26);
+   if(this.noise){const burst=c.createBufferSource();burst.buffer=this.noise;const bf=c.createBiquadFilter();bf.type='highpass';bf.frequency.value=1200;const bg=c.createGain();bg.gain.setValueAtTime(.0001,t);bg.gain.exponentialRampToValueAtTime(.03*(1-.5*this.duckLevel),t+.008);bg.gain.exponentialRampToValueAtTime(.0001,t+.12);burst.connect(bf);bf.connect(bg);bg.connect(master);burst.start(t);burst.stop(t+.14);}
+   osc.onended=()=>{try{osc.disconnect();gain.disconnect();}catch{}};}catch{}
+ }
+ /** Warden enrage howl: low rising roar with a shriek layer (recorded even muted). */
+ wardenEnrage(){
+  const now=this.context?.currentTime??performance.now()/1000;if(this.lastWardenEnrageAt!==null&&now-this.lastWardenEnrageAt<1)return;
+  this.lastWardenEnrageAt=now;this.wardenEnrageCount++;
+  const c=this.context,master=this.master;if(!c||!master||!this.started||this.paused||!this.enabled())return;
+  try{const t=c.currentTime,gain=c.createGain(),osc=c.createOscillator(),filter=c.createBiquadFilter();
+   osc.type='sawtooth';osc.frequency.setValueAtTime(78,t);osc.frequency.exponentialRampToValueAtTime(150,t+.35);osc.frequency.exponentialRampToValueAtTime(62,t+1.15);
+   filter.type='lowpass';filter.frequency.setValueAtTime(500,t);filter.frequency.exponentialRampToValueAtTime(1800,t+.35);filter.frequency.exponentialRampToValueAtTime(300,t+1.15);filter.Q.value=1.4;
+   gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.07*(1-.55*this.duckLevel),t+.08);gain.gain.setValueAtTime(.06*(1-.55*this.duckLevel),t+.9);gain.gain.exponentialRampToValueAtTime(.0001,t+1.2);
+   osc.connect(filter);filter.connect(gain);gain.connect(master);osc.start(t);osc.stop(t+1.22);
+   const shriek=c.createOscillator(),sg=c.createGain();shriek.type='sawtooth';shriek.frequency.setValueAtTime(1100,t+.15);shriek.frequency.exponentialRampToValueAtTime(520,t+.7);sg.gain.setValueAtTime(.0001,t);sg.gain.exponentialRampToValueAtTime(.022*(1-.55*this.duckLevel),t+.16);sg.gain.exponentialRampToValueAtTime(.0001,t+.9);shriek.connect(sg);sg.connect(master);shriek.start(t);shriek.stop(t+.92);
+   if(this.noise){const roar=c.createBufferSource();roar.buffer=this.noise;roar.loop=true;const rf=c.createBiquadFilter();rf.type='bandpass';rf.frequency.setValueAtTime(300,t);rf.frequency.exponentialRampToValueAtTime(700,t+.4);rf.Q.value=.8;const rg=c.createGain();rg.gain.setValueAtTime(.0001,t);rg.gain.exponentialRampToValueAtTime(.04*(1-.55*this.duckLevel),t+.1);rg.gain.exponentialRampToValueAtTime(.0001,t+1.1);roar.connect(rf);rf.connect(rg);rg.connect(master);roar.start(t);roar.stop(t+1.12);}
+   osc.onended=()=>{try{osc.disconnect();filter.disconnect();gain.disconnect();}catch{}};}catch{}
  }
  private noiseBuffer(c:AudioContext,seconds:number,pink:boolean):AudioBuffer{
   const length=Math.ceil(c.sampleRate*seconds),buffer=c.createBuffer(1,length,c.sampleRate),data=buffer.getChannelData(0);

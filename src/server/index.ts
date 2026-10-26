@@ -4,11 +4,11 @@ import {WebSocketServer,WebSocket} from 'ws';
 import {randomBytes} from 'node:crypto';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {createGame,addPlayer,setInput,command,tick,snapshot,idle,forceSiege,qaEnsureFriendlyCastle,shieldBash} from '../simulation/game';
+import {createGame,addPlayer,setInput,command,tick,snapshot,idle,forceSiege,qaEnsureFriendlyCastle,shieldBash,qaForceEnrage} from '../simulation/game';
 import {DEFAULT_DIFFICULTY,isDifficulty} from '../shared/difficulty';
 import type {Game} from '../shared/types';
 type Seat={id:string;token:string;name:string;ws?:WebSocket;left:number};
-type Room={code:string;game:Game;seats:Seat[];host:string;lastActive:number;ended:number;};
+type Room={code:string;game:Game;seats:Seat[];host:string;lastActive:number;ended:number;qaEnrageAt?:number;};
 export function makeServer(){
  const app=express(),server=createServer(app),wss=new WebSocketServer({server,path:'/ws',maxPayload:2048});const rooms=new Map<string,Room>();
  app.get('/health',(_req,res)=>res.json({ok:true,rooms:rooms.size}));
@@ -55,6 +55,9 @@ export function makeServer(){
     if(!room.game.castles.some(c=>c.friendly))qaEnsureFriendlyCastle(room.game);
     const index=typeof m.index==='number'&&Number.isFinite(m.index)?Math.max(1,Math.floor(m.index)):undefined;
     if(!forceSiege(room.game,index))return error('Could not start a siege.');
+    // QA-only enrage capture: 2 s after a forced boss siege, drop the boss to 45% to trigger the normal
+    // enrage path (same gate as everything else here; production servers reject qa-siege entirely).
+    room.qaEnrageAt=(room.game.siege as {boss?:boolean}|null)?.boss?Date.now()+2000:0;
     broadcast(room);
    }
    else if(m.type==='bash'){const result=shieldBash(room.game,seat.id);if(result)error(result);}
@@ -62,7 +65,7 @@ export function makeServer(){
   });
   ws.on('close',()=>{clearTimeout(joinTimeout);clearInterval(heartbeat);if(room&&seat&&seat.ws===ws){seat.ws=undefined;seat.left=Date.now();const p=room.game.actors.find(a=>a.id===seat!.id);if(p){p.connected=false;p.input=idle();p.block=false;}removeExpired(room,Date.now());broadcast(room);}});
  });
- let frames=0;const timer=setInterval(()=>{const now=Date.now();frames++;for(const [code,r] of rooms){removeExpired(r,now);if(r.seats.some(s=>s.ws)){r.lastActive=now;tick(r.game);if(frames%2===0)broadcast(r);}if(r.game.status!=='playing'&&!r.ended)r.ended=now;if(now-r.lastActive>300000||(r.ended&&now-r.ended>600000)){r.seats.forEach(s=>s.ws?.close(4000,'Room expired'));rooms.delete(code);}}},50);
+ let frames=0;const timer=setInterval(()=>{const now=Date.now();frames++;for(const [code,r] of rooms){removeExpired(r,now);if(process.env.SS_QA==='1'&&r.qaEnrageAt&&now>=r.qaEnrageAt){r.qaEnrageAt=0;qaForceEnrage(r.game);}if(r.seats.some(s=>s.ws)){r.lastActive=now;tick(r.game);if(frames%2===0)broadcast(r);}if(r.game.status!=='playing'&&!r.ended)r.ended=now;if(now-r.lastActive>300000||(r.ended&&now-r.ended>600000)){r.seats.forEach(s=>s.ws?.close(4000,'Room expired'));rooms.delete(code);}}},50);
  return {app,server,rooms,close:async()=>{clearInterval(timer);for(const ws of wss.clients)ws.terminate();await new Promise<void>(r=>wss.close(()=>r()));await new Promise<void>(r=>server.close(()=>r()));}};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){const s=makeServer();const port=Number(process.env.PORT)||3000;s.server.listen(port,'0.0.0.0',()=>console.log(`Swords & Shrouds server listening on ${port}`));process.on('SIGTERM',()=>{s.close().then(()=>process.exit(0));});}
