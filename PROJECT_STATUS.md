@@ -1,6 +1,6 @@
 # Swords & Shrouds — project checkpoint
 
-Updated: 2026-10-25. Read this file first when continuing in a new chat.
+Updated: 2026-10-26. Read this file first when continuing in a new chat.
 Do not require the previous conversation or import its full transcript.
 Inspect current code and git history before assuming this checkpoint is still current.
 
@@ -25,7 +25,59 @@ re-check source mtimes vs the artifact mtime before handing a hash, and rebuild 
 `node_modules/.vite` cleared (cycle-11/13/14/18 lessons: post-freeze edits and races produced
 superseded artifacts — only gate a hash a clean rebuild reproduces).
 
-## Cycle 19 (2026-10V) — Shroud Colossus second boss (DEPLOYING)
+## Character PBR + goblin production release (2026-10-26)
+
+- Game implementation: **`e58f38d0376b186d130d6e3b9f5cc1eee99fadc5`**, pushed to `main`.
+- Host release: **`1b47a768f25a2a00ec01c498524e4d6786861a50`**, pushed to `main`;
+  `game-source.json` pins the exact game implementation above.
+- Seven human variants use real Cursed Knight armour/cloth geometry and 360° embedded PBR
+  materials: templar, hero, ally, berserker, ranger, survivor and fallen. Class-specific kits,
+  palette grading and reduced armour distinguish the silhouettes without new magic.
+- Blender 5.2 slot-based retargeting preserves the UE rest orientation, folds twist weights into
+  the animated limb bones and removes horizontal root travel. Six clips, one skin and both
+  Mixamo hand sockets are present. Triangles range from 7,998 to 14,240 per character.
+- Goblin: short, hunched silhouette, olive skin, pointed ears, long nose, brow and worn leather;
+  **10,584 triangles**, 1.45 m authored height, existing melee-only simulation and zombie fallback.
+  The deterministic enemy appearance mix is `id%5`; no goblin spells, abilities or new actor type.
+- Hardening: strict gzip/deflate/XFL=2 asset checks, reduced-motion-safe torch intensity/radius,
+  removed duplicate smoke/mote updates. Scanned roads, modular ruins/keeps, courtyard props,
+  11-weapon arsenal/racks, instanced grass/rocks and existing atmosphere/combat audio remain integrated.
+
+### Verification on the exact game commit
+
+- Clean detached worktree: `npm ci`, **58/58 tests**, `tsc --noEmit`, **88/88 asset checks**,
+  two fresh production builds. Goblin is 389,255 B; SHA-256
+  `6b6214dd7b0e3b31c8f6a7a3ae76758ba4827fdcd08c721b1baea38b528f85e5`.
+- Root game bundle **`index-BLOa6N0t.js`**, 998,941 B; SHA-256
+  `fa670c5ba74f3f69b73c78a4fb69f41596a96a6106739f510ce604c260d4a493`.
+  Game assets total 20,753,583 B (~19.79 MiB).
+- Production world QA **45/45**, two-client co-op **22/22**, perf-lite **56/56**.
+  Exact-commit focused browser QA: **14 captures**, seven human variants, all five enemy
+  appearances, goblin availability/fallback, hit feedback/reduced motion and real melee; zero page errors.
+- Host Vite + clean pinned game build and Wrangler dry-run pass. Local Durable Object runtime:
+  website/assets, origin rejection, room creation, movement, shared equipment, late join,
+  locked-weapon rejection, reconnect, isolation and four-player capacity all pass.
+- Hosted game bundle **`index-CKLQSgLk.js`**, 999,116 B; SHA-256
+  `8dc87512a24a5b1afd95bb5852497ce6b28a82eaecb2e049aa63b3284ee19169`.
+- **Live deployment: BLOCKED at rollout verification.** Live multiplayer assertions pass on the
+  existing backend (origin checks, rooms, movement, weapon sharing, reconnect, isolation/capacity).
+  More than 15 minutes after the host push, the goblin URL still returns 404 and the served bundle
+  is the previous `index-DIThYzGd.js`, not the verified `index-CKLQSgLk.js`. No Cloudflare API token
+  is available to inspect/retry the remote build; public repository check endpoints return 404.
+
+### Limits and next work
+
+- This is a browser-budgeted, Skyrim-inspired materials/silhouette upgrade, not a claim of
+  exact Skyrim/AAA fidelity. Physical GPU, controller, audio and touch-device checks remain.
+- The broad main-tree feature harness timed out after 20 minutes and reported two failures in
+  unrelated, uncommitted cycle-20 journal-preview work. Those edits were not included in this release.
+  Focused release gates above are green; keep unrelated local changes separate.
+- GitHub warns that the pre-existing `scripts/smoke-browser.mjs` is 84.03 MB. Only the required
+  QA hunks were committed. Existing dependency audit advisories were not auto-upgraded.
+- Next: inspect Cloudflare Workers Builds/deployment access, publish the pinned host release,
+  verify the live goblin/bundle in a browser, then continue separately owned cycle-20 work.
+
+## Cycle 19 (2026-10V) — Shroud Colossus second boss
 
 Final bundle **`index-tknOtxLM.js`** (998,421 B). Contract `docs/BATCH-2026-10V-SPEC.md`, results
 `docs/BATCH-2026-10V-RESULTS.md`. Roadmap milestone B.
