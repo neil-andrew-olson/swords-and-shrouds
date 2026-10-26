@@ -2494,3 +2494,15 @@ HARNESS-ONLY EXCEPTIONS: characters' one fail was death-induced controller-hints
 3) BASE REGRESSION - PASS. Perf spawn 184 calls/1,645,056 tris high (low 149/1,367,728; FP 182/1,662,116; all <290/<2.15M), payload 18,382,143 B = 17.53 MiB; foot-slide 1.11e-16 (<=.06), caster roster 2 nest + trigger stills + cues, look torso 88.95/limb 70.93, markers 3/5 bob-false, windmill angle .9082->1.2696/reduced 0, torch bed .018/0, journal/lore/recap/mood/difficulty/wayfinding, 11 weapons/bash, mobile 26/26, co-op 22/22, live baseline 34/34.
 
 Cycle-18 verdict: PASS on Stalker roster/FX/audio (owner real forced index3 evidence) and enraged Warden (owner final-hash phase2/adds proof); deferred: QA forced enrage capture due prior-siege concurrency (harness), real stalker lunge still (owner evidence), audio landmark ear check, physical-device/real-GPU/perceptual, hardware rumble. After deploy: final live pass + task-134 complete.
+
+
+### Final live deployment verification - cycle-18 (game b6296456, hosting 359be4bc)
+
+Live runs: deployed 34/34 (qa/live-batch21-deployed), feature/probes/views 110/111 (qa/live-feature-c18), live mobile 26/26 (qa/live-mobile-c18). Live serves index-DsLoqiLl.js (986,779 B) = hosting build of authoritative index-Bnc8c7Xv.js (986,604 B; +175 B); /health OK; 11 cards; payload 18,353,518 B = 17.50 MiB / 96 assets; 0 page/console errors, 0 404s (external Cloudflare beacon only); night TP 54.35.
+- STALKER live: __ssStalkers() 2 wilds (a98/a99); trigger stills stalker-lunge/hit; __ssStalkerFx windup/lunges/draws 0 + reduced static; __ssStalkerAudio cues stalkerLungeAt/HitAt counts 1/1; caption "A Shroud Stalker closes in!" wired.
+- ENRAGED WARDEN: owner final-hash in-game proof (phase2 FRENZIED, tint #7a2a5a, aura, +1 screamer/+1 caster once, howl cue/caption) acknowledged; QA forced still remains deferred (prior-siege concurrency) as documented.
+- REGRESSION live: foot-slide 1.11e-16; caster roster 2 nest + trigger stills + cues; look torso 92.33/limb 72.29; markers 3/5 bob-false; windmill .9322->1.3977/reduced 0; torch bed .018/0; journal/lore/recap/mood/difficulty/wayfinding; 11 cards; mobile 26/26 (journal 352x747/776x300, bash safe, 3-pointer, 130 calls/1.31M tris).
+- HARNESS CAVEAT: feature's one fail was the controller-hints check after the QA player died (death-induced; "QA Knight is down" screen); all new cycle-18 gates pass.
+- DEFERRED: QA forced enrage still (owner phase2 proof), real stalker lunge still (owner), audio ear check, physical-device/real-GPU/perceptual, hardware rumble.
+
+Cycle-18 live deployment verified green for Shroud Stalker roster/FX/cues/caption and enraged-Warden owner proof, plus regressions. task-134 complete. Cycle-19 notes: Shroud Colossus (slam AoE/pools/phases), boss-bar HUD fix, teal-quad flag/banner fix.
